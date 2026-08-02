@@ -1,4 +1,5 @@
 import { sandboxSettingForProvider } from '@/sandbox/provider-names.js';
+import { MINIMAX_DEFAULT_MODEL, MINIMAX_ENDPOINTS, MINIMAX_MODELS, MINIMAX_PROVIDER } from '@/core/model/minimax.js';
 import type { SettingsAvailability } from './schema.js';
 
 export type AdapterStatus = 'available' | 'unavailable' | 'invalid';
@@ -36,6 +37,16 @@ export function describeSettingsAdapters(installedSandboxes: string[] = ['local'
     model: [
       descriptor('openai', 'OpenAI', true, 'runtime', objectSchema()),
       descriptor('anthropic', 'Anthropic', true, 'runtime', objectSchema()),
+      descriptor(MINIMAX_PROVIDER, 'MiniMax', true, 'runtime', objectSchema({
+        model: { type: 'string', enum: MINIMAX_MODELS.map((model) => model.model_id), default: MINIMAX_DEFAULT_MODEL },
+        region: { type: 'string', enum: ['global_en', 'cn_zh'], default: 'global_en' },
+        openai_base_url: { type: 'string', format: 'uri', default: MINIMAX_ENDPOINTS.global_en.openai_base_url },
+        anthropic_base_url: { type: 'string', format: 'uri', default: MINIMAX_ENDPOINTS.global_en.anthropic_base_url },
+        cn_openai_base_url: { type: 'string', format: 'uri', default: MINIMAX_ENDPOINTS.cn_zh.openai_base_url },
+        cn_anthropic_base_url: { type: 'string', format: 'uri', default: MINIMAX_ENDPOINTS.cn_zh.anthropic_base_url },
+        docs_root: { type: 'string', format: 'uri', default: MINIMAX_ENDPOINTS.global_en.docs_root },
+        cn_docs_root: { type: 'string', format: 'uri', default: MINIMAX_ENDPOINTS.cn_zh.docs_root },
+      })),
       descriptor('openai_compatible', 'OpenAI compatible', true, 'runtime', objectSchema()),
     ],
     loop_engine: [

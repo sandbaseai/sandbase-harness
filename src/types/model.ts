@@ -26,7 +26,7 @@ export interface ModelProvider {
 // Model Configuration
 // ============================================================
 
-export type ModelProviderType = 'openai' | 'anthropic' | 'ollama' | string;
+export type ModelProviderType = 'openai' | 'anthropic' | 'ollama' | 'minimax' | string;
 
 export interface ModelConfig {
   /** Reference name in the model registry */

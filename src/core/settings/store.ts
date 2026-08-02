@@ -2,6 +2,7 @@ import type { Database } from '@/core/db/database.js';
 import { relative, resolve, sep } from 'node:path';
 import { resolveEnvVars } from '@/core/config/env-resolver.js';
 import { defaultSettingsAvailability, runtimeSettingsSchema, validateRuntimeSettings, validateRuntimeSettingsCredentials, type RuntimeSettings } from './schema.js';
+import { MINIMAX_PROVIDER, miniMaxModelId, miniMaxOpenAiBaseUrl } from '@/core/model/minimax.js';
 import { sandboxSettingForProvider } from '@/sandbox/provider-names.js';
 import type { ModelConfig } from '@/types/model.js';
 import {
@@ -160,10 +161,12 @@ export function modelConfigFromRuntimeSettings(
   config: RuntimeSettings,
   dataDir?: string,
 ): ModelConfig {
+  const miniMax = config.model.vendor === MINIMAX_PROVIDER;
   return {
     name: 'default',
     provider: config.model.vendor,
-    base_url: config.model.base_url,
+    ...(miniMax ? { model: miniMaxModelId(config.model.options.model) } : {}),
+    base_url: miniMax ? miniMaxOpenAiBaseUrl(config.model.options, config.model.base_url) : config.model.base_url,
     api_key: resolveRuntimeSettingsModelApiKey(db, config.model.api_key, dataDir),
     is_default: true,
   };
@@ -328,6 +331,7 @@ function resolvedOptionalUrl(value?: string): string | undefined {
 
 function normalizeVendor(provider?: string): RuntimeSettings['model']['vendor'] {
   if (provider === 'anthropic') return 'anthropic';
+  if (provider === MINIMAX_PROVIDER) return MINIMAX_PROVIDER;
   if (!provider || provider === 'openai') return 'openai';
   return 'openai_compatible';
 }

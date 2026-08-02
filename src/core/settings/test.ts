@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { probeKubernetesCluster, resolveKubernetesNamespace } from '@/sandbox/kubernetes-provider.js';
 import type { RuntimeSettings } from './schema.js';
 import { localArtifactStorageDir, runtimeSettingsSecretStates } from './store.js';
+import { MINIMAX_PROVIDER } from '@/core/model/minimax.js';
 
 export type RuntimeSettingsTestArea =
   | 'model'
@@ -111,7 +112,7 @@ function testModel(db: Database, config: RuntimeSettings): RuntimeSettingsTestCh
   const vendor = config.model.vendor;
   checks.push({
     name: 'vendor',
-    status: ['openai', 'anthropic', 'openai_compatible'].includes(vendor) ? 'ok' : 'failed',
+    status: ['openai', 'anthropic', 'openai_compatible', MINIMAX_PROVIDER].includes(vendor) ? 'ok' : 'failed',
     message: `Model vendor is ${vendor}.`,
   });
 

@@ -9,6 +9,7 @@ import { Database } from '@/core/db/database.js';
 import { activateRuntimeSettings, getOrSeedRuntimeSettings, localArtifactStorageDir, maskRuntimeSettings, modelConfigFromRuntimeSettings, runtimeSettingsSecretStates, saveRuntimeSettings } from '@/core/settings/store.js';
 import { composeRuntimeFromSettings } from '@/core/runtime/composition.js';
 import { ModelRegistry } from '@/model/registry.js';
+import { MINIMAX_ENDPOINTS } from '@/core/model/minimax.js';
 
 // Typed rather than inferred: without the annotation the literal widens
 // (`schema_version: number`, `provider: string`) and every spread of it into a
@@ -80,6 +81,24 @@ describe('Settings V2 schema', () => {
       sandbox: { provider: 'docker', options: { timeout_seconds: 300 } },
     }, availabilityFromDescriptors(descriptors));
     expect(result.valid).toBe(true);
+  });
+
+  it('accepts MiniMax as an available model vendor with regional endpoint defaults', () => {
+    const descriptors = describeSettingsAdapters(['local']);
+    const model = descriptors.model.find((adapter) => adapter.id === 'minimax');
+
+    expect(model).toMatchObject({ label: 'MiniMax', status: 'available' });
+    expect(model?.options_schema.properties).toMatchObject({
+      model: { default: 'MiniMax-M3' },
+      openai_base_url: { default: MINIMAX_ENDPOINTS.global_en.openai_base_url },
+      anthropic_base_url: { default: MINIMAX_ENDPOINTS.global_en.anthropic_base_url },
+      cn_openai_base_url: { default: MINIMAX_ENDPOINTS.cn_zh.openai_base_url },
+      cn_anthropic_base_url: { default: MINIMAX_ENDPOINTS.cn_zh.anthropic_base_url },
+    });
+    expect(validateRuntimeSettings({
+      ...validConfig,
+      model: { vendor: 'minimax', api_key: '${MINIMAX_API_KEY}', options: {} },
+    }, availabilityFromDescriptors(descriptors)).valid).toBe(true);
   });
 
   it('skips live health checks for registered Docker sandbox checks', async () => {
@@ -641,6 +660,28 @@ describe('Settings V2 activation', () => {
     const model = modelConfigFromRuntimeSettings(db, config, directory);
     expect(model).toMatchObject({ name: 'default', provider: 'anthropic' });
     expect(model.model).toBeUndefined();
+    db.close();
+  });
+
+  it('builds MiniMax runtime model defaults from Settings V2', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'ma-settings-minimax-model-'));
+    directories.push(directory);
+    const db = new Database(join(directory, 'settings.db'));
+    db.runMigrations();
+    const initial = getOrSeedRuntimeSettings(db);
+    const config: RuntimeSettings = {
+      ...initial.effective_config,
+      model: { vendor: 'minimax', api_key: '${MINIMAX_API_KEY}', options: { region: 'cn_zh', model: 'MiniMax-M2.7' } },
+    };
+
+    const model = modelConfigFromRuntimeSettings(db, config, directory);
+
+    expect(model).toMatchObject({
+      name: 'default',
+      provider: 'minimax',
+      model: 'MiniMax-M2.7',
+      base_url: MINIMAX_ENDPOINTS.cn_zh.openai_base_url,
+    });
     db.close();
   });
 

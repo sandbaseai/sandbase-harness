@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { MINIMAX_PROVIDER } from '@/core/model/minimax.js';
 
 const optionsSchema = z.record(z.unknown()).default({});
 const STORED_SECRET_PREFIX = '__managed_secret__:';
@@ -6,7 +7,7 @@ const STORED_SECRET_PREFIX = '__managed_secret__:';
 export const runtimeSettingsSchema = z.object({
   schema_version: z.literal(1),
   model: z.object({
-    vendor: z.enum(['openai', 'anthropic', 'openai_compatible']),
+    vendor: z.enum(['openai', 'anthropic', 'openai_compatible', MINIMAX_PROVIDER]),
     base_url: z.string().url().optional(),
     api_key: z.string().min(1).optional(),
     options: optionsSchema,
@@ -176,7 +177,7 @@ export function validateRuntimeSettingsCredentials(
 
 export function defaultSettingsAvailability(): SettingsAvailability {
   return {
-    modelVendors: new Set(['openai', 'anthropic', 'openai_compatible']),
+    modelVendors: new Set(['openai', 'anthropic', 'openai_compatible', MINIMAX_PROVIDER]),
     loopEngines: new Set(['builtin']),
     metadataStorage: new Set(['sqlite']),
     artifactStorage: new Set(['local']),

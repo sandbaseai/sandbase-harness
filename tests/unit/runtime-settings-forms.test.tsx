@@ -283,6 +283,27 @@ describe('Runtime Settings forms', () => {
     expect(hydrated.sandbox.options.timeout_seconds).toBe(300);
   });
 
+  it('hydrates MiniMax display defaults from the selected model vendor', () => {
+    const adapters: RuntimeSettings['adapters'] = {
+      model: [{ id: 'minimax', label: 'MiniMax', version: '1', status: 'available', restart_policy: 'runtime', options_schema: {} }],
+      loop_engine: [{ id: 'builtin', label: 'Default', version: '1', status: 'available', restart_policy: 'runtime', options_schema: { type: 'object', properties: { default_max_steps: { type: 'integer', default: 25 } } } }],
+      storage: { metadata: [], artifacts: [] },
+      memory: [],
+      sandbox: [{ id: 'local', label: 'Local', version: '1', status: 'available', restart_policy: 'runtime', options_schema: { type: 'object', properties: { timeout_seconds: { type: 'integer', default: 300 } } } }],
+    };
+    const hydrated = applyRuntimeSettingsDefaults({
+      ...config,
+      model: { vendor: 'minimax' as const, options: {} },
+    }, adapters);
+
+    expect(hydrated.model).toMatchObject({
+      vendor: 'minimax',
+      base_url: 'https://api.minimax.io/v1',
+      api_key: '${MINIMAX_API_KEY}',
+      options: {},
+    });
+  });
+
   it('renders memory and loop engine as single-backend forms instead of provider tables', () => {
     const loop = renderToStaticMarkup(<LoopEngineSettingsForm adapters={[{ id: 'builtin', label: 'Default', status: 'available' }]} config={config} onChange={() => {}} />);
     const memory = renderToStaticMarkup(<MemorySettingsForm adapters={[{ id: 'sqlite', label: 'SQLite', status: 'available' }]} config={config} onChange={() => {}} />);

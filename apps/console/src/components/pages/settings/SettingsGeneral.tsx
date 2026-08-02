@@ -13,14 +13,15 @@ export function SettingsGeneral({ data, setView }: { data: ConsoleData; setView:
   const settings = data.settings;
   const savedModel = settings?.saved_config.model;
   const [vendor, setVendor] = useState<RuntimeSettingsConfig['model']['vendor']>(savedModel?.vendor ?? 'openai');
-  const [baseUrl, setBaseUrl] = useState(savedModel?.base_url ?? '');
+  const [baseUrl, setBaseUrl] = useState(savedModel?.base_url ?? defaultModelBaseUrl(savedModel?.vendor));
   const [apiKey, setApiKey] = useState('');
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const baseUrlVendor = vendor === 'openai_compatible' || vendor === 'minimax';
 
   useEffect(() => {
     setVendor(savedModel?.vendor ?? 'openai');
-    setBaseUrl(savedModel?.base_url ?? '');
+    setBaseUrl(savedModel?.base_url ?? defaultModelBaseUrl(savedModel?.vendor));
     setApiKey('');
   }, [savedModel?.vendor, savedModel?.base_url, settings?.revision]);
 
@@ -38,7 +39,7 @@ export function SettingsGeneral({ data, setView }: { data: ConsoleData; setView:
         model: {
           ...settings.saved_config.model,
           vendor,
-          base_url: vendor === 'openai_compatible' ? baseUrl.trim() : undefined,
+          base_url: baseUrlVendor ? baseUrl.trim() || defaultModelBaseUrl(vendor) || undefined : undefined,
           api_key: trimmedKey || (apiKeyConfigured ? settings.saved_config.model.api_key : undefined),
         },
       };
@@ -80,15 +81,20 @@ export function SettingsGeneral({ data, setView }: { data: ConsoleData; setView:
               event.preventDefault();
               void saveModelProvider();
             }}>
-              <FormField label="Provider" description="Keep this simple: OpenAI, Anthropic, or an OpenAI-compatible endpoint.">
-                <select value={vendor} onChange={(event) => setVendor(event.target.value as RuntimeSettingsConfig['model']['vendor'])}>
+              <FormField label="Provider" description="Keep this simple: OpenAI, Anthropic, MiniMax, or an OpenAI-compatible endpoint.">
+                <select value={vendor} onChange={(event) => {
+                  const nextVendor = event.target.value as RuntimeSettingsConfig['model']['vendor'];
+                  setVendor(nextVendor);
+                  setBaseUrl(defaultModelBaseUrl(nextVendor));
+                }}>
                   <option value="openai">OpenAI</option>
                   <option value="anthropic">Anthropic</option>
+                  <option value="minimax">MiniMax</option>
                   <option value="openai_compatible">OpenAI-compatible</option>
                 </select>
               </FormField>
-              {vendor === 'openai_compatible' ? (
-                <FormField label="Base URL" description="Only needed for a compatible gateway or self-hosted model endpoint.">
+              {baseUrlVendor ? (
+                <FormField label="Base URL" description="Use the default endpoint or point to a compatible gateway.">
                   <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="https://api.example.com/v1" />
                 </FormField>
               ) : null}
@@ -163,6 +169,11 @@ function runtimeDatabasePath(workspace: Workspace | null) {
   return workspace?.databasePath
     ?? workspace?.directories?.database
     ?? (workspace?.dataDir ? `${workspace.dataDir.replace(/\/$/, '')}/data.db` : undefined);
+}
+
+function defaultModelBaseUrl(vendor: RuntimeSettingsConfig['model']['vendor'] | undefined): string {
+  if (vendor === 'minimax') return 'https://api.minimax.io/v1';
+  return '';
 }
 
 function metadataStorageLabel(settings: RuntimeSettings | null, workspace: Workspace | null) {

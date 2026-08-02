@@ -2,7 +2,7 @@
  * Model Provider Registry
  *
  * Manages model configurations and creates Vercel AI SDK LanguageModel instances.
- * Supports: openai (OpenAI-compatible, incl. Ollama/vLLM), anthropic.
+ * Supports: openai (OpenAI-compatible, incl. Ollama/vLLM), anthropic, minimax.
  * Includes retry policy wrapper (Property 14).
  */
 
@@ -10,6 +10,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { wrapLanguageModel, type LanguageModelV1, type LanguageModelV1Middleware } from 'ai';
 import { resolveEnvVars } from '@/core/config/env-resolver.js';
+import { MINIMAX_PROVIDER, miniMaxOpenAiBaseUrl } from '@/core/model/minimax.js';
 import {
   DEFAULT_RETRY_POLICY,
   type ModelConfig,
@@ -259,6 +260,13 @@ function createModelInstance(
         baseURL: baseUrl,
       });
       return openai(model);
+    }
+    case MINIMAX_PROVIDER: {
+      const minimax = createOpenAI({
+        apiKey: apiKey ?? '',
+        baseURL: miniMaxOpenAiBaseUrl({}, baseUrl),
+      });
+      return minimax(model);
     }
     case 'anthropic': {
       const anthropic = createAnthropic({

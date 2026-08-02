@@ -86,12 +86,14 @@ export function applyRuntimeSettingsDefaults(
 
 function defaultModelBaseUrl(vendor: RuntimeSettingsConfig['model']['vendor']): string {
   if (vendor === 'anthropic') return 'https://api.anthropic.com';
+  if (vendor === 'minimax') return 'https://api.minimax.io/v1';
   if (vendor === 'openai_compatible') return 'http://localhost:11434/v1';
   return 'https://api.openai.com/v1';
 }
 
 function defaultModelApiKey(vendor: RuntimeSettingsConfig['model']['vendor']): string {
   if (vendor === 'anthropic') return '${ANTHROPIC_API_KEY}';
+  if (vendor === 'minimax') return '${MINIMAX_API_KEY}';
   if (vendor === 'openai') return '${OPENAI_API_KEY}';
   return '${MODEL_API_KEY}';
 }
