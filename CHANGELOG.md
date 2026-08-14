@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.3.0 - 2026-08-14
+
+### Highlights
+
+- **DeepSeek Harness integration**: ships an installable Cordis bundle and the
+  `managed-agents-mcp` stdio server so DSH can create and inspect agents,
+  manage persistent sessions, stream turns, retrieve artifacts, and cancel
+  runs through MCP.
+- **Verified integration guide**: adds a reproducible DSH configuration,
+  permission boundaries, troubleshooting guidance, and compatibility evidence
+  against DeepSeek Harness commit `47f9438`.
+- **DeepSeek V4 reasoning controls**: forwards Settings V2 `reasoning_effort`
+  values to OpenAI-compatible model requests and documents a verified
+  DeepSeek V4 setup.
+- **Distribution metadata**: corrects package repository links to
+  `sandbaseai/sandbase-harness` and adds Glama maintainer metadata for MCP
+  directory verification.
+
 ## 0.2.0 - 2026-08-01
 
 ### Breaking changes
