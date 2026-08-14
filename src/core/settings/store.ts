@@ -165,6 +165,9 @@ export function modelConfigFromRuntimeSettings(
     provider: config.model.vendor,
     base_url: config.model.base_url,
     api_key: resolveRuntimeSettingsModelApiKey(db, config.model.api_key, dataDir),
+    reasoning_effort: typeof config.model.options.reasoning_effort === 'string'
+      ? config.model.options.reasoning_effort
+      : undefined,
     is_default: true,
   };
 }
