@@ -43,6 +43,8 @@ export interface ModelConfig {
   temperature?: number;
   /** Max tokens override */
   max_tokens?: number;
+  /** Provider reasoning effort (for example `max` with DeepSeek V4 Pro). */
+  reasoning_effort?: string;
   /** Whether this provider is the default for new agents and templates */
   is_default?: boolean;
 }
