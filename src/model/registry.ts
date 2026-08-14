@@ -110,7 +110,13 @@ export class ModelRegistry {
     const resolvedApiKey = config.api_key ? resolveEnvVars(config.api_key, false) : undefined;
     const resolvedBaseUrl = config.base_url ? resolveEnvVars(config.base_url, false) : undefined;
 
-    const base = createModelInstance(config.provider, config.model, resolvedApiKey, resolvedBaseUrl);
+    const base = createModelInstance(
+      config.provider,
+      config.model,
+      resolvedApiKey,
+      resolvedBaseUrl,
+      config.reasoning_effort,
+    );
     return wrapLanguageModel({
       model: base,
       middleware: createRetryMiddleware(this.retryPolicy),
@@ -250,6 +256,7 @@ function createModelInstance(
   model: string,
   apiKey?: string,
   baseUrl?: string,
+  reasoningEffort?: string,
 ): LanguageModelV1 {
   switch (provider) {
     case 'openai':
@@ -258,7 +265,7 @@ function createModelInstance(
         apiKey: apiKey ?? 'ollama', // Ollama doesn't need a key
         baseURL: baseUrl,
       });
-      return openai(model);
+      return openai(model, reasoningEffort ? { reasoningEffort: reasoningEffort as 'low' | 'medium' | 'high' } : undefined);
     }
     case 'anthropic': {
       const anthropic = createAnthropic({
@@ -273,7 +280,7 @@ function createModelInstance(
         apiKey: apiKey ?? '',
         baseURL: baseUrl,
       });
-      return openaiCompat(model);
+      return openaiCompat(model, reasoningEffort ? { reasoningEffort: reasoningEffort as 'low' | 'medium' | 'high' } : undefined);
     }
   }
 }
