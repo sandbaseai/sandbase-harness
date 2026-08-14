@@ -49,6 +49,23 @@ describe('ModelRegistry runtime introspection', () => {
     });
   });
 
+  it('preserves provider reasoning effort for resolved model ids', () => {
+    const registry = new ModelRegistry();
+    registry.register({
+      name: 'default',
+      provider: 'openai_compatible',
+      api_key: '${DEEPSEEK_API_KEY}',
+      base_url: 'https://api.deepseek.com/v1',
+      reasoning_effort: 'max',
+      is_default: true,
+    });
+
+    expect(registry.resolveModelConfig('deepseek-v4-pro')).toMatchObject({
+      model: 'deepseek-v4-pro',
+      reasoning_effort: 'max',
+    });
+  });
+
   it('uses the default provider settings for unqualified user model ids', () => {
     const registry = new ModelRegistry();
     registry.register({
