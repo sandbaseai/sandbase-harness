@@ -19,7 +19,8 @@
     "node": ">=22"
   },
   "bin": {
-    "managed-agents": "dist/index.js"
+    "managed-agents": "dist/index.js",
+    "managed-agents-mcp": "dist/mcp/index.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -72,6 +73,8 @@
     "anthropic",
     "mcp",
     "mcp-tools",
+    "deepseek-harness",
+    "dsh-plugin",
     "local-first",
     "local-ai-agents",
     "sandboxed-execution",
@@ -97,6 +100,7 @@
     "@ai-sdk/anthropic": "^1.0.0",
     "@ai-sdk/openai": "^1.0.0",
     "@hono/node-server": "^1.13.0",
+    "@modelcontextprotocol/sdk": "^1.30.0",
     "ai": "^4.0.0",
     "commander": "^12.0.0",
     "hono": "^4.6.0",

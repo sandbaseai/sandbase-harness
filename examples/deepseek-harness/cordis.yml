@@ -1,0 +1,11 @@
+- id: mcp-sandbase-harness
+  name: '@deepseek-ai/dsh-mcp-client'
+  config:
+    serverName: sandbase
+    transport: stdio
+    command: npx
+    args: ['-y', 'managed-agents-mcp']
+    env:
+      MANAGED_AGENTS_URL: !!js process.env.MANAGED_AGENTS_URL
+      MANAGED_AGENTS_API_KEY: !!js process.env.MANAGED_AGENTS_API_KEY
+    failOnStartupError: true

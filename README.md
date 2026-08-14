@@ -30,6 +30,8 @@ is that runtime layer — not a visual workflow builder and not another model SD
 - Settings V2: one workspace model vendor, loop engine, storage, memory,
   sandbox — with validation, form/JSON modes, and restart flow
 - MCP toolsets, permission policies, built-in tools, and skill packages
+- DeepSeek Harness bridge over MCP stdio for agents, sessions, streamed turns,
+  artifacts, and cancellation
 - TypeScript SDK at `managed-agents/sdk`
 - Release gate: `npm run release:check`
 
@@ -45,6 +47,22 @@ is that runtime layer — not a visual workflow builder and not another model SD
 - npm 10+
 - A model provider API key (OpenAI, Anthropic, or OpenAI-compatible endpoint)
 - Docker (optional, for Docker-backed sandboxes)
+
+## DeepSeek Harness
+
+Run this project as a DSH plugin instead of treating `dsh-plugin` as discovery
+metadata only. Start `managed-agents`, then load the included Cordis patch:
+
+```bash
+export MANAGED_AGENTS_URL=http://127.0.0.1:3000
+pnpm dsh web --patch ./examples/deepseek-harness/cordis.yml
+```
+
+The patch starts `managed-agents-mcp` over stdio. DSH can then list agents,
+create and run sessions, inspect results and artifacts, and stop work through
+native `mcp__sandbase__*` tools. See
+[`examples/deepseek-harness`](examples/deepseek-harness/README.md) for the full
+tool list and authenticated-runtime configuration.
 
 ## Quick Start
 

@@ -3,7 +3,7 @@ import { defineConfig } from 'tsup';
 export default defineConfig([
   {
     // CLI entry (needs the shebang)
-    entry: { index: 'src/index.ts' },
+    entry: { index: 'src/index.ts', 'mcp/index': 'src/mcp/index.ts' },
     format: ['esm'],
     dts: true,
     sourcemap: true,
