@@ -303,6 +303,14 @@ npm run release:check  # full local release gate
 `release:check` runs typecheck, tests, both builds, `npm pack --dry-run`, CLI
 init smoke, and `examples/basic` startup smoke.
 
+## SandBase Ecosystem
+
+- [SandBase CLI](https://github.com/sandbaseai/cli) — connect Cursor, Claude Code,
+  Codex, Windsurf, Gemini CLI, OpenCode, and other MCP clients to 2,000+ tools
+  and 200+ AI models with one onboarding command.
+- [SandBase](https://www.sandbase.ai) — hosted agent infrastructure, model access,
+  tools, and managed sandboxes.
+
 ## Documentation
 
 - [Installation](docs/installation.md)
