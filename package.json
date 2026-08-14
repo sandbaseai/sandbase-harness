@@ -12,6 +12,11 @@
     "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
+  "dsh": {
+    "bundle": {
+      "patch": "./examples/deepseek-harness/cordis.yml"
+    }
+  },
   "bugs": {
     "url": "https://github.com/sandbaseai/managed-agents/issues"
   },

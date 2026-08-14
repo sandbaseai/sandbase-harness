@@ -134,11 +134,22 @@ class LocalSandboxInstance implements SandboxInstance {
         cwd,
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
+        // Give the command its own process group so a timeout can terminate
+        // grandchildren as well as the shell itself on POSIX systems.
+        detached: process.platform !== 'win32',
       });
 
       const timer = setTimeout(() => {
         timedOut = true;
-        proc.kill('SIGKILL');
+        if (process.platform !== 'win32' && proc.pid) {
+          try {
+            process.kill(-proc.pid, 'SIGKILL');
+          } catch {
+            proc.kill('SIGKILL');
+          }
+        } else {
+          proc.kill('SIGKILL');
+        }
       }, timeout);
 
       proc.stdout.on('data', (chunk: Buffer) => {

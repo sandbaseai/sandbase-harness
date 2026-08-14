@@ -51,11 +51,13 @@ is that runtime layer — not a visual workflow builder and not another model SD
 ## DeepSeek Harness
 
 Run this project as a DSH plugin instead of treating `dsh-plugin` as discovery
-metadata only. Start `managed-agents`, then load the included Cordis patch:
+metadata only. Install the bundle into a DSH profile, start `managed-agents`,
+then boot that profile:
 
 ```bash
 export MANAGED_AGENTS_URL=http://127.0.0.1:3000
-pnpm dsh web --patch ./examples/deepseek-harness/cordis.yml
+dsh plugin --profile web add managed-agents
+dsh web
 ```
 
 The patch starts `managed-agents-mcp` over stdio. DSH can then list agents,
