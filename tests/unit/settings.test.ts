@@ -637,9 +637,12 @@ describe('Settings V2 activation', () => {
     const db = new Database(join(directory, 'settings.db'));
     db.runMigrations();
     const initial = getOrSeedRuntimeSettings(db);
-    const config = { ...initial.effective_config, model: { vendor: 'anthropic' as const, options: {} } };
+    const config = {
+      ...initial.effective_config,
+      model: { vendor: 'anthropic' as const, options: { reasoning_effort: 'max' } },
+    };
     const model = modelConfigFromRuntimeSettings(db, config, directory);
-    expect(model).toMatchObject({ name: 'default', provider: 'anthropic' });
+    expect(model).toMatchObject({ name: 'default', provider: 'anthropic', reasoning_effort: 'max' });
     expect(model.model).toBeUndefined();
     db.close();
   });
