@@ -71,6 +71,11 @@ native `mcp__sandbase__*` tools. See
 [`examples/deepseek-harness`](examples/deepseek-harness/README.md) for the full
 tool list and authenticated-runtime configuration.
 
+New to DSH profiles, plugin composition, tool policy, or session semantics? The
+independent [DeepSeek Harness Handbook](https://github.com/sandbaseai/deepseek-harness-handbook)
+provides source-backed quickstarts, architecture maps, and troubleshooting for
+the runtime layers used by this integration.
+
 ## Quick Start
 
 ```bash
