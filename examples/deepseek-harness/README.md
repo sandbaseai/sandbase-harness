@@ -10,6 +10,10 @@ stdio and exposes agents, sessions, streamed turns, artifacts, and cancellation.
 - DeepSeek Harness with `@deepseek-ai/dsh-mcp-client` and stdio MCP support
 - `managed-agents` 0.2.0 or a source build from this repository
 
+Last verified on 2026-08-14 against DeepSeek Harness commit
+[`47f9438`](https://github.com/deepseek-ai/deepseek-harness/commit/47f943859bef60e4160492346772ded9b24f765a): the Cordis layer composed cleanly,
+DSH launched the stdio child, and the MCP handshake completed.
+
 Start the runtime first:
 
 ```bash
