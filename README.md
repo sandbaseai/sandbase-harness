@@ -124,6 +124,9 @@ Agents pick concrete model IDs (`gpt-4o`, `claude-sonnet-4-20250514`,
 `openai/gpt-5.5`). The workspace config only says how to reach the model
 service.
 
+For DeepSeek V4 Pro/Flash configuration, including maximum reasoning effort,
+see [DeepSeek V4](docs/deepseek-v4.md).
+
 ## CLI
 
 ```bash
