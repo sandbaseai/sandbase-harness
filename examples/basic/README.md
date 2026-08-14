@@ -5,9 +5,10 @@ A minimal managed-agents setup with a single echo assistant.
 ## Setup
 
 ```bash
-# Start from this directory
+# Build from the repository root, then start from this directory.
+npm run build:runtime
 cd examples/basic
-npx managed-agents start --agents-dir agents --config .managed-agents/config.yaml
+node ../../dist/index.js start --agents-dir agents --config .managed-agents/config.yaml
 ```
 
 Configure model credentials in `.managed-agents/config.yaml` before calling a

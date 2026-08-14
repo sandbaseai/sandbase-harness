@@ -11,15 +11,22 @@ and the local Console.
 - A model vendor API key or an OpenAI-compatible local endpoint
 - Docker, only when using Docker-backed sandboxes
 
-## Install With npx
+## Install From A Tagged Source Release
 
-Use `npx` when you want to try the runtime without installing a global package:
+The unscoped `managed-agents` package currently visible on npm is not this
+project. Until an official scoped package is announced in this repository, use
+the tagged GitHub source release and do not run `npx managed-agents` or
+`npm install managed-agents`.
 
 ```bash
-mkdir my-agents
-cd my-agents
-npx managed-agents init
-npx managed-agents start
+git clone --branch v0.3.0 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+cd sandbase-harness
+npm ci
+npm run build
+mkdir ../my-agents
+cd ../my-agents
+node ../sandbase-harness/dist/index.js init
+node ../sandbase-harness/dist/index.js start
 ```
 
 The Dashboard will be available at:
@@ -34,26 +41,25 @@ The API will be available at:
 http://127.0.0.1:3000/v1
 ```
 
-## Global Install
+## Optional Source Command Links
 
-Use a global install for a workstation or shared development machine:
+From the tagged source checkout, `npm link` exposes the two locally built
+executables on a workstation. This does not download the unrelated unscoped
+npm package:
 
 ```bash
-npm install -g managed-agents
+cd sandbase-harness
+npm link
+cd ../my-agents
 managed-agents init
 managed-agents start
 ```
 
-Upgrade the global install with:
+Remove the source links with:
 
 ```bash
-npm update -g managed-agents
-```
-
-Remove it with:
-
-```bash
-npm uninstall -g managed-agents
+cd sandbase-harness
+npm unlink -g
 ```
 
 ## Build From Source
@@ -61,8 +67,8 @@ npm uninstall -g managed-agents
 Use a source checkout when contributing to the project:
 
 ```bash
-git clone git@github.com:sandbaseai/managed-agents.git
-cd managed-agents
+git clone https://github.com/sandbaseai/sandbase-harness.git
+cd sandbase-harness
 npm ci
 npm run build
 ```
@@ -81,8 +87,8 @@ Then create a runtime workspace outside the source checkout:
 ```bash
 mkdir ../my-agents
 cd ../my-agents
-node ../managed-agents/dist/index.js init
-node ../managed-agents/dist/index.js start
+node ../sandbase-harness/dist/index.js init
+node ../sandbase-harness/dist/index.js start
 ```
 
 During development, run the TypeScript entry point directly:

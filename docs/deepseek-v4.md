@@ -44,7 +44,8 @@ tools:
   - type: agent_toolset_20260401
 ```
 
-Start the runtime with `npx managed-agents start`, open
+From a tagged source checkout, build the runtime and start it with
+`node dist/index.js start`, then open
 `http://127.0.0.1:3000/dashboard`, select the agent, and send the first task.
 
 Do not commit API keys to the workspace. The `${DEEPSEEK_API_KEY}` reference is

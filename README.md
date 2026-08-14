@@ -5,8 +5,13 @@ credentials, audit trails, and a built-in Console — all running on your
 machine or in your own infrastructure.
 
 ```bash
-npx managed-agents init
-npx managed-agents start
+git clone --branch v0.3.0 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+cd sandbase-harness
+npm ci
+npm run build
+mkdir ../my-agents && cd ../my-agents
+node ../sandbase-harness/dist/index.js init
+node ../sandbase-harness/dist/index.js start
 # open http://127.0.0.1:3000/dashboard
 ```
 
@@ -69,22 +74,31 @@ tool list and authenticated-runtime configuration.
 ## Quick Start
 
 ```bash
-mkdir my-agents && cd my-agents
-npx managed-agents init
-npx managed-agents start
+git clone --branch v0.3.0 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+cd sandbase-harness
+npm ci
+npm run build
+mkdir ../my-agents && cd ../my-agents
+node ../sandbase-harness/dist/index.js init
+node ../sandbase-harness/dist/index.js start
 ```
 
 Open `http://127.0.0.1:3000/dashboard`, go to **Settings > Models**, paste your
 API key, and you're running.
 
-From a source checkout:
+The unscoped `managed-agents` name on npm is not this project. Until an
+official scoped package is announced in this repository, install only from the
+tagged GitHub source release shown above. Do not run `npx managed-agents` or
+`npm install managed-agents`.
+
+For development from the latest `main` branch:
 
 ```bash
-git clone git@github.com:sandbaseai/managed-agents.git
-cd managed-agents && npm ci && npm run build
-cd .. && mkdir my-agents && cd my-agents
-node ../managed-agents/dist/index.js init
-node ../managed-agents/dist/index.js start
+git clone https://github.com/sandbaseai/sandbase-harness.git
+cd sandbase-harness && npm ci && npm run build
+cd .. && mkdir my-agents-dev && cd my-agents-dev
+node ../sandbase-harness/dist/index.js init
+node ../sandbase-harness/dist/index.js start
 ```
 
 ## Workspace Layout

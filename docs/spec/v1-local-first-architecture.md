@@ -339,12 +339,13 @@ An adapter can return to public UI/docs only when all of these exist:
 The release smoke test should be simple enough for a new open-source user:
 
 ```bash
-git clone git@github.com:sandbaseai/managed-agents.git
-cd managed-agents
+git clone https://github.com/sandbaseai/sandbase-harness.git
+cd sandbase-harness
 npm ci
 npm run build
-npx managed-agents init
-npx managed-agents start
+mkdir ../my-agents && cd ../my-agents
+node ../sandbase-harness/dist/index.js init
+node ../sandbase-harness/dist/index.js start
 ```
 
 Then verify:

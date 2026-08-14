@@ -5,7 +5,7 @@ Reviewed: 2026-07-23
 Repository:
 
 - Local path: `/Users/liyb/Documents/Codex/2026-07-16/new-chat-2/managed-agents`
-- Remote: `git@github.com:sandbaseai/managed-agents.git`
+- Remote: `https://github.com/sandbaseai/sandbase-harness.git`
 - Local HEAD reviewed: `b8979f1e9778f8cc1e56a5cc86048340afd16eec`
 - Remote freshness: not verified in this sandbox because outbound SSH to GitHub is blocked.
 - Worktree state: dirty, with substantial existing product changes. This review preserves the worktree and does not re-clone over it.
@@ -420,4 +420,3 @@ Public alpha can be cut when:
 - A user can create an agent, create a session, mount files/skills/vaults/memory, run the session, inspect events/artifacts, and export a handoff bundle.
 - Docs accurately distinguish implemented, partial, and roadmap behavior.
 - Tests cover runtime settings, capability policy, credential policy, sessions, resources, operations primitives, Console guardrails, and SDK/CLI smoke flows.
-

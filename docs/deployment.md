@@ -64,17 +64,27 @@ external access.
 
 ## Docker Compose
 
-This example stores runtime state in a named volume and keeps the HTTP service
-bound to localhost on the host machine.
+Build the image from a tagged SandBase Harness source checkout. The unscoped
+`managed-agents` npm package is not this project and must not be installed in a
+deployment image.
+
+```dockerfile
+FROM node:22-bookworm-slim
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY . .
+RUN npm run build
+CMD ["node", "dist/index.js", "start", "--host", "0.0.0.0", "--port", "3000", "--data-dir", "/data"]
+```
+
+This Compose example stores runtime state in a named volume and keeps the HTTP
+service bound to localhost on the host machine:
 
 ```yaml
 services:
   managed-agents:
-    image: node:22-bookworm-slim
-    working_dir: /app
-    command: >
-      sh -lc "npm install -g managed-agents &&
-      managed-agents start --host 0.0.0.0 --port 3000 --data-dir /data"
+    build: .
     ports:
       - "127.0.0.1:3000:3000"
     environment:
@@ -95,7 +105,8 @@ container runtime and permissions are explicitly managed.
 
 ## Kubernetes
 
-Use a `Deployment` for the runtime and a persistent volume for `/data`:
+Push the same source-built image to your registry, then use a `Deployment` for
+the runtime and a persistent volume for `/data`:
 
 ```yaml
 apiVersion: apps/v1
@@ -114,12 +125,18 @@ spec:
     spec:
       containers:
         - name: runtime
-          image: node:22-bookworm-slim
+          image: your-registry.example/sandbase-harness:v0.3.0
           workingDir: /app
           command:
-            - sh
-            - -lc
-            - npm install -g managed-agents && managed-agents start --host 0.0.0.0 --port 3000 --data-dir /data
+            - node
+            - dist/index.js
+            - start
+            - --host
+            - 0.0.0.0
+            - --port
+            - "3000"
+            - --data-dir
+            - /data
           envFrom:
             - secretRef:
                 name: managed-agents-secrets
