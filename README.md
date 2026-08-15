@@ -339,6 +339,9 @@ init smoke, and `examples/basic` startup smoke.
 
 ## SandBase Ecosystem
 
+- [SandBase Skills](https://github.com/sandbaseai/sandbase-skills) — 88 installable
+  Agent Skills for research, social intelligence, marketing, and business
+  workflows across Codex, Claude Code, Cursor, Gemini CLI, and other clients.
 - [SandBase CLI](https://github.com/sandbaseai/cli) — connect Cursor, Claude Code,
   Codex, Windsurf, Gemini CLI, OpenCode, and other MCP clients to 2,000+ tools
   and 200+ AI models with one onboarding command.
