@@ -66,4 +66,14 @@ describe('v1 local-first architecture spec', () => {
     expect(settingsPage).toContain('\\"sandbox_provider\\":\\"local\\"');
     expect(settingsPage).not.toContain('\\"hosting_type\\":\\"self_hosted\\"');
   });
+
+  it('documents the companion DSH Skill install path from GitHub source', () => {
+    const command = 'npx --yes github:sandbaseai/sandbase-skills add multi-source-search';
+    const destination = '.dsh/skills/multi-source-search';
+
+    expect(read('README.md')).toContain(command);
+    expect(read('README.md')).toContain(destination);
+    expect(read('examples/deepseek-harness/README.md')).toContain(command);
+    expect(read('examples/deepseek-harness/README.md')).toContain(destination);
+  });
 });

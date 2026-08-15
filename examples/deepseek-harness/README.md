@@ -40,6 +40,22 @@ dsh plugin --profile web add managed-agents
 dsh web
 ```
 
+### Add a portable research Skill
+
+The plugin exposes managed-agent operations as MCP tools. Skills are a separate
+DSH extension surface and can be installed alongside it. From the same DSH
+project root:
+
+```bash
+npx --yes github:sandbaseai/sandbase-skills add multi-source-search
+dsh web
+```
+
+The command copies the complete open-source Skill to
+`.dsh/skills/multi-source-search`. The Skill can use DSH's existing search and
+page-reading tools without a SandBase account; optional provider-backed
+workflows remain opt-in.
+
 For source development, load the included patch directly after building and
 put `dist/mcp` on `PATH`, or replace `command` with the absolute path to the
 built executable in a private test overlay.

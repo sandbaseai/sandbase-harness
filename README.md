@@ -86,6 +86,18 @@ native `mcp__sandbase__*` tools. See
 [`examples/deepseek-harness`](examples/deepseek-harness/README.md) for the full
 tool list and authenticated-runtime configuration.
 
+Pair the plugin with SandBase Skills to give the same DSH project a portable,
+source-verifiable research workflow:
+
+```bash
+npx --yes github:sandbaseai/sandbase-skills add multi-source-search
+dsh web
+```
+
+This installs the complete Skill into `.dsh/skills/multi-source-search`, DSH's
+project-scoped discovery directory. It runs from GitHub source and needs no
+SandBase account when DSH already provides web/search tools.
+
 New to DSH profiles, plugin composition, tool policy, or session semantics? The
 independent [DeepSeek Harness Handbook](https://github.com/sandbaseai/deepseek-harness-handbook)
 provides source-backed quickstarts, architecture maps, and troubleshooting for
