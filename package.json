@@ -1,6 +1,6 @@
 {
   "name": "managed-agents",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Local-first, self-hosted AI agent runtime with Claude Managed Agents-style APIs, sandboxed sessions, memory, tools, audit, replay, and a local Console.",
   "type": "module",
   "homepage": "https://github.com/sandbaseai/sandbase-harness#readme",
