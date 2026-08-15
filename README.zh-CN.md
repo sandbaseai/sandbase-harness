@@ -1,0 +1,157 @@
+# SandBase Harness
+
+[English](./README.md) | 中文
+
+一个本地优先、可自托管的 AI Agent Runtime。它把持久化会话、沙箱工具、
+Memory、凭证、审计日志、事件回放和可视化 Console 放在同一个运行时边界中，
+并提供原生 DeepSeek Harness stdio MCP 插件。
+
+> 当前稳定版本：[v0.3.2](https://github.com/sandbaseai/sandbase-harness/releases/tag/v0.3.2)
+
+## 为什么需要它
+
+模型 SDK 负责调用模型，但生产 Agent 还需要解决另一组问题：
+
+- 会话和产物如何持久化？
+- 工具在哪个沙箱中执行？
+- 敏感动作如何经过权限与审批？
+- 出错后如何查看事件、回放并恢复？
+- 不同模型如何通过同一运行时接入？
+
+SandBase Harness 提供这层运行时基础设施。它不是可视化工作流编辑器，
+也不替代模型 SDK。
+
+## 核心能力
+
+- Claude Managed Agents 风格的 /v1 API 和本地 Console
+- SQLite 会话、Agent、Memory、Skill、文件、凭证和 API Key 元数据
+- 可恢复的 Server-Sent Events 与会话事件回放
+- OpenAI、Anthropic 和 OpenAI-compatible 模型边界
+- Local、Docker、Kubernetes 和自托管 Worker 沙箱
+- MCP Toolset、权限策略、内置工具和 Skill Package
+- DeepSeek Harness 原生 stdio MCP Bridge
+- TypeScript SDK：managed-agents/sdk
+- 发布门禁：npm run release:check
+
+## 从源码启动
+
+npm 上未加 scope 的 managed-agents **不是**本项目。请使用带标签的
+GitHub 源码，不要运行 npx managed-agents 或 npm install managed-agents。
+
+~~~bash
+git clone --branch v0.3.2 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+cd sandbase-harness
+npm ci
+npm run build
+
+mkdir ../my-agents && cd ../my-agents
+node ../sandbase-harness/dist/index.js init
+node ../sandbase-harness/dist/index.js start
+~~~
+
+打开 http://127.0.0.1:3000/dashboard，进入 **Settings > Models**，
+配置模型 API Key 后即可创建 Agent 和会话。
+
+## 接入 DeepSeek Harness
+
+先构建并暴露本地命令：
+
+~~~bash
+git clone --branch v0.3.2 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+cd sandbase-harness
+npm ci
+npm run build:runtime
+npm link
+
+mkdir ../my-agents && cd ../my-agents
+managed-agents init
+managed-agents start
+~~~
+
+另开终端，把插件安装到 DSH Web Profile：
+
+~~~bash
+export MANAGED_AGENTS_URL=http://127.0.0.1:3000
+# 仅在 Runtime 开启认证时设置 MANAGED_AGENTS_API_KEY
+dsh plugin --profile web add managed-agents
+dsh web
+~~~
+
+DSH 随后可以通过原生 MCP Namespace：
+
+- 列出 Agent
+- 创建和运行持久化会话
+- 读取会话状态和产物
+- 停止正在运行的任务
+
+完整工具列表、兼容性证据、权限边界和卸载方法见
+[DeepSeek Harness 集成指南](./examples/deepseek-harness/README.md)。
+
+官方社区展示：
+[DeepSeek Harness Discussion #1918](https://github.com/deepseek-ai/deepseek-harness/discussions/1918)。
+
+## 添加可移植研究 Skill
+
+在同一个 DSH 项目根目录安装无需 SandBase 账号的 multi-source-search：
+
+~~~bash
+npx --yes github:sandbaseai/sandbase-skills add multi-source-search
+dsh web
+~~~
+
+安装器会把完整 Skill 写入 DSH 的项目级发现目录
+.dsh/skills/multi-source-search。当 DSH 已提供网页搜索和页面读取工具时，
+该 Skill 不需要 SandBase API。
+
+## 工作区结构
+
+~~~text
+my-agents/
+├── agents/                  # YAML Agent 定义
+├── skills/                  # 启动时导入的 Skill
+└── .managed-agents/         # Runtime 状态（应加入 gitignore）
+    ├── config.yaml
+    ├── data.db
+    ├── logs/
+    ├── files/
+    ├── skills/
+    ├── snapshots/
+    └── sandbox/
+~~~
+
+## 安全边界
+
+- API Key 应只通过环境变量或受控配置传入，不要写入 Prompt 或提交到 Git。
+- 默认 Local Sandbox 以当前操作系统用户执行命令，适合可信开发环境。
+- 需要更强隔离时使用 Docker 或 Kubernetes Sandbox。
+- DSH MCP 子进程只连接 MANAGED_AGENTS_URL，有效权限由
+  MANAGED_AGENTS_API_KEY 决定，Bridge 不持久化凭证。
+
+安全问题请使用仓库的
+[Security 页面](https://github.com/sandbaseai/sandbase-harness/security)，
+不要在公开 Issue 中附带 API Key、工作区数据或会话产物。
+
+## 文档
+
+- [安装](./docs/installation.md)
+- [使用指南](./docs/usage.md)
+- [API](./docs/api.md)
+- [Skill](./docs/skills.md)
+- [部署示例](./docs/deployment.md)
+- [DeepSeek V4](./docs/deepseek-v4.md)
+- [系统设计](./docs/spec/design.md)
+
+## 开发与验证
+
+~~~bash
+npm ci
+npm run typecheck
+npm test
+npm run build
+npm run release:check
+~~~
+
+项目采用 [Apache-2.0](./LICENSE) 许可证。欢迎通过
+[Issues](https://github.com/sandbaseai/sandbase-harness/issues) 和
+[Discussions](https://github.com/sandbaseai/sandbase-harness/discussions)
+反馈问题、分享集成经验或参与贡献。

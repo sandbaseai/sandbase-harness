@@ -76,4 +76,16 @@ describe('v1 local-first architecture spec', () => {
     expect(read('examples/deepseek-harness/README.md')).toContain(command);
     expect(read('examples/deepseek-harness/README.md')).toContain(destination);
   });
+
+  it('offers a Chinese entry point with the verified source and DSH paths', () => {
+    const root = read('README.md');
+    const chinese = read('README.zh-CN.md');
+
+    expect(root).toContain('[中文](./README.zh-CN.md)');
+    expect(chinese).toContain('git clone --branch v0.3.2 --depth 1');
+    expect(chinese).toContain('dsh plugin --profile web add managed-agents');
+    expect(chinese).toContain('npx --yes github:sandbaseai/sandbase-skills add multi-source-search');
+    expect(chinese).toContain('.dsh/skills/multi-source-search');
+    expect(chinese).not.toMatch(/(?:^|\n)npx managed-agents/m);
+  });
 });
