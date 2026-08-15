@@ -10,7 +10,7 @@ credentials, audit trails, and a built-in Console — all running on your
 machine or in your own infrastructure.
 
 ```bash
-git clone --branch v0.3.0 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+git clone --branch v0.3.1 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
 cd sandbase-harness
 npm ci
 npm run build
@@ -19,6 +19,16 @@ node ../sandbase-harness/dist/index.js init
 node ../sandbase-harness/dist/index.js start
 # open http://127.0.0.1:3000/dashboard
 ```
+
+Choose SandBase Harness when you need more than a model loop:
+
+| Need | What Harness provides |
+| --- | --- |
+| Run generated code safely | Local, Docker, Kubernetes, and self-hosted worker sandboxes |
+| Inspect long-running agents | Persistent sessions, resumable event streams, audit, and replay |
+| Control tool access | MCP toolsets, credential vaults, permission policies, and approvals |
+| Operate any model | OpenAI, Anthropic, and OpenAI-compatible providers, including DeepSeek V4 |
+| Keep infrastructure yours | Local-first SQLite and file storage with no required hosted control plane |
 
 ## Why
 
@@ -84,7 +94,7 @@ the runtime layers used by this integration.
 ## Quick Start
 
 ```bash
-git clone --branch v0.3.0 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+git clone --branch v0.3.1 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
 cd sandbase-harness
 npm ci
 npm run build
