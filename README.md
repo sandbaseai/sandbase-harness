@@ -1,4 +1,9 @@
-# managed-agents
+# SandBase Harness
+
+[![GitHub stars](https://img.shields.io/github/stars/sandbaseai/sandbase-harness?style=social)](https://github.com/sandbaseai/sandbase-harness/stargazers)
+[![Release](https://img.shields.io/github/v/release/sandbaseai/sandbase-harness)](https://github.com/sandbaseai/sandbase-harness/releases/latest)
+[![Discussions](https://img.shields.io/github/discussions/sandbaseai/sandbase-harness)](https://github.com/sandbaseai/sandbase-harness/discussions)
+[![License](https://img.shields.io/github/license/sandbaseai/sandbase-harness)](LICENSE)
 
 A local-first runtime for AI agents. Sessions, sandboxed tools, memory,
 credentials, audit trails, and a built-in Console — all running on your
