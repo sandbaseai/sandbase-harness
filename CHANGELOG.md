@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.3.2 - 2026-08-15
+
+### Highlights
+
+- **Containerized MCP bridge**: adds `Dockerfile.mcp` and `.dockerignore` for
+  the six-tool stdio bridge, with OCI and MCP server metadata.
+- **Verified container build**: CI now builds the production MCP image from a
+  clean checkout so broken Docker packaging blocks future changes.
+- **Release-aligned quick start**: source, Docker, installation, deployment,
+  and DeepSeek Harness examples now pin the immutable v0.3.2 tag that contains
+  every referenced file.
+- **Project trust and discovery**: adds security and contribution policies,
+  private vulnerability reporting, and a direct SandBase Agent Skills link.
+
 ## 0.3.0 - 2026-08-14
 
 ### Highlights

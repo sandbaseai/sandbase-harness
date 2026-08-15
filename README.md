@@ -10,7 +10,7 @@ credentials, audit trails, and a built-in Console — all running on your
 machine or in your own infrastructure.
 
 ```bash
-git clone --branch v0.3.1 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+git clone --branch v0.3.2 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
 cd sandbase-harness
 npm ci
 npm run build
@@ -94,7 +94,7 @@ the runtime layers used by this integration.
 ## Quick Start
 
 ```bash
-git clone --branch v0.3.1 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+git clone --branch v0.3.2 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
 cd sandbase-harness
 npm ci
 npm run build
@@ -116,10 +116,10 @@ Harness API, build the image from the tagged source checkout, then add this
 stdio command to an MCP client:
 
 ```bash
-docker build -f Dockerfile.mcp -t sandbase-harness-mcp:0.3.1 .
+docker build -f Dockerfile.mcp -t sandbase-harness-mcp:0.3.2 .
 docker run --rm -i \
   -e MANAGED_AGENTS_URL=http://host.docker.internal:3000 \
-  sandbase-harness-mcp:0.3.1
+  sandbase-harness-mcp:0.3.2
 ```
 
 For an authenticated remote runtime, also pass `MANAGED_AGENTS_API_KEY`. The
