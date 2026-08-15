@@ -1,0 +1,41 @@
+name: Bug report
+description: Report a reproducible problem in SandBase Harness
+title: "bug: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: For security vulnerabilities, use the private reporting link in SECURITY.md instead.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release, commit, or container tag where the problem occurs.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction
+      description: Provide the smallest reproducible example and exact commands.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and logs
+      description: Remove secrets, tokens, and personal data.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Node.js version, sandbox provider, and model provider.
+
