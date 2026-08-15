@@ -66,3 +66,6 @@ jobs:
 
       - name: Release smoke
         run: npm run smoke:release
+
+      - name: Build MCP container
+        run: docker build -f Dockerfile.mcp -t sandbase-harness-mcp:ci .

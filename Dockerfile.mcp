@@ -1,0 +1,30 @@
+# syntax=docker/dockerfile:1
+
+FROM node:22-bookworm-slim AS build
+
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+
+COPY tsconfig.json tsconfig.tests.json tsup.config.ts ./
+COPY src ./src
+RUN npm run build:runtime && npm prune --omit=dev
+
+FROM node:22-bookworm-slim AS runtime
+
+LABEL org.opencontainers.image.title="SandBase Harness MCP" \
+      org.opencontainers.image.description="Six-tool stdio MCP bridge for SandBase Harness sessions" \
+      org.opencontainers.image.source="https://github.com/sandbaseai/sandbase-harness" \
+      org.opencontainers.image.licenses="Apache-2.0" \
+      io.modelcontextprotocol.server.name="io.github.sandbaseai/sandbase-harness"
+
+WORKDIR /app
+ENV NODE_ENV=production
+
+COPY --from=build --chown=node:node /app/package.json ./package.json
+COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/dist ./dist
+
+USER node
+ENTRYPOINT ["node", "dist/mcp/index.js"]
+

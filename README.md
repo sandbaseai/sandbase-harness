@@ -111,6 +111,21 @@ official scoped package is announced in this repository, install only from the
 tagged GitHub source release shown above. Do not run `npx managed-agents` or
 `npm install managed-agents`.
 
+The six-tool MCP bridge also has a minimal container definition. Start the
+Harness API, build the image from the tagged source checkout, then add this
+stdio command to an MCP client:
+
+```bash
+docker build -f Dockerfile.mcp -t sandbase-harness-mcp:0.3.1 .
+docker run --rm -i \
+  -e MANAGED_AGENTS_URL=http://host.docker.internal:3000 \
+  sandbase-harness-mcp:0.3.1
+```
+
+For an authenticated remote runtime, also pass `MANAGED_AGENTS_API_KEY`. The
+container image contains only the MCP bridge; agent sessions and sandbox work
+remain in the connected Harness runtime.
+
 For development from the latest `main` branch:
 
 ```bash
