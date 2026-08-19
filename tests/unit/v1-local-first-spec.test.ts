@@ -82,10 +82,24 @@ describe('v1 local-first architecture spec', () => {
     const chinese = read('README.zh-CN.md');
 
     expect(root).toContain('[中文](./README.zh-CN.md)');
-    expect(chinese).toContain('git clone --branch v0.3.2 --depth 1');
+    expect(chinese).toContain('git clone --branch v0.3.3 --depth 1');
     expect(chinese).toContain('dsh plugin --profile web add managed-agents');
     expect(chinese).toContain('npx --yes github:sandbaseai/sandbase-skills add multi-source-search');
     expect(chinese).toContain('.dsh/skills/multi-source-search');
     expect(chinese).not.toMatch(/(?:^|\n)npx managed-agents/m);
+  });
+
+  it('documents first-class MiniMax configuration', () => {
+    const readme = read('README.md');
+    const installation = read('docs/installation.md');
+    const minimax = read('docs/minimax.md');
+
+    expect(readme).toContain('[MiniMax](docs/minimax.md)');
+    expect(installation).toContain('`minimax`');
+    expect(minimax).toContain('https://api.minimax.io/v1');
+    expect(minimax).toContain('https://api.minimaxi.com/v1');
+    expect(minimax).toContain('MiniMax-M3');
+    expect(minimax).toContain('MiniMax-M2.7');
+    expect(minimax).toContain('${MINIMAX_API_KEY}');
   });
 });

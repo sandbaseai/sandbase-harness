@@ -19,7 +19,7 @@ the tagged GitHub source release and do not run `npx managed-agents` or
 `npm install managed-agents`.
 
 ```bash
-git clone --branch v0.3.2 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+git clone --branch v0.3.3 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
 cd sandbase-harness
 npm ci
 npm run build
@@ -142,7 +142,7 @@ http://127.0.0.1:3000/dashboard#models
 Configure the workspace model vendor, then click `Validate` or
 `Check configuration` before saving:
 
-- `Vendor`: `anthropic`, `openai`, or `openai_compatible`
+- `Vendor`: `anthropic`, `openai`, `minimax`, or `openai_compatible`
 - `Base URL`: required for OpenAI-compatible local or hosted endpoints
 - `API key`: the provider key for model requests
 
@@ -150,6 +150,9 @@ Runtime model connection settings live in `.managed-agents/config.yaml`. Agents
 set concrete model IDs in their own definitions, for example `model: gpt-4o` or
 `model: openai/gpt-5.5`. The workspace model config supplies provider
 credentials and base URL only.
+
+For MiniMax regional endpoints and supported model IDs, follow the
+[MiniMax configuration guide](minimax.md).
 
 The same file should make the local storage defaults explicit:
 

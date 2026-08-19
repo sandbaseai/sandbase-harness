@@ -12,7 +12,7 @@ credentials, audit trails, and a built-in Console — all running on your
 machine or in your own infrastructure.
 
 ```bash
-git clone --branch v0.3.2 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+git clone --branch v0.3.3 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
 cd sandbase-harness
 npm ci
 npm run build
@@ -29,7 +29,7 @@ Choose SandBase Harness when you need more than a model loop:
 | Run generated code safely | Local, Docker, Kubernetes, and self-hosted worker sandboxes |
 | Inspect long-running agents | Persistent sessions, resumable event streams, audit, and replay |
 | Control tool access | MCP toolsets, credential vaults, permission policies, and approvals |
-| Operate any model | OpenAI, Anthropic, and OpenAI-compatible providers, including DeepSeek V4 |
+| Operate any model | OpenAI, Anthropic, MiniMax, and OpenAI-compatible providers, including DeepSeek V4 |
 | Keep infrastructure yours | Local-first SQLite and file storage with no required hosted control plane |
 
 ## Why
@@ -67,7 +67,7 @@ is that runtime layer — not a visual workflow builder and not another model SD
 
 - Node.js 22+
 - npm 10+
-- A model provider API key (OpenAI, Anthropic, or OpenAI-compatible endpoint)
+- A model provider API key (OpenAI, Anthropic, MiniMax, or an OpenAI-compatible endpoint)
 - Docker (optional, for Docker-backed sandboxes)
 
 ## DeepSeek Harness
@@ -108,7 +108,7 @@ the runtime layers used by this integration.
 ## Quick Start
 
 ```bash
-git clone --branch v0.3.2 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+git clone --branch v0.3.3 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
 cd sandbase-harness
 npm ci
 npm run build
@@ -130,10 +130,10 @@ Harness API, build the image from the tagged source checkout, then add this
 stdio command to an MCP client:
 
 ```bash
-docker build -f Dockerfile.mcp -t sandbase-harness-mcp:0.3.2 .
+docker build -f Dockerfile.mcp -t sandbase-harness-mcp:0.3.3 .
 docker run --rm -i \
   -e MANAGED_AGENTS_URL=http://host.docker.internal:3000 \
-  sandbase-harness-mcp:0.3.2
+  sandbase-harness-mcp:0.3.3
 ```
 
 For an authenticated remote runtime, also pass `MANAGED_AGENTS_API_KEY`. The
@@ -189,6 +189,9 @@ service.
 
 For DeepSeek V4 Pro/Flash configuration, including maximum reasoning effort,
 see [DeepSeek V4](docs/deepseek-v4.md).
+
+For first-class MiniMax configuration, regional endpoints, and the supported
+MiniMax-M3 and MiniMax-M2.7 model IDs, see [MiniMax](docs/minimax.md).
 
 ## CLI
 

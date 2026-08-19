@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.3 - 2026-08-19
+
+### Highlights
+
+- **First-class MiniMax provider**: adds MiniMax to Settings V2 and the
+  runtime provider boundary, with global and mainland China endpoints.
+- **Current MiniMax models**: supports `MiniMax-M3` as the default and
+  `MiniMax-M2.7` as an explicit alternative.
+- **Verified setup guide**: documents environment-variable credentials,
+  regional endpoint selection, agent model IDs, and configuration checks.
+
 ## 0.3.2 - 2026-08-15
 
 ### Highlights
