@@ -106,6 +106,10 @@ This installs the complete Skill into `.dsh/skills/multi-source-search`, DSH's
 project-scoped discovery directory. It runs from GitHub source and needs no
 SandBase account when DSH already provides web/search tools.
 
+For a complete, reproducible workflow that combines the evidence ledger with
+sandboxed execution, credentials, audit, and replay, read
+[Build an Auditable Research Agent](https://blog.sandbase.ai/auditable-research-agent-evidence-ledger-sandbox-replay/).
+
 New to DSH profiles, plugin composition, tool policy, or session semantics? The
 independent [DeepSeek Harness Handbook](https://github.com/sandbaseai/deepseek-harness-handbook)
 provides source-backed quickstarts, architecture maps, and troubleshooting for
