@@ -113,7 +113,11 @@ sandboxed execution, credentials, audit, and replay, read
 New to DSH profiles, plugin composition, tool policy, or session semantics? The
 independent [DeepSeek Harness Handbook](https://github.com/sandbaseai/deepseek-harness-handbook)
 provides source-backed quickstarts, architecture maps, and troubleshooting for
-the runtime layers used by this integration.
+the runtime layers used by this integration. Start with the local-browser
+[Install Doctor](https://sandbaseai.github.io/deepseek-harness-handbook/install-doctor.html)
+for installation evidence, or use the
+[Failure Router](https://sandbaseai.github.io/deepseek-harness-handbook/diagnose.html)
+to identify the first broken runtime boundary.
 
 ## Quick Start
 
