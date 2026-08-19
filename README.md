@@ -401,6 +401,9 @@ init smoke, and `examples/basic` startup smoke.
 - [SandBase CLI](https://github.com/sandbaseai/cli) — connect Cursor, Claude Code,
   Codex, Windsurf, Gemini CLI, OpenCode, and other MCP clients to 2,000+ AI
   models with one onboarding command.
+- [DSH Plugin Store](https://github.com/sandbaseai/dsh-plugin-store) — discover,
+  filter, install, and manage community DeepSeek Harness plugins from the native
+  Settings experience.
 - [SandBase](https://www.sandbase.ai) — hosted agent infrastructure, model access,
   tools, and managed sandboxes.
 
