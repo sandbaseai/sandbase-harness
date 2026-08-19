@@ -8,7 +8,7 @@ stdio and exposes agents, sessions, streamed turns, artifacts, and cancellation.
 
 - Node.js 22+
 - DeepSeek Harness with `@deepseek-ai/dsh-mcp-client` and stdio MCP support
-- SandBase Harness v0.3.3 or a source build from this repository
+- SandBase Harness v0.3.4 or a source build from this repository
 
 Last verified on 2026-08-14 against DeepSeek Harness commit
 [`47f9438`](https://github.com/deepseek-ai/deepseek-harness/commit/47f943859bef60e4160492346772ded9b24f765a): the Cordis layer composed cleanly,
@@ -17,7 +17,7 @@ DSH launched the stdio child, and the MCP handshake completed.
 Build the tagged source release and expose its two local executables first:
 
 ```bash
-git clone --branch v0.3.3 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+git clone --branch v0.3.4 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
 cd sandbase-harness
 npm ci
 npm run build:runtime

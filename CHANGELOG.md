@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.4 - 2026-08-19
+
+### Highlights
+
+- **Published MCP container**: release tags now produce public multi-platform
+  `linux/amd64` and `linux/arm64` images in GitHub Container Registry.
+- **Verifiable supply chain**: images carry OCI and MCP ownership labels and a
+  GitHub build-provenance attestation tied to the release digest.
+- **Registry-ready metadata**: adds a version-aligned `server.json` for the
+  official MCP Registry OCI distribution format.
+
 ## 0.3.3 - 2026-08-19
 
 ### Highlights

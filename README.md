@@ -12,7 +12,7 @@ credentials, audit trails, and a built-in Console — all running on your
 machine or in your own infrastructure.
 
 ```bash
-git clone --branch v0.3.3 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+git clone --branch v0.3.4 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
 cd sandbase-harness
 npm ci
 npm run build
@@ -108,7 +108,7 @@ the runtime layers used by this integration.
 ## Quick Start
 
 ```bash
-git clone --branch v0.3.3 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+git clone --branch v0.3.4 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
 cd sandbase-harness
 npm ci
 npm run build
@@ -125,20 +125,21 @@ official scoped package is announced in this repository, install only from the
 tagged GitHub source release shown above. Do not run `npx managed-agents` or
 `npm install managed-agents`.
 
-The six-tool MCP bridge also has a minimal container definition. Start the
-Harness API, build the image from the tagged source checkout, then add this
-stdio command to an MCP client:
+The six-tool MCP bridge is published as a multi-architecture OCI image. Start
+the Harness API, then add this stdio command to an MCP client:
 
 ```bash
-docker build -f Dockerfile.mcp -t sandbase-harness-mcp:0.3.3 .
+docker pull ghcr.io/sandbaseai/sandbase-harness-mcp:0.3.4
 docker run --rm -i \
   -e MANAGED_AGENTS_URL=http://host.docker.internal:3000 \
-  sandbase-harness-mcp:0.3.3
+  ghcr.io/sandbaseai/sandbase-harness-mcp:0.3.4
 ```
 
 For an authenticated remote runtime, also pass `MANAGED_AGENTS_API_KEY`. The
 container image contains only the MCP bridge; agent sessions and sandbox work
-remain in the connected Harness runtime.
+remain in the connected Harness runtime. Every release image is built from the
+matching Git tag for `linux/amd64` and `linux/arm64`, includes OCI source and
+MCP ownership metadata, and receives a GitHub build-provenance attestation.
 
 For development from the latest `main` branch:
 

@@ -6,7 +6,7 @@
 Memory、凭证、审计日志、事件回放和可视化 Console 放在同一个运行时边界中，
 并提供原生 DeepSeek Harness stdio MCP 插件。
 
-> 当前稳定版本：[v0.3.3](https://github.com/sandbaseai/sandbase-harness/releases/tag/v0.3.3)
+> 当前稳定版本：[v0.3.4](https://github.com/sandbaseai/sandbase-harness/releases/tag/v0.3.4)
 
 ## 为什么需要它
 
@@ -39,7 +39,7 @@ npm 上未加 scope 的 managed-agents **不是**本项目。请使用带标签�
 GitHub 源码，不要运行 npx managed-agents 或 npm install managed-agents。
 
 ~~~bash
-git clone --branch v0.3.3 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+git clone --branch v0.3.4 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
 cd sandbase-harness
 npm ci
 npm run build
@@ -57,7 +57,7 @@ node ../sandbase-harness/dist/index.js start
 先构建并暴露本地命令：
 
 ~~~bash
-git clone --branch v0.3.3 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+git clone --branch v0.3.4 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
 cd sandbase-harness
 npm ci
 npm run build:runtime

@@ -1,0 +1,36 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.sandbaseai/sandbase-harness",
+  "title": "SandBase Harness",
+  "description": "Stdio MCP bridge for SandBase Harness agents, sessions, turns, artifacts, and cancellation.",
+  "repository": {
+    "url": "https://github.com/sandbaseai/sandbase-harness",
+    "source": "github"
+  },
+  "version": "0.3.4",
+  "packages": [
+    {
+      "registryType": "oci",
+      "identifier": "ghcr.io/sandbaseai/sandbase-harness-mcp:0.3.4",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "MANAGED_AGENTS_URL",
+          "description": "URL of the SandBase Harness runtime API.",
+          "isRequired": true,
+          "isSecret": false,
+          "format": "string"
+        },
+        {
+          "name": "MANAGED_AGENTS_API_KEY",
+          "description": "API key when the connected Harness runtime requires authentication.",
+          "isRequired": false,
+          "isSecret": true,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}
