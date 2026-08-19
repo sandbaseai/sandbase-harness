@@ -36,9 +36,29 @@ In another terminal, install this bundle into the Web profile and start DSH:
 ```bash
 export MANAGED_AGENTS_URL=http://127.0.0.1:3000
 # Only set MANAGED_AGENTS_API_KEY when runtime authentication is enabled.
+
+# Preflight 1: prove the runtime URL is reachable.
+curl --fail --silent --show-error \
+  "$MANAGED_AGENTS_URL/v1/x/health"
+
+# Preflight 2: prove the MCP child will have data-API access.
+if [ -n "${MANAGED_AGENTS_API_KEY:-}" ]; then
+  curl --fail --silent --show-error \
+    -H "Authorization: Bearer $MANAGED_AGENTS_API_KEY" \
+    "$MANAGED_AGENTS_URL/v1/agents"
+else
+  curl --fail --silent --show-error \
+    "$MANAGED_AGENTS_URL/v1/agents"
+fi
+
 dsh plugin --profile web add managed-agents
 dsh web
 ```
+
+Run both preflight requests before DSH. If the health request fails, fix the
+runtime process or `MANAGED_AGENTS_URL`. If health succeeds but the agents
+request returns `401`, export an API key accepted by that runtime. The key is
+sent only in the request header and is not printed by these commands.
 
 ### Add a portable research Skill
 
