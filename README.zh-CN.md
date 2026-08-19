@@ -8,6 +8,8 @@ Memory、凭证、审计日志、事件回放和可视化 Console 放在同一�
 
 > 当前稳定版本：[v0.3.4](https://github.com/sandbaseai/sandbase-harness/releases/tag/v0.3.4)
 
+> 官方 MCP Registry：[io.github.sandbaseai/sandbase-harness](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.sandbaseai%2Fsandbase-harness)（状态：`active`）
+
 > 如果只需要轻量接入而不需要完整 Runtime，可使用 [SandBase CLI](https://github.com/sandbaseai/cli)：
 > 它通过本地 stdio MCP Bridge，将 25 个 AI 客户端目标连接到 2,000+ 模型。
 
