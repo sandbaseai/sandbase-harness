@@ -1,0 +1,19 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "sandbase-harness",
+  "version": "0.1.0",
+  "description": "Connect Copilot and compatible agents to an existing SandBase Harness runtime for agents, sessions, turns, artifacts, and cancellation.",
+  "author": {
+    "name": "SandBase AI",
+    "url": "https://github.com/sandbaseai"
+  },
+  "homepage": "https://github.com/sandbaseai/sandbase-harness",
+  "repository": "https://github.com/sandbaseai/sandbase-harness",
+  "license": "Apache-2.0",
+  "keywords": [
+    "agent-runtime",
+    "mcp",
+    "sandbox",
+    "self-hosted"
+  ]
+}

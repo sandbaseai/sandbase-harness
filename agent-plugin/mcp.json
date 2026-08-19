@@ -1,0 +1,20 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "sandbase-harness": {
+      "type": "stdio",
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "--add-host=host.docker.internal:host-gateway",
+        "-e",
+        "MANAGED_AGENTS_URL",
+        "-e",
+        "MANAGED_AGENTS_API_KEY",
+        "ghcr.io/sandbaseai/sandbase-harness-mcp:0.3.4"
+      ]
+    }
+  }
+}

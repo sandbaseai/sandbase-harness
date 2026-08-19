@@ -48,4 +48,41 @@ describe('MCP OCI distribution', () => {
     expect(workflow).not.toContain('NPM_TOKEN');
     expect(workflow).not.toContain('MCP_GITHUB_TOKEN');
   });
+
+  it('ships a portable Agent Plugin pinned to the release MCP image', () => {
+    const packageManifest = JSON.parse(read('package.json')) as { version: string };
+    const plugin = JSON.parse(read('agent-plugin/plugin.json')) as {
+      $schema: string;
+      name: string;
+      version: string;
+      license: string;
+    };
+    const mcp = JSON.parse(read('agent-plugin/mcp.json')) as {
+      $schema: string;
+      mcpServers: Record<string, {
+        type: string;
+        command: string;
+        args: string[];
+        env?: Record<string, string>;
+      }>;
+    };
+    const server = mcp.mcpServers['sandbase-harness'];
+
+    expect(plugin).toEqual(expect.objectContaining({
+      $schema: 'https://agent-plugins.org/schemas/1.0.0/plugin.schema.json',
+      name: 'sandbase-harness',
+      version: '0.1.0',
+      license: 'Apache-2.0',
+    }));
+    expect(mcp.$schema).toBe('https://agent-plugins.org/schemas/1.0.0/mcp.schema.json');
+    expect(server).toEqual(expect.objectContaining({
+      type: 'stdio',
+      command: 'docker',
+    }));
+    expect(server.args).toContain(`ghcr.io/sandbaseai/sandbase-harness-mcp:${packageManifest.version}`);
+    expect(server.args).toContain('MANAGED_AGENTS_URL');
+    expect(server.args).toContain('MANAGED_AGENTS_API_KEY');
+    expect(server.env).toBeUndefined();
+    expect(JSON.stringify(mcp)).not.toMatch(/api[_-]?key["']?\s*:/i);
+  });
 });

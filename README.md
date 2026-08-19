@@ -145,6 +145,25 @@ remain in the connected Harness runtime. Every release image is built from the
 matching Git tag for `linux/amd64` and `linux/arm64`, includes OCI source and
 MCP ownership metadata, and receives a GitHub build-provenance attestation.
 
+### Portable Agent Plugin
+
+Copilot CLI, VS Code, and other Agent Plugins 1.0 clients can install the same
+OCI-backed MCP bridge directly from this repository. Start the Harness API and
+Docker first, then expose its URL to the plugin process:
+
+```bash
+export MANAGED_AGENTS_URL=http://host.docker.internal:3000
+# Optional when the runtime requires authentication:
+export MANAGED_AGENTS_API_KEY=your-runtime-key
+
+copilot plugin install sandbaseai/sandbase-harness:agent-plugin
+```
+
+The plugin passes these environment variables through to the pinned
+`ghcr.io/sandbaseai/sandbase-harness-mcp:0.3.4` image. It does not store a key
+in `plugin.json`, `mcp.json`, or the installed plugin files. On Linux, the
+plugin's Docker command maps `host.docker.internal` through `host-gateway`.
+
 For development from the latest `main` branch:
 
 ```bash
