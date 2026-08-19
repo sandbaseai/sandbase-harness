@@ -420,6 +420,13 @@ init smoke, and `examples/basic` startup smoke.
 - [Contributing](CONTRIBUTING.md)
 - [Changelog](CHANGELOG.md)
 
+## Community Guides
+
+- [Self-host the SandBase agent runtime](https://www.ssdnodes.com/learn/self-host-sandbase-agent-runtime)
+  by SSD Nodes — an independent VPS walkthrough covering installation, agent
+  configuration, MCP servers, sandbox modes, and reverse-proxy deployment. The
+  article demonstrates v0.3.2; use the current release command above for v0.3.4.
+
 ## License
 
 [Apache-2.0](LICENSE)
