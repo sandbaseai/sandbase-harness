@@ -28,9 +28,24 @@ describe('MCP OCI distribution', () => {
 
     expect(workflow).toContain('types: [published]');
     expect(workflow).toContain('packages: write');
+    expect(workflow).toContain('artifact-metadata: write');
     expect(workflow).toContain('platforms: linux/amd64,linux/arm64');
     expect(workflow).toContain('actions/attest-build-provenance@v4');
     expect(workflow).not.toContain('npm publish');
     expect(dockerfile).toContain('io.modelcontextprotocol.server.name="io.github.sandbaseai/sandbase-harness"');
+  });
+
+  it('publishes validated metadata through short-lived GitHub OIDC', () => {
+    const workflow = read('.github/workflows/publish-mcp-registry.yml');
+
+    expect(workflow).toContain('workflow_dispatch:');
+    expect(workflow).toContain('id-token: write');
+    expect(workflow).toContain('docker manifest inspect');
+    expect(workflow).toContain('sha256sum --check --strict');
+    expect(workflow).toContain('./mcp-publisher validate');
+    expect(workflow).toContain('./mcp-publisher login github-oidc');
+    expect(workflow).toContain('./mcp-publisher publish');
+    expect(workflow).not.toContain('NPM_TOKEN');
+    expect(workflow).not.toContain('MCP_GITHUB_TOKEN');
   });
 });

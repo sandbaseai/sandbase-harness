@@ -8,6 +8,7 @@ permissions:
   contents: read
   packages: write
   attestations: write
+  artifact-metadata: write
   id-token: write
 
 jobs:
@@ -36,7 +37,6 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
-            type=raw,value=latest
           labels: |
             io.modelcontextprotocol.server.name=io.github.sandbaseai/sandbase-harness
 
