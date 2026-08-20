@@ -33,6 +33,8 @@ export interface Skill {
   display_title: string | null;
   /** Short description (from frontmatter `description`). */
   description: string;
+  /** Optional Agent Skills environment requirements. */
+  compatibility: string | null;
   /** Markdown body - the instructions the model should follow. */
   instructions: string;
   /** Original frontmatter (preserved for round-trip). */
@@ -96,6 +98,10 @@ export function parseSkill(content: string, packageName: string, file = `${packa
   if (!name || !description) {
     return null;
   }
+  const compatibility = readCompatibility(frontmatter);
+  if (frontmatter.compatibility !== undefined && compatibility === null) {
+    return null;
+  }
 
   const displayTitle = typeof frontmatter.display_title === 'string' && frontmatter.display_title.trim()
     ? frontmatter.display_title.trim()
@@ -107,6 +113,7 @@ export function parseSkill(content: string, packageName: string, file = `${packa
     name,
     display_title: displayTitle,
     description,
+    compatibility,
     instructions: (match[2] ?? '').trim(),
     frontmatter,
     file,
@@ -246,4 +253,9 @@ function readSkillMetadata(skillDir: string): SkillMetadata | null {
 
 function readString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function readCompatibility(frontmatter: Record<string, unknown>): string | null {
+  const compatibility = readString(frontmatter.compatibility);
+  return compatibility && compatibility.length <= 500 ? compatibility : null;
 }

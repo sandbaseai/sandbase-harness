@@ -21,6 +21,7 @@ export function skillResource(skill: Skill) {
     updated_at: skill.updated_at,
     name: skill.name,
     description: skill.description,
+    compatibility: skill.compatibility,
     file: skill.file || null,
     versions: skill.versions,
   };

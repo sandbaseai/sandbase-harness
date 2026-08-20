@@ -19,7 +19,8 @@ export function Skills({ data, onRefresh }: { data: ConsoleData; onRefresh: () =
         || skill.id.toLowerCase().includes(q)
         || skill.name.toLowerCase().includes(q)
         || skillDisplayName(skill).toLowerCase().includes(q)
-        || skill.description.toLowerCase().includes(q);
+        || skill.description.toLowerCase().includes(q)
+        || skill.compatibility?.toLowerCase().includes(q);
       return sourceMatches && queryMatches;
     });
   }, [data.skills, query, source]);
@@ -124,6 +125,12 @@ function SkillDetailsDrawer({ skill, onClose }: { skill: Skill; onClose: () => v
       </div>
       <div className="drawerBody">
         <p>{skill.description}</p>
+        {skill.compatibility ? (
+          <div className="infoBanner">
+            <strong>Compatibility</strong>
+            <span>{skill.compatibility}</span>
+          </div>
+        ) : null}
         <div className="drawerMetaGrid">
           <span>Source</span>
           <strong>{skill.source === 'anthropic' ? 'Anthropic' : 'Custom'}</strong>

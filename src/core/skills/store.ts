@@ -72,14 +72,16 @@ export function getSkillStoragePath(db: Database, id: string): string | null {
 }
 
 function rowToSkill(row: SkillRow): Skill {
+  const frontmatter = parseObject(row.frontmatter);
   return {
     id: row.id,
     type: 'skill',
     name: row.name,
     display_title: row.display_title,
     description: row.description,
+    compatibility: compatibilityFromFrontmatter(frontmatter),
     instructions: row.instructions,
-    frontmatter: parseObject(row.frontmatter),
+    frontmatter,
     file: row.file,
     source: row.source,
     latest_version: row.latest_version,
@@ -87,6 +89,13 @@ function rowToSkill(row: SkillRow): Skill {
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+}
+
+function compatibilityFromFrontmatter(frontmatter: Record<string, unknown>): string | null {
+  const value = frontmatter.compatibility;
+  return typeof value === 'string' && value.trim() && value.trim().length <= 500
+    ? value.trim()
+    : null;
 }
 
 function parseObject(value: string): Record<string, unknown> {

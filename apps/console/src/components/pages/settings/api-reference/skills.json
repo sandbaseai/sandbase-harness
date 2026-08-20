@@ -54,6 +54,11 @@
         "name": "source",
         "type": "custom | anthropic",
         "description": "Skill origin."
+      },
+      {
+        "name": "compatibility",
+        "type": "string | null",
+        "description": "Authored Agent Skills environment requirements; descriptive only and never executed."
       }
     ]
   },

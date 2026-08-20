@@ -8,6 +8,7 @@ describe('skill resource helpers', () => {
       id: 'skill_a',
       type: 'skill',
       name: 'a',
+      compatibility: 'Requires network access',
       file: 'a/SKILL.md',
       versions: [{ id: '1', created_at: null, latest: true }],
     });
@@ -33,6 +34,7 @@ function testSkill(name: string): Skill {
     name,
     display_title: name,
     description: `${name} description`,
+    compatibility: 'Requires network access',
     instructions: `${name} instructions`,
     frontmatter: {},
     file: `${name}/SKILL.md`,

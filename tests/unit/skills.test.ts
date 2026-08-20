@@ -18,6 +18,7 @@ import {
 const SKILL_MD = `---
 name: code-review
 description: Reviews code for bugs and style
+compatibility: Requires git and network access
 ---
 
 # Code Review Skill
@@ -33,6 +34,7 @@ describe('Skills', () => {
       const skill = parseSkill(SKILL_MD, 'package-name')!;
       expect(skill.name).toBe('code-review');
       expect(skill.description).toBe('Reviews code for bugs and style');
+      expect(skill.compatibility).toBe('Requires git and network access');
       expect(skill.instructions).toContain('# Code Review Skill');
       expect(skill.instructions).toContain('Check for bugs');
     });
@@ -46,6 +48,11 @@ describe('Skills', () => {
       const skill = parseSkill('---\nname: x\n---\nbody', 'f');
       expect(skill).toBeNull();
     });
+
+    it('rejects invalid compatibility metadata', () => {
+      expect(parseSkill('---\nname: x\ndescription: x\ncompatibility: []\n---\nbody', 'x')).toBeNull();
+      expect(parseSkill(`---\nname: x\ndescription: x\ncompatibility: ${'x'.repeat(501)}\n---\nbody`, 'x')).toBeNull();
+    });
   });
 
   describe('round-trip (Property 2)', () => {
@@ -56,6 +63,7 @@ describe('Skills', () => {
 
       expect(second.name).toBe(first.name);
       expect(second.description).toBe(first.description);
+      expect(second.compatibility).toBe(first.compatibility);
       expect(second.instructions).toBe(first.instructions);
     });
   });
@@ -149,6 +157,7 @@ function testSkill(name: string, description: string, instructions: string): Ski
     name,
     display_title: name,
     description,
+    compatibility: null,
     instructions,
     frontmatter: {},
     file: `${name}/SKILL.md`,

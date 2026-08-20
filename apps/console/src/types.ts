@@ -215,6 +215,7 @@ export type Skill = {
   name: string;
   display_title: string | null;
   description: string;
+  compatibility: string | null;
   source: 'custom' | 'anthropic';
   latest_version: string | null;
   versions: Array<{ id: string; created_at: string | null; latest: boolean }>;

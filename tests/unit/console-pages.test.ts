@@ -226,6 +226,7 @@ function populatedConsoleData(): ConsoleData {
       name: 'ui-review',
       display_title: 'UI Review',
       description: 'Checklist for dashboard polish.',
+      compatibility: 'Requires git and network access.',
       source: 'custom',
       latest_version: '202607230001',
       versions: [{ id: '202607230001', created_at: now, latest: true }],

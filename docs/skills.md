@@ -29,12 +29,15 @@ The total upload size limit is 8 MB.
 ## SKILL.md
 
 `SKILL.md` must start with YAML frontmatter. `name` and `description` are
-required.
+required. The optional standard `compatibility` field describes concrete host,
+system-package, network, or runtime requirements and is limited to 500
+characters.
 
 ```markdown
 ---
 name: code-review-assistant
 description: Reviews code changes for correctness, security, and maintainability.
+compatibility: Requires git and access to the source repository.
 ---
 
 # Code Review Assistant
@@ -134,9 +137,15 @@ Response:
   "type": "skill",
   "updated_at": "2026-07-12T00:00:00.000Z",
   "name": "code-review-assistant",
-  "description": "Reviews code changes."
+  "description": "Reviews code changes.",
+  "compatibility": "Requires git and access to the source repository."
 }
 ```
+
+The API and Console expose `compatibility` before an operator assigns the Skill
+to an agent. SandBase Harness treats this field as untrusted descriptive text;
+it does not install packages, grant permissions, or enable network access from
+its contents.
 
 ## List And Retrieve Skills
 

@@ -44,6 +44,7 @@ function builtinSkill(input: {
     name: input.id,
     display_title: input.id,
     description: input.description,
+    compatibility: null,
     instructions: '',
     frontmatter: {},
     file: '',

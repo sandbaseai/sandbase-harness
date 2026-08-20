@@ -1253,6 +1253,7 @@ describe('Managed Agents API', () => {
       const skillContent = `---
 name: contract-skill
 description: Exercises the standard skill API.
+compatibility: Requires network access and Python 3.9+
 ---
 
 # Contract Skill
@@ -1273,6 +1274,7 @@ Use this in API tests.
       expect(create.body.type).toBe('skill');
       expect(create.body.source).toBe('custom');
       expect(create.body.display_title).toBe('Contract Skill');
+      expect(create.body.compatibility).toBe('Requires network access and Python 3.9+');
       expect(create.body.latest_version).toBeTruthy();
 
       const skillId = create.body.id;
@@ -1292,6 +1294,7 @@ Use this in API tests.
       expect(get.body.id).toBe(skillId);
       expect(get.body.name).toBe('contract-skill');
       expect(get.body.description).toBe('Exercises the standard skill API.');
+      expect(get.body.compatibility).toBe('Requires network access and Python 3.9+');
 
       const customList = await getJson('/v1/skills?source=custom');
       expect(customList.body.data.some((item: any) => item.id === skillId)).toBe(true);
