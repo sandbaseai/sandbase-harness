@@ -152,6 +152,9 @@ export function createServer(deps: ServerDeps) {
 
   // Runtime extension endpoints
   app.route('/v1/x', extendedRoutes(deps));
+  // Operations are part of the documented public API. Keep the legacy /v1/x
+  // mount for compatibility with clients that adopted the preview paths.
+  app.route('/v1', operationsRoutes(deps));
   app.route('/v1/x', operationsRoutes(deps));
 
   // Self-hosted sandbox worker endpoints (R9.14)

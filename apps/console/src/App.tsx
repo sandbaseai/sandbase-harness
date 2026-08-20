@@ -1,69 +1,13 @@
-import {
-  ChevronDown,
-  Database,
-  FileText,
-  Info,
-  LayoutDashboard,
-  Lock,
-  MessageSquare,
-  Monitor,
-  Plus,
-  Server,
-  Settings,
-  Zap,
-} from 'lucide-react';
+import { ChevronDown, Info, Plus } from 'lucide-react';
 import { Component, type ErrorInfo, type ReactNode, useEffect, useState } from 'react';
-import { EmptyState, LoadingState } from './components/Common';
+import { LoadingState } from './components/Common';
+import { ConsoleRouteView, NAV_GROUPS, SETTINGS_VIEW_IDS } from './components/ConsoleRoutes';
 import { AgentEditModal, AgentModal } from './components/modals/AgentModals';
 import { SessionModal } from './components/modals/SessionModals';
 import { AddCredentialModal, AddMemoryModal, ResourceModal } from './components/modals/ResourceModals';
-import { Agents, AgentDetail } from './components/pages/AgentPages';
-import { Sessions, SessionDetail } from './components/pages/SessionPages';
-import { Files, Skills } from './components/pages/BuildPages';
-import { Environments, EnvironmentDetail, environmentKind } from './components/pages/EnvironmentPages';
-import { CredentialVaults, CredentialVaultDetail } from './components/pages/CredentialVaultPages';
-import { MemoryStores, MemoryStoreDetail } from './components/pages/MemoryStorePages';
-import { SettingsView } from './components/pages/settings/SettingsView';
-import { SETTINGS_VIEW_IDS } from './components/pages/settings/navigation';
 import { useHashRoute } from './hooks/useHashRoute';
 import { useConsoleData } from './hooks/useConsoleData';
-import type {
-  Agent,
-  AgentTab,
-  ConsoleData,
-  Environment,
-  MemoryStore,
-  Session,
-  Template,
-  Vault,
-  ViewId,
-} from './types';
-
-const NAV_GROUPS: Array<{ label: string; items: Array<{ id: ViewId; label: string; icon: typeof LayoutDashboard }> }> = [
-  {
-    label: 'Build',
-    items: [
-      { id: 'files', label: 'Files', icon: FileText },
-      { id: 'skills', label: 'Skills', icon: Zap },
-    ],
-  },
-  {
-    label: 'Default',
-    items: [
-      { id: 'agents', label: 'Agents', icon: Monitor },
-      { id: 'sessions', label: 'Sessions', icon: MessageSquare },
-      { id: 'environments', label: 'Environments', icon: Server },
-      { id: 'credential-vaults', label: 'Credential Vaults', icon: Lock },
-      { id: 'memory-stores', label: 'Memory Stores', icon: Database },
-    ],
-  },
-  {
-    label: 'System',
-    items: [
-      { id: 'settings', label: 'Settings', icon: Settings },
-    ],
-  },
-];
+import type { Agent, AgentTab, Template } from './types';
 
 
 export function App() {
@@ -160,7 +104,7 @@ export function App() {
         {error ? <div className="banner error">{error}</div> : null}
         {loading ? <LoadingState /> : (
           <ConsoleErrorBoundary resetKey={`${view}:${selectedAgentId ?? ''}:${selectedSessionId ?? ''}:${selectedEnvironmentId ?? ''}:${selectedVaultId ?? ''}:${selectedMemoryStoreId ?? ''}`}>
-            <View
+            <ConsoleRouteView
               view={view}
               data={data}
               setView={setRoute}
@@ -310,138 +254,5 @@ class ConsoleErrorBoundary extends Component<
         <span>{this.state.error.message}</span>
       </div>
     );
-  }
-}
-
-function View(props: {
-  view: ViewId;
-  data: ConsoleData;
-  setView: (view: ViewId) => void;
-  selectedAgentId: string | null;
-  selectedSessionId: string | null;
-  selectedEnvironmentId: string | null;
-  selectedVaultId: string | null;
-  selectedMemoryStoreId: string | null;
-  agentTab: AgentTab;
-  onAgentTab: (tab: AgentTab) => void;
-  onOpenAgent: (agent: Agent) => void;
-  onOpenSession: (session: Session) => void;
-  onOpenEnvironment: (environment: Environment) => void;
-  onOpenVault: (vault: Vault) => void;
-  onOpenMemoryStore: (store: MemoryStore) => void;
-  onEditAgent: (agent: Agent) => void;
-  onNewAgent: (template: Template | 'blank') => void;
-  onNewSession: (agentId?: string) => void;
-  onNewCredential: (vaultId: string) => void;
-  onNewMemory: (storeId: string) => void;
-  onNewResource: (kind: 'environment' | 'credential_vault' | 'memory_store') => void;
-  onRefresh: () => void;
-}) {
-  switch (props.view) {
-    case 'agents':
-      return <Agents data={props.data} onNewAgent={() => props.onNewAgent('blank')} onOpenAgent={props.onOpenAgent} />;
-    case 'agent-detail': {
-      const agent = props.data.agents.find((item) => item.id === props.selectedAgentId) ?? props.data.agents[0];
-      return agent ? (
-        <AgentDetail
-          agent={agent}
-          data={props.data}
-          tab={props.agentTab}
-          onTab={props.onAgentTab}
-          onBack={() => props.setView('agents')}
-          onEdit={() => props.onEditAgent(agent)}
-          onNewSession={() => props.onNewSession(agent.id)}
-          onOpenSession={props.onOpenSession}
-          onRefresh={props.onRefresh}
-        />
-      ) : <EmptyState icon={<Monitor size={22} />} title="No agent selected" />;
-    }
-    case 'sessions':
-      return <Sessions data={props.data} onNewSession={() => props.onNewSession()} onOpenSession={props.onOpenSession} />;
-    case 'session-detail': {
-      const session = props.data.sessions.find((item) => item.id === props.selectedSessionId);
-      return session ? (
-        <SessionDetail
-          session={session}
-          data={props.data}
-          onBack={() => props.setView('sessions')}
-          onRefresh={props.onRefresh}
-          onOpenAgent={(agent) => props.onOpenAgent(agent)}
-        />
-      ) : <EmptyState icon={<MessageSquare size={22} />} title="No session selected" />;
-    }
-    case 'environments':
-      return <Environments data={props.data} onNew={() => props.onNewResource('environment')} onOpenEnvironment={props.onOpenEnvironment} />;
-    case 'environment-detail': {
-      const environment = props.data.environments.find((item) => item.id === props.selectedEnvironmentId);
-      return environment ? (
-        <EnvironmentDetail
-          environment={environment}
-          data={props.data}
-          onBack={() => props.setView('environments')}
-          onRefresh={props.onRefresh}
-        />
-      ) : <EmptyState icon={<Server size={22} />} title="No environment selected" />;
-    }
-    case 'credential-vaults':
-      return <CredentialVaults data={props.data} onNew={() => props.onNewResource('credential_vault')} onOpenVault={props.onOpenVault} />;
-    case 'credential-vault-detail': {
-      const vault = props.data.vaults.find((item) => item.id === props.selectedVaultId);
-      return vault ? (
-        <CredentialVaultDetail
-          vault={vault}
-          onBack={() => props.setView('credential-vaults')}
-          onRefresh={props.onRefresh}
-          onNewCredential={() => props.onNewCredential(vault.id)}
-        />
-      ) : <EmptyState icon={<Lock size={22} />} title="No credential vault selected" />;
-    }
-    case 'memory-stores':
-      return <MemoryStores data={props.data} onNew={() => props.onNewResource('memory_store')} onOpenMemoryStore={props.onOpenMemoryStore} />;
-    case 'memory-store-detail': {
-      const store = props.data.memoryStores.find((item) => item.id === props.selectedMemoryStoreId);
-      return store ? (
-        <MemoryStoreDetail
-          store={store}
-          onBack={() => props.setView('memory-stores')}
-          onRefresh={props.onRefresh}
-          onNewMemory={() => props.onNewMemory(store.id)}
-        />
-      ) : <EmptyState icon={<Database size={22} />} title="No memory store selected" />;
-    }
-    case 'skills':
-      return <Skills data={props.data} onRefresh={props.onRefresh} />;
-    case 'files':
-      return <Files data={props.data} onRefresh={props.onRefresh} />;
-    case 'workspace':
-      return <SettingsView data={props.data} section="workspace" onRefresh={props.onRefresh} setView={props.setView} />;
-    case 'runtime':
-      return <SettingsView data={props.data} section="advanced" onRefresh={props.onRefresh} setView={props.setView} />;
-    case 'advanced':
-      return <SettingsView data={props.data} section="advanced" onRefresh={props.onRefresh} setView={props.setView} />;
-    case 'models':
-      return <SettingsView data={props.data} section="models" onRefresh={props.onRefresh} setView={props.setView} />;
-    case 'loop-engine':
-      return <SettingsView data={props.data} section="loop-engine" onRefresh={props.onRefresh} setView={props.setView} />;
-    case 'storage':
-      return <SettingsView data={props.data} section="storage" onRefresh={props.onRefresh} setView={props.setView} />;
-    case 'memory':
-      return <SettingsView data={props.data} section="memory" onRefresh={props.onRefresh} setView={props.setView} />;
-    case 'sandbox':
-      return <SettingsView data={props.data} section="sandbox" onRefresh={props.onRefresh} setView={props.setView} />;
-    case 'api-keys':
-      return <SettingsView data={props.data} section="api-keys" onRefresh={props.onRefresh} setView={props.setView} />;
-    case 'api-reference':
-      return <SettingsView data={props.data} section="api-reference" onRefresh={props.onRefresh} setView={props.setView} />;
-    case 'logs':
-      return <SettingsView data={props.data} section="logs" onRefresh={props.onRefresh} setView={props.setView} />;
-    case 'monitoring':
-      return <SettingsView data={props.data} section="monitoring" onRefresh={props.onRefresh} setView={props.setView} />;
-    case 'observability':
-      return <SettingsView data={props.data} section="monitoring" onRefresh={props.onRefresh} setView={props.setView} />;
-    case 'settings':
-      return <SettingsView data={props.data} section="general" onRefresh={props.onRefresh} setView={props.setView} />;
-    default:
-      return <Agents data={props.data} onNewAgent={() => props.onNewAgent('blank')} onOpenAgent={props.onOpenAgent} />;
   }
 }

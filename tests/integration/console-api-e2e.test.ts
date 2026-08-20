@@ -169,14 +169,14 @@ describe('Console/API no-port E2E flow', () => {
     });
     expect(message.status).toBe(200);
 
-    const webhook = await postJson('/v1/x/webhooks', {
+    const webhook = await postJson('/v1/webhooks', {
       name: 'E2E webhook',
       url: 'https://example.invalid/webhook',
       events: ['session.completed'],
     });
     expect(webhook.status).toBe(201);
 
-    const schedule = await postJson('/v1/x/scheduled-deployments', {
+    const schedule = await postJson('/v1/scheduled-deployments', {
       name: 'E2E schedule',
       agent_id: agent.body.id,
       environment_id: environment.body.id,
@@ -185,7 +185,7 @@ describe('Console/API no-port E2E flow', () => {
     });
     expect(schedule.status).toBe(201);
 
-    const outcome = await postJson('/v1/x/outcomes', {
+    const outcome = await postJson('/v1/outcomes', {
       name: 'E2E outcome',
       objective: 'The session should answer.',
       criteria: ['Agent replied'],
@@ -231,9 +231,9 @@ describe('Console/API no-port E2E flow', () => {
       page('/v1/memory_stores'),
       page('/v1/files'),
       page('/v1/skills'),
-      page('/v1/x/webhooks'),
-      page('/v1/x/scheduled-deployments'),
-      page('/v1/x/outcomes'),
+      page('/v1/webhooks'),
+      page('/v1/scheduled-deployments'),
+      page('/v1/outcomes'),
       json('/v1/x/workspace'),
       json('/v1/x/settings'),
       json('/v1/x/runtime'),

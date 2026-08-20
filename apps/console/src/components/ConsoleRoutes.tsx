@@ -20,7 +20,7 @@ import { EnvironmentDetail, Environments } from './pages/EnvironmentPages';
 import { MemoryStoreDetail, MemoryStores } from './pages/MemoryPages';
 import { OutcomesPage, ScheduledDeploymentsPage, WebhooksPage } from './pages/OperationsPages';
 import { SessionDetail, Sessions } from './pages/SessionPages';
-import { RuntimeView as RuntimePageView, SettingsView as SettingsPageView } from './pages/settings/SettingsPage';
+import { SettingsView } from './pages/settings/SettingsView';
 import type { Agent, AgentTab, ConsoleData, Environment, MemoryStore, Session, Template, Vault, ViewId } from '../types';
 
 export const NAV_GROUPS: Array<{ label: string; items: Array<{ id: ViewId; label: string; icon: typeof LayoutDashboard }> }> = [
@@ -181,33 +181,33 @@ export function ConsoleRouteView(props: {
     case 'outcomes':
       return <OutcomesPage data={props.data} onRefresh={props.onRefresh} />;
     case 'workspace':
-      return <SettingsPageView data={props.data} section="workspace" onRefresh={props.onRefresh} setView={props.setView} />;
+      return <SettingsView data={props.data} section="workspace" onRefresh={props.onRefresh} setView={props.setView} />;
     case 'runtime':
-      return <RuntimePageView data={props.data} />;
+      return <SettingsView data={props.data} section="advanced" onRefresh={props.onRefresh} setView={props.setView} />;
     case 'advanced':
-      return <SettingsPageView data={props.data} section="advanced" onRefresh={props.onRefresh} setView={props.setView} />;
+      return <SettingsView data={props.data} section="advanced" onRefresh={props.onRefresh} setView={props.setView} />;
     case 'models':
-      return <SettingsPageView data={props.data} section="models" onRefresh={props.onRefresh} setView={props.setView} />;
+      return <SettingsView data={props.data} section="models" onRefresh={props.onRefresh} setView={props.setView} />;
     case 'loop-engine':
-      return <SettingsPageView data={props.data} section="loop-engine" onRefresh={props.onRefresh} setView={props.setView} />;
+      return <SettingsView data={props.data} section="loop-engine" onRefresh={props.onRefresh} setView={props.setView} />;
     case 'storage':
-      return <SettingsPageView data={props.data} section="storage" onRefresh={props.onRefresh} setView={props.setView} />;
+      return <SettingsView data={props.data} section="storage" onRefresh={props.onRefresh} setView={props.setView} />;
     case 'memory':
-      return <SettingsPageView data={props.data} section="memory" onRefresh={props.onRefresh} setView={props.setView} />;
+      return <SettingsView data={props.data} section="memory" onRefresh={props.onRefresh} setView={props.setView} />;
     case 'sandbox':
-      return <SettingsPageView data={props.data} section="sandbox" onRefresh={props.onRefresh} setView={props.setView} />;
+      return <SettingsView data={props.data} section="sandbox" onRefresh={props.onRefresh} setView={props.setView} />;
     case 'api-keys':
-      return <SettingsPageView data={props.data} section="api-keys" onRefresh={props.onRefresh} setView={props.setView} />;
+      return <SettingsView data={props.data} section="api-keys" onRefresh={props.onRefresh} setView={props.setView} />;
     case 'api-reference':
-      return <SettingsPageView data={props.data} section="api-reference" onRefresh={props.onRefresh} setView={props.setView} />;
+      return <SettingsView data={props.data} section="api-reference" onRefresh={props.onRefresh} setView={props.setView} />;
     case 'logs':
-      return <SettingsPageView data={props.data} section="logs" onRefresh={props.onRefresh} setView={props.setView} />;
+      return <SettingsView data={props.data} section="logs" onRefresh={props.onRefresh} setView={props.setView} />;
     case 'monitoring':
-      return <SettingsPageView data={props.data} section="monitoring" onRefresh={props.onRefresh} setView={props.setView} />;
+      return <SettingsView data={props.data} section="monitoring" onRefresh={props.onRefresh} setView={props.setView} />;
     case 'observability':
-      return <SettingsPageView data={props.data} section="monitoring" onRefresh={props.onRefresh} setView={props.setView} />;
+      return <SettingsView data={props.data} section="monitoring" onRefresh={props.onRefresh} setView={props.setView} />;
     case 'settings':
-      return <SettingsPageView data={props.data} section="general" onRefresh={props.onRefresh} setView={props.setView} />;
+      return <SettingsView data={props.data} section="general" onRefresh={props.onRefresh} setView={props.setView} />;
     default:
       return <Agents data={props.data} onNewAgent={() => props.onNewAgent('blank')} onOpenAgent={props.onOpenAgent} />;
   }
