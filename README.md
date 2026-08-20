@@ -38,6 +38,9 @@ Choose SandBase Harness when you need more than a model loop:
 | Operate any model | OpenAI, Anthropic, MiniMax, and OpenAI-compatible providers, including DeepSeek V4 |
 | Keep infrastructure yours | Local-first SQLite and file storage with no required hosted control plane |
 
+If this runtime solves a real agent-infrastructure problem for you,
+[star the repository](https://github.com/sandbaseai/sandbase-harness) so other builders can find it.
+
 ## Why
 
 Agent SDKs handle the model loop. Production agents need more: persistent

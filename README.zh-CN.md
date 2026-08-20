@@ -28,6 +28,9 @@ Memory、凭证、审计日志、事件回放和可视化 Console 放在同一�
 SandBase Harness 提供这层运行时基础设施。它不是可视化工作流编辑器，
 也不替代模型 SDK。
 
+如果它解决了你的真实 Agent 基础设施问题，欢迎
+[为仓库点 Star](https://github.com/sandbaseai/sandbase-harness)，帮助更多开发者发现它。
+
 ## 核心能力
 
 - Claude Managed Agents 风格的 /v1 API 和本地 Console
