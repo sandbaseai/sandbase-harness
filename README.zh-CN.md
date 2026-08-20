@@ -10,7 +10,7 @@ Memory、凭证、审计日志、事件回放和可视化 Console 放在同一�
 
 ![SandBase Harness 架构](docs/assets/sandbase-harness-architecture.svg)
 
-> 当前稳定版本：[v0.3.5](https://github.com/sandbaseai/sandbase-harness/releases/tag/v0.3.5)
+> 当前稳定版本：[v0.3.6](https://github.com/sandbaseai/sandbase-harness/releases/tag/v0.3.6)
 
 > 官方 MCP Registry：[io.github.sandbaseai/sandbase-harness](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.sandbaseai%2Fsandbase-harness)（状态：`active`）
 
@@ -65,7 +65,7 @@ npm 上未加 scope 的 managed-agents **不是**本项目。请使用带标签�
 GitHub 源码，不要运行 npx managed-agents 或 npm install managed-agents。
 
 ~~~bash
-git clone --branch v0.3.5 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+git clone --branch v0.3.6 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
 cd sandbase-harness
 npm ci
 npm run build
@@ -83,7 +83,7 @@ node ../sandbase-harness/dist/index.js start
 先构建并暴露本地命令：
 
 ~~~bash
-git clone --branch v0.3.5 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+git clone --branch v0.3.6 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
 cd sandbase-harness
 npm ci
 npm run build:runtime

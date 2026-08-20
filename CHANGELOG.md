@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.6 - 2026-08-20
+
+### Fixes
+
+- Restores the documented `/v1` operations API for webhooks, scheduled
+  deployments, and outcomes while retaining `/v1/x` compatibility aliases.
+- Exposes all three operations screens in the primary Console navigation and
+  routes `#scheduled-deployments` to its intended page.
+- Wires the complete Memory Stores implementation to prevent list and detail
+  views from crashing on missing runtime bindings.
+
 ## 0.3.5 - 2026-08-20
 
 ### Highlights
