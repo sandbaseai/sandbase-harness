@@ -4,8 +4,10 @@
       config:
         serverName: sandbase
         transport: stdio
-        command: managed-agents-mcp
+        command: node
+        args:
+          - !!js dshHomePath('profiles/web/node_modules/managed-agents/dist/mcp/index.js')
         env:
-          MANAGED_AGENTS_URL: !!js process.env.MANAGED_AGENTS_URL
-          MANAGED_AGENTS_API_KEY: !!js process.env.MANAGED_AGENTS_API_KEY
+          MANAGED_AGENTS_URL: !!js process.env.MANAGED_AGENTS_URL ?? 'http://127.0.0.1:3000'
+          MANAGED_AGENTS_API_KEY: !!js process.env.MANAGED_AGENTS_API_KEY ?? ''
         failOnStartupError: true

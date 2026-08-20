@@ -19,7 +19,7 @@ the tagged GitHub source release and do not run `npx managed-agents` or
 `npm install managed-agents`.
 
 ```bash
-git clone --branch v0.3.6 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+git clone --branch v0.3.7 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
 cd sandbase-harness
 npm ci
 npm run build

@@ -8,28 +8,26 @@ stdio and exposes agents, sessions, streamed turns, artifacts, and cancellation.
 
 - Node.js 22+
 - DeepSeek Harness with `@deepseek-ai/dsh-mcp-client` and stdio MCP support
-- SandBase Harness v0.3.6 or a source build from this repository
+- SandBase Harness v0.3.7 or a source build from this repository
 
 Last verified on 2026-08-14 against DeepSeek Harness commit
 [`47f9438`](https://github.com/deepseek-ai/deepseek-harness/commit/47f943859bef60e4160492346772ded9b24f765a): the Cordis layer composed cleanly,
 DSH launched the stdio child, and the MCP handshake completed.
 
-Build the tagged source release and expose its two local executables first:
+Build the tagged source release and start the runtime from that checkout:
 
 ```bash
-git clone --branch v0.3.6 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+git clone --branch v0.3.7 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
 cd sandbase-harness
 npm ci
 npm run build:runtime
-npm link
 mkdir ../my-agents && cd ../my-agents
-managed-agents init
-managed-agents start
+node ../sandbase-harness/dist/index.js init
+node ../sandbase-harness/dist/index.js start
 ```
 
 The unscoped `managed-agents` package on npm is not SandBase Harness. Do not
-use `npx managed-agents`; `npm link` above links only the verified source
-checkout.
+use `npx managed-agents` or install that registry package.
 
 In another terminal, install this bundle into the Web profile and start DSH:
 
@@ -51,7 +49,9 @@ else
     "$MANAGED_AGENTS_URL/v1/agents"
 fi
 
-dsh plugin --profile web add managed-agents
+# Run from the sibling my-agents workspace created above. This installs the
+# fixed source checkout directly instead of resolving the npm package name.
+dsh plugin --profile web add -w ../sandbase-harness
 dsh web
 ```
 
@@ -76,9 +76,8 @@ The command copies the complete open-source Skill to
 page-reading tools without a SandBase account; optional provider-backed
 workflows remain opt-in.
 
-For source development, load the included patch directly after building and
-put `dist/mcp` on `PATH`, or replace `command` with the absolute path to the
-built executable in a private test overlay.
+The bundle resolves its MCP entry from the installed Web profile, so a clean
+profile needs neither a global `npm link` nor a custom `PATH` entry.
 
 DSH receives these tools under its stable MCP namespace:
 
@@ -112,8 +111,8 @@ stronger isolation boundary.
 
 ## Troubleshooting
 
-- `MCP startup failed`: build or install `managed-agents` and confirm
-  `managed-agents-mcp` is on `PATH`.
+- `MCP startup failed`: confirm the source checkout was built before running
+  `dsh plugin --profile web add -w ../sandbase-harness`.
 - `fetch failed`: start the runtime and check `MANAGED_AGENTS_URL`.
 - `401` or `403`: set `MANAGED_AGENTS_API_KEY` to a key accepted by the
   runtime.

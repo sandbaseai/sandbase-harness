@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.7 - 2026-08-20
+
+### Fixes
+
+- Makes the DeepSeek Harness bundle boot in a clean Web profile when
+  `MANAGED_AGENTS_API_KEY` is unset by keeping all MCP `env` values string-typed.
+- Resolves the MCP entry from the installed profile instead of requiring a
+  globally linked `managed-agents-mcp` executable on `PATH`.
+- Replaces the ambiguous npm-name installation command with a pinned local
+  source install, preventing resolution of the unrelated unscoped package.
+
 ## 0.3.6 - 2026-08-20
 
 ### Fixes

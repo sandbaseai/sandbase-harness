@@ -10,7 +10,7 @@ Memory、凭证、审计日志、事件回放和可视化 Console 放在同一�
 
 ![SandBase Harness 架构](docs/assets/sandbase-harness-architecture.svg)
 
-> 当前稳定版本：[v0.3.6](https://github.com/sandbaseai/sandbase-harness/releases/tag/v0.3.6)
+> 当前稳定版本：[v0.3.7](https://github.com/sandbaseai/sandbase-harness/releases/tag/v0.3.7)
 
 > 官方 MCP Registry：[io.github.sandbaseai/sandbase-harness](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.sandbaseai%2Fsandbase-harness)（状态：`active`）
 
@@ -65,7 +65,7 @@ npm 上未加 scope 的 managed-agents **不是**本项目。请使用带标签�
 GitHub 源码，不要运行 npx managed-agents 或 npm install managed-agents。
 
 ~~~bash
-git clone --branch v0.3.6 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+git clone --branch v0.3.7 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
 cd sandbase-harness
 npm ci
 npm run build
@@ -80,18 +80,17 @@ node ../sandbase-harness/dist/index.js start
 
 ## 接入 DeepSeek Harness
 
-先构建并暴露本地命令：
+先构建固定版本源码并启动 Runtime：
 
 ~~~bash
-git clone --branch v0.3.6 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+git clone --branch v0.3.7 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
 cd sandbase-harness
 npm ci
 npm run build:runtime
-npm link
 
 mkdir ../my-agents && cd ../my-agents
-managed-agents init
-managed-agents start
+node ../sandbase-harness/dist/index.js init
+node ../sandbase-harness/dist/index.js start
 ~~~
 
 另开终端，把插件安装到 DSH Web Profile：
@@ -99,7 +98,8 @@ managed-agents start
 ~~~bash
 export MANAGED_AGENTS_URL=http://127.0.0.1:3000
 # 仅在 Runtime 开启认证时设置 MANAGED_AGENTS_API_KEY
-dsh plugin --profile web add managed-agents
+# 从上面创建的 my-agents 目录运行，直接安装固定源码，不解析 npm 同名包
+dsh plugin --profile web add -w ../sandbase-harness
 dsh web
 ~~~
 
