@@ -13,7 +13,7 @@
         "MANAGED_AGENTS_URL",
         "-e",
         "MANAGED_AGENTS_API_KEY",
-        "ghcr.io/sandbaseai/sandbase-harness-mcp:0.3.4"
+        "ghcr.io/sandbaseai/sandbase-harness-mcp:0.3.5"
       ]
     }
   }

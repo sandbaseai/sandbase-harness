@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.5 - 2026-08-20
+
+### Highlights
+
+- **Agent Skills compatibility metadata**: validates and preserves the standard
+  optional `compatibility` field (1–500 characters), exposes it through the API,
+  and renders it safely in Console search and detail views.
+- **Instant Codespaces evaluation**: adds a development-container configuration
+  and documented one-click path to build and open the local Console without
+  preparing a host Node.js environment.
+- **Verified DSH onboarding**: adds runtime/auth preflight checks and links the
+  bilingual DeepSeek Harness developer walkthrough and operator tools.
+- **Release-aligned Agent Plugin**: pins the portable MCP plugin to the v0.3.5
+  multi-architecture bridge image produced from this tag.
+
 ## 0.3.4 - 2026-08-19
 
 ### Highlights
