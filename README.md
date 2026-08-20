@@ -97,6 +97,10 @@ native `mcp__sandbase__*` tools. See
 [`examples/deepseek-harness`](examples/deepseek-harness/README.md) for the full
 tool list and authenticated-runtime configuration.
 
+For a walkthrough that starts with DSH and adds this runtime as a real
+third-party plugin, read the
+[DeepSeek Harness developer guide](https://blog.sandbase.ai/deepseek-harness-developer-preview-2026/#add-a-real-third-party-runtime-plugin).
+
 Pair the plugin with SandBase Skills to give the same DSH project a portable,
 source-verifiable research workflow:
 

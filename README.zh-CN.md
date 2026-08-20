@@ -99,6 +99,9 @@ DSH 随后可以通过原生 MCP Namespace：
 完整工具列表、兼容性证据、权限边界和卸载方法见
 [DeepSeek Harness 集成指南](./examples/deepseek-harness/README.md)。
 
+如果希望从 DSH 开始，按步骤加入这个第三方 Runtime 插件，请阅读
+[DeepSeek Harness 开发者指南](https://blog.sandbase.ai/zh-CN/deepseek-harness-developer-preview-2026/#接入一个真实的第三方-runtime-插件)。
+
 官方社区展示：
 [DeepSeek Harness Discussion #1918](https://github.com/deepseek-ai/deepseek-harness/discussions/1918)。
 
