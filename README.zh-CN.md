@@ -33,6 +33,20 @@ SandBase Harness 提供这层运行时基础设施。它不是可视化工作流
 如果它解决了你的真实 Agent 基础设施问题，欢迎
 [为仓库点 Star](https://github.com/sandbaseai/sandbase-harness)，帮助更多开发者发现它。
 
+### 在 Codespaces 中试用
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/sandbaseai/sandbase-harness?quickstart=1)
+
+仓库内置的开发容器会自动安装依赖并构建运行时。终端准备完成后，在转发端口上启动服务：
+
+```bash
+node dist/index.js start --host 0.0.0.0
+```
+
+打开转发的 **SandBase Harness Console** 端口，然后在 **Settings > Models**
+中配置模型。GitHub 可能会对 Codespaces 用量计费；下方的本地快速开始仍然免费，
+并会把全部运行时数据保存在你的机器上。
+
 ## 核心能力
 
 - Claude Managed Agents 风格的 /v1 API 和本地 Console

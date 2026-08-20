@@ -41,6 +41,21 @@ Choose SandBase Harness when you need more than a model loop:
 If this runtime solves a real agent-infrastructure problem for you,
 [star the repository](https://github.com/sandbaseai/sandbase-harness) so other builders can find it.
 
+### Try it in Codespaces
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/sandbaseai/sandbase-harness?quickstart=1)
+
+The included development container installs dependencies and builds the runtime.
+When the terminal is ready, start the server on the forwarded port:
+
+```bash
+node dist/index.js start --host 0.0.0.0
+```
+
+Open the forwarded **SandBase Harness Console** port, then configure a model in
+**Settings > Models**. Codespaces usage may be billed by GitHub; the local
+quick start below remains free and keeps all runtime data on your machine.
+
 ## Why
 
 Agent SDKs handle the model loop. Production agents need more: persistent

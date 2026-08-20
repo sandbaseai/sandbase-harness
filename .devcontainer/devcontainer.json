@@ -1,0 +1,12 @@
+{
+  "name": "SandBase Harness",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm",
+  "postCreateCommand": "npm ci && npm run build",
+  "forwardPorts": [3000],
+  "portsAttributes": {
+    "3000": {
+      "label": "SandBase Harness Console",
+      "onAutoForward": "notify"
+    }
+  }
+}
