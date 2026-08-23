@@ -17,6 +17,10 @@ machine or in your own infrastructure.
 > Looking for a lightweight bridge instead of a full runtime? [SandBase CLI](https://github.com/sandbaseai/cli)
 > connects 25 AI client targets to 2,000+ models through a local stdio MCP bridge.
 
+> Need hosted model and media APIs instead? SandBase provides one interface for
+> [LLM, image, and video generation APIs](https://blog.sandbase.ai/unified-ai-api-llm-image-video-2026/),
+> with the [API quickstart](https://www.sandbase.ai/docs/getting-started/) covering keys and first calls.
+
 ```bash
 git clone --branch v0.3.7 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
 cd sandbase-harness
