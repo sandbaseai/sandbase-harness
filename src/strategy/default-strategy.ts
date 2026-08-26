@@ -15,10 +15,12 @@
  */
 
 import { jsonSchema, streamText } from 'ai';
+import { createAiSdkExecutionLock, type JsonSchemaLike } from 'prefix-safe-json';
 import type { LanguageModelV1 } from 'ai';
 import type { AgentStrategy, StrategyContext } from '@/types/strategy.js';
 import type { SessionEvent } from '@/types/session.js';
 import type { ContentBlock } from '@/types/cma-protocol.js';
+import { createAiSdkV4ExecutionGuard } from './ai-sdk-v4-execution-guard.js';
 
 /** Max characters retained per tool result (OMA parity). */
 const MAX_TOOL_RESULT_CHARS = 50_000;
@@ -58,14 +60,33 @@ export class DefaultStrategy implements AgentStrategy {
     let totalSteps = 0;
     let totalTokensIn = 0;
     let totalTokensOut = 0;
+    const confirmTools = new Set(config.confirmTools ?? []);
+    const confirmableToolCallIds = new Set<string>();
+    const pendingConfirmationCalls: Array<{
+      toolCallId: string;
+      toolName: string;
+      tokensIn: number;
+      tokensOut: number;
+    }> = [];
     const startTime = Date.now();
 
     try {
       // Build Vercel AI SDK tool definitions from our CoreTool map
+      const confirmationToolDefinitions = Object.fromEntries(
+        Object.entries(tools).filter(([name]) => confirmTools.has(name)),
+      );
+      const lockedConfirmationTools = createAiSdkExecutionLock(confirmationToolDefinitions);
       const aiTools: Record<string, any> = {};
       for (const [name, tool] of Object.entries(tools)) {
-        aiTools[name] = toAiTool(tool);
+        aiTools[name] = toAiTool(lockedConfirmationTools[name] ?? tool);
       }
+      const guard = createAiSdkV4ExecutionGuard({
+        schemas: Object.fromEntries(
+          Object.entries(confirmationToolDefinitions)
+            .filter(([, tool]) => tool?.parameters && typeof tool.parameters === 'object')
+            .map(([name, tool]) => [name, tool.parameters as JsonSchemaLike]),
+        ),
+      });
 
       // Convert our messages to Vercel AI SDK format
       const aiMessages = messages.map((m) => ({
@@ -81,6 +102,7 @@ export class DefaultStrategy implements AgentStrategy {
         maxSteps,
         temperature: config.temperature,
         maxTokens: config.maxTokens,
+        toolCallStreaming: true,
         abortSignal,
         onStepFinish: async (step) => {
           totalSteps++;
@@ -123,7 +145,19 @@ export class DefaultStrategy implements AgentStrategy {
 
           // Emit events for tool calls (MCP tools get the mcp_* event type)
           if (step.toolCalls && step.toolCalls.length > 0) {
+            const resultIds = new Set((step.toolResults ?? []).map((result) => result.toolCallId));
             for (const toolCall of step.toolCalls) {
+              const awaitsConfirmation = confirmTools.has(toolCall.toolName) && !resultIds.has(toolCall.toolCallId);
+              if (awaitsConfirmation) {
+                pendingConfirmationCalls.push({
+                  toolCallId: toolCall.toolCallId,
+                  toolName: toolCall.toolName,
+                  tokensIn,
+                  tokensOut,
+                });
+                continue;
+              }
+
               const isMcp = toolCall.toolName.startsWith('mcp_');
               const toolUseEvent = eventLog.append(session.id, {
                 type: isMcp ? 'agent.mcp_tool_use' : 'agent.tool_use',
@@ -184,6 +218,7 @@ export class DefaultStrategy implements AgentStrategy {
       let messageId = '';
       let streamError: unknown;
       for await (const part of result.fullStream) {
+        guard.push(part);
         if (part.type === 'text-delta') {
           if (!streaming) {
             streaming = true;
@@ -215,6 +250,32 @@ export class DefaultStrategy implements AgentStrategy {
         throw streamError instanceof Error ? streamError : new Error(String(streamError));
       }
 
+      const guarded = guard.finish();
+      for (const pendingCall of pendingConfirmationCalls) {
+        const matches = guarded.decisions.filter(
+          (decision) => decision.toolCallId === pendingCall.toolCallId && decision.name === pendingCall.toolName,
+        );
+        if (matches.length !== 1) continue;
+
+        const authority = guard.takeDecision(matches[0].internalId);
+        if (!authority) continue;
+
+        confirmableToolCallIds.add(pendingCall.toolCallId);
+        const isMcp = pendingCall.toolName.startsWith('mcp_');
+        const toolUseEvent = eventLog.append(session.id, {
+          type: isMcp ? 'agent.mcp_tool_use' : 'agent.tool_use',
+          content: [{
+            type: 'tool_use',
+            id: pendingCall.toolCallId,
+            name: pendingCall.toolName,
+            input: authority.value as Record<string, unknown>,
+          }] as ContentBlock[],
+          tokensIn: pendingCall.tokensIn,
+          tokensOut: pendingCall.tokensOut,
+        });
+        broadcast(toolUseEvent);
+      }
+
       // Detect tool calls that were emitted but have no result — these are
       // confirm-required tools (built without execute), so the SDK stopped on
       // them. Signal that the session needs user confirmation (requires_action).
@@ -222,8 +283,9 @@ export class DefaultStrategy implements AgentStrategy {
       const toolResults = await result.toolResults;
       const resolvedIds = new Set((toolResults ?? []).map((r: any) => r.toolCallId));
       const pending = (toolCalls ?? []).filter((c: any) => !resolvedIds.has(c.toolCallId));
-      const confirmSet = new Set(config.confirmTools ?? []);
-      const pendingConfirm = pending.filter((c: any) => confirmSet.has(c.toolName));
+      const pendingConfirm = pending.filter(
+        (c: any) => confirmTools.has(c.toolName) && confirmableToolCallIds.has(c.toolCallId),
+      );
 
       if (pendingConfirm.length > 0 && config.onRequiresAction) {
         config.onRequiresAction();
