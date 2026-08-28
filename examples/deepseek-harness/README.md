@@ -52,6 +52,8 @@ fi
 # Run from the sibling my-agents workspace created above. This installs the
 # fixed source checkout directly instead of resolving the npm package name.
 dsh plugin --profile web add -w ../sandbase-harness
+# Git URL fallback. Keep HTTPS; do not convert the spec to SSH.
+# dsh plugin --profile web add git+https://github.com/sandbaseai/sandbase-harness.git
 dsh web
 ```
 
@@ -111,8 +113,12 @@ stronger isolation boundary.
 
 ## Troubleshooting
 
-- `MCP startup failed`: confirm the source checkout was built before running
-  `dsh plugin --profile web add -w ../sandbase-harness`.
+- `MCP startup failed`: confirm `dist/mcp/index.js` exists. A local checkout
+  still needs `npm run build` before `dsh plugin --profile web add -w ../sandbase-harness`.
+  A git-hosted install should build through `prepare` when `dist/` is missing.
+- `git ls-remote git+ssh://...`: keep the original HTTPS spec
+  (`git+https://github.com/sandbaseai/sandbase-harness.git`). Converting it to
+  SSH fails on Windows hosts without GitHub SSH access.
 - `fetch failed`: start the runtime and check `MANAGED_AGENTS_URL`.
 - `401` or `403`: set `MANAGED_AGENTS_API_KEY` to a key accepted by the
   runtime.

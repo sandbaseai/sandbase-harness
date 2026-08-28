@@ -102,6 +102,8 @@ export MANAGED_AGENTS_URL=http://127.0.0.1:3000
 # 仅在 Runtime 开启认证时设置 MANAGED_AGENTS_API_KEY
 # 从上面创建的 my-agents 目录运行，直接安装固定源码，不解析 npm 同名包
 dsh plugin --profile web add -w ../sandbase-harness
+# Git URL 备选。保持 HTTPS，不要改成 SSH。
+# dsh plugin --profile web add git+https://github.com/sandbaseai/sandbase-harness.git
 dsh web
 ~~~
 

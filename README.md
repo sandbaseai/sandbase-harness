@@ -108,13 +108,17 @@ then boot that profile:
 
 ```bash
 export MANAGED_AGENTS_URL=http://127.0.0.1:3000
-# Run from the sibling my-agents workspace created above.
+# Preferred: install a local source checkout after `npm run build`.
 dsh plugin --profile web add -w ../sandbase-harness
+# Git URL fallback. Keep HTTPS; do not convert the spec to SSH.
+# dsh plugin --profile web add git+https://github.com/sandbaseai/sandbase-harness.git
 dsh web
 ```
 
 The profile installs the verified source checkout directly; it does not resolve
-the unrelated unscoped npm package. The patch starts the bundled MCP entry over
+the unrelated unscoped npm package. A git-hosted install runs `prepare` only
+when `dist/` is missing. Keep the HTTPS git spec; converting it to SSH fails on
+Windows hosts without GitHub SSH access. The patch starts the bundled MCP entry over
 stdio. DSH can then list agents,
 create and run sessions, inspect results and artifacts, and stop work through
 native `mcp__sandbase__*` tools. See

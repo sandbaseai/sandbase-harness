@@ -49,6 +49,22 @@ describe('MCP OCI distribution', () => {
     expect(workflow).not.toContain('MCP_GITHUB_TOKEN');
   });
 
+  it('builds missing dist entries during git-hosted installs', () => {
+    const packageManifest = JSON.parse(read('package.json')) as {
+      scripts: Record<string, string>;
+      bin: Record<string, string>;
+    };
+    const prepare = read('scripts/prepare-install.mjs');
+
+    expect(packageManifest.scripts.prepare).toBe('node scripts/prepare-install.mjs');
+    expect(packageManifest.bin['managed-agents']).toBe('dist/index.js');
+    expect(packageManifest.bin['managed-agents-mcp']).toBe('dist/mcp/index.js');
+    expect(prepare).toContain("join(root, 'dist', 'index.js')");
+    expect(prepare).toContain("join(root, 'dist', 'mcp', 'index.js')");
+    expect(prepare).toContain("['run', 'build']");
+    expect(prepare).toContain('process.exit(0)');
+  });
+
   it('keeps DSH MCP environment values valid when optional variables are unset', () => {
     const patch = read('examples/deepseek-harness/cordis.yml');
 
