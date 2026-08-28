@@ -33,6 +33,8 @@ describe('MCP OCI distribution', () => {
     expect(workflow).toContain('actions/attest-build-provenance@v4');
     expect(workflow).not.toContain('npm publish');
     expect(dockerfile).toContain('io.modelcontextprotocol.server.name="io.github.sandbaseai/sandbase-harness"');
+    expect(dockerfile).toContain('RUN npm ci --ignore-scripts');
+    expect(dockerfile).toContain('RUN npm run build:runtime && npm prune --omit=dev');
   });
 
   it('publishes validated metadata through short-lived GitHub OIDC', () => {
