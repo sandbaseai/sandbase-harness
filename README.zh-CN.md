@@ -114,6 +114,19 @@ dsh plugin --profile web add -w ../sandbase-harness
 dsh web
 ~~~
 
+Git 安装需要额外一步 pnpm 构建白名单。第一次 add 会以
+`ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED` 失败，并打印对应的精确 key；把该 key
+加到 profile 的 `pnpm-workspace.yaml` 的 `allowBuilds:` 下，然后重新运行同一条
+add 命令。裸包名无法匹配 git-hosted 解析：
+
+~~~yaml
+allowBuilds:
+  "managed-agents@https://codeload.github.com/sandbaseai/sandbase-harness/tar.gz/<commit>": true
+~~~
+
+第二次运行会通过 `prepare` 构建 `dist/`，创建 `managed-agents` /
+`managed-agents-mcp` 可执行入口，并挂载 Bundle 层。
+
 DSH 随后可以通过原生 MCP Namespace：
 
 - 列出 Agent

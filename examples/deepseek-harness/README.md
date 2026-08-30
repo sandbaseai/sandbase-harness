@@ -115,7 +115,10 @@ stronger isolation boundary.
 
 - `MCP startup failed`: confirm `dist/mcp/index.js` exists. A local checkout
   still needs `npm run build` before `dsh plugin --profile web add -w ../sandbase-harness`.
-  A git-hosted install should build through `prepare` when `dist/` is missing.
+  A git-hosted install builds through `prepare` when `dist/` is missing, but
+  pnpm blocks the first run with `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED` until
+  the exact key it prints is added under `allowBuilds:` in the profile's
+  `pnpm-workspace.yaml`; re-run the add command afterwards.
 - `git ls-remote git+ssh://...`: keep the original HTTPS spec
   (`git+https://github.com/sandbaseai/sandbase-harness.git`). Converting it to
   SSH fails on Windows hosts without GitHub SSH access.

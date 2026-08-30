@@ -146,7 +146,23 @@ dsh web
 The profile installs the verified source checkout directly; it does not resolve
 the unrelated unscoped npm package. A git-hosted install runs `prepare` only
 when `dist/` is missing. Keep the HTTPS git spec; converting it to SSH fails on
-Windows hosts without GitHub SSH access. The patch starts the bundled MCP entry over
+Windows hosts without GitHub SSH access.
+
+A git-hosted install needs one extra step for pnpm's build allowlist. The
+first `dsh plugin --profile web add` fails with
+`ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED` and prints the exact key. Add that key
+under `allowBuilds:` in the profile's `pnpm-workspace.yaml`, then re-run the
+same add command; a plain package name does not match a git-hosted
+resolution:
+
+```yaml
+allowBuilds:
+  "managed-agents@https://codeload.github.com/sandbaseai/sandbase-harness/tar.gz/<commit>": true
+```
+
+The second run builds `dist/` through `prepare`, creates the
+`managed-agents` / `managed-agents-mcp` bins, and joins the bundle layer. The
+patch starts the bundled MCP entry over
 stdio. DSH can then list agents,
 create and run sessions, inspect results and artifacts, and stop work through
 native `mcp__sandbase__*` tools. See

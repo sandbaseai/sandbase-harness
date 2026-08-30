@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### Documentation
+
+- Documents the verified git-hosted DSH install flow: the first add fails with
+  `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED` until the exact key pnpm prints is
+  added under `allowBuilds:` in the profile's `pnpm-workspace.yaml`; the
+  second add runs `prepare`, builds `dist/`, creates both bins, and joins the
+  bundle layer. Verified end to end on Windows with DSH `0.1.1-rc.2`.
+
 ## 0.3.8 - 2026-08-30
 
 ### Fixes
