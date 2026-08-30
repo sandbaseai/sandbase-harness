@@ -35,6 +35,7 @@
     "examples",
     "scripts",
     "README.md",
+    "llms-install.md",
     "CHANGELOG.md",
     "CONTRIBUTING.md",
     "LICENSE"
