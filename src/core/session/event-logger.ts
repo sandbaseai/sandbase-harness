@@ -95,6 +95,21 @@ export class EventLogger {
     const row = stmt.get(sessionId) as { max_seq: number | null } | undefined;
     return row?.max_seq ?? 0;
   }
+
+  /**
+   * Add usage from one model request to the session aggregate.
+   * Callers must invoke this once per model request, not once per event
+   * projection, because several events may describe the same request.
+   */
+  recordUsage(sessionId: string, tokensIn: number, tokensOut: number): void {
+    this.db.prepare(`
+      UPDATE sessions
+      SET usage_tokens_in = COALESCE(usage_tokens_in, 0) + ?,
+          usage_tokens_out = COALESCE(usage_tokens_out, 0) + ?,
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(tokensIn, tokensOut, sessionId);
+  }
 }
 
 // ============================================================

@@ -40,6 +40,10 @@ export class InMemoryEventLog implements EventLogWriter {
     return this.events.length;
   }
 
+  recordUsage(_sessionId: string, _tokensIn: number, _tokensOut: number): void {
+    // Ephemeral delegated sessions have no durable session aggregate.
+  }
+
   getEvents(): SessionEvent[] {
     return this.events;
   }

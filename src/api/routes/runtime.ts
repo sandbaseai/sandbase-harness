@@ -113,7 +113,8 @@ export function runtimeRoutes(deps: ServerDeps) {
         COALESCE(SUM(tokens_in), 0) AS input_tokens,
         COALESCE(SUM(tokens_out), 0) AS output_tokens,
         COALESCE(AVG(NULLIF(duration_ms, 0)), 0) AS average_duration_ms
-       FROM events`,
+       FROM events
+       WHERE type = 'span.model_request_end'`,
     ).get() as { total: number; input_tokens: number; output_tokens: number; average_duration_ms: number };
     const files = deps.db.prepare(
       `SELECT

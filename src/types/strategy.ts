@@ -109,6 +109,8 @@ export interface EventLogWriter {
     delegationDepth?: number;
   }): SessionEvent;
   getLatestSeq(sessionId: string): number;
+  /** Record canonical model usage for the owning session. */
+  recordUsage(sessionId: string, tokensIn: number, tokensOut: number): void;
 }
 
 // ============================================================

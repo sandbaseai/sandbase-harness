@@ -105,6 +105,23 @@ describe('Event Logger', () => {
     });
   });
 
+  describe('recordUsage', () => {
+    it('accumulates canonical model-request usage on the session', () => {
+      logger.recordUsage('sess_test', 120, 30);
+      logger.recordUsage('sess_test', 80, 20);
+
+      const row = db.prepare(
+        'SELECT usage_tokens_in, usage_tokens_out FROM sessions WHERE id = ?',
+      ).get('sess_test') as { usage_tokens_in: number; usage_tokens_out: number };
+
+      expect(row).toEqual({ usage_tokens_in: 200, usage_tokens_out: 50 });
+    });
+
+    it('does not change usage when the session does not exist', () => {
+      expect(() => logger.recordUsage('sess_missing', 10, 5)).not.toThrow();
+    });
+  });
+
   describe('append-only invariant (Property 7)', () => {
     it('event count monotonically increases', () => {
       const counts: number[] = [];

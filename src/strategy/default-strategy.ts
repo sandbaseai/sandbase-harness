@@ -98,6 +98,10 @@ export class DefaultStrategy implements AgentStrategy {
             durationMs: Date.now() - startTime,
           });
           broadcast(spanEvent);
+          // Persist the aggregate once per model request. The same usage is
+          // intentionally copied to projected message/tool events for local
+          // attribution, so metrics must not sum those projections.
+          eventLog.recordUsage(session.id, tokensIn, tokensOut);
 
           // Emit agent.thinking for reasoning output (extended-thinking models)
           const reasoning = (step as { reasoning?: string }).reasoning;
