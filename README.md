@@ -26,7 +26,7 @@ machine or in your own infrastructure.
 > with the [API quickstart](https://www.sandbase.ai/docs/getting-started/) covering keys and first calls.
 
 ```bash
-git clone --branch v0.3.7 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+git clone --branch v0.3.8 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
 cd sandbase-harness
 npm ci
 npm run build
@@ -159,7 +159,7 @@ to identify the first broken runtime boundary.
 ## Quick Start
 
 ```bash
-git clone --branch v0.3.7 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+git clone --branch v0.3.8 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
 cd sandbase-harness
 npm ci
 npm run build
@@ -180,10 +180,10 @@ The six-tool MCP bridge is published as a multi-architecture OCI image. Start
 the Harness API, then add this stdio command to an MCP client:
 
 ```bash
-docker pull ghcr.io/sandbaseai/sandbase-harness-mcp:0.3.7
+docker pull ghcr.io/sandbaseai/sandbase-harness-mcp:0.3.8
 docker run --rm -i \
   -e MANAGED_AGENTS_URL=http://host.docker.internal:3000 \
-  ghcr.io/sandbaseai/sandbase-harness-mcp:0.3.7
+  ghcr.io/sandbaseai/sandbase-harness-mcp:0.3.8
 ```
 
 For an authenticated remote runtime, also pass `MANAGED_AGENTS_API_KEY`. The
@@ -207,7 +207,7 @@ copilot plugin install sandbaseai/sandbase-harness:agent-plugin
 ```
 
 The plugin passes these environment variables through to the pinned
-`ghcr.io/sandbaseai/sandbase-harness-mcp:0.3.7` image. It does not store a key
+`ghcr.io/sandbaseai/sandbase-harness-mcp:0.3.8` image. It does not store a key
 in `plugin.json`, `mcp.json`, or the installed plugin files. On Linux, the
 plugin's Docker command maps `host.docker.internal` through `host-gateway`.
 
@@ -470,7 +470,7 @@ init smoke, and `examples/basic` startup smoke.
 - [Self-host the SandBase agent runtime](https://www.ssdnodes.com/learn/self-host-sandbase-agent-runtime)
   by SSD Nodes — an independent VPS walkthrough covering installation, agent
   configuration, MCP servers, sandbox modes, and reverse-proxy deployment. The
-  article demonstrates v0.3.2; use the current release command above for v0.3.7.
+  article demonstrates v0.3.2; use the current release command above for v0.3.8.
 
 ## License
 

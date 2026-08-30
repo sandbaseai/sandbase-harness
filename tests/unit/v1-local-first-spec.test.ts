@@ -82,7 +82,7 @@ describe('v1 local-first architecture spec', () => {
     const chinese = read('README.zh-CN.md');
 
     expect(root).toContain('[中文](./README.zh-CN.md)');
-    expect(chinese).toContain('git clone --branch v0.3.7 --depth 1');
+    expect(chinese).toContain('git clone --branch v0.3.8 --depth 1');
     expect(chinese).toContain('dsh plugin --profile web add -w ../sandbase-harness');
     expect(chinese).not.toContain('npm link');
     expect(chinese).toContain('npx --yes github:sandbaseai/sandbase-skills add multi-source-search');

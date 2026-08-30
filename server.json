@@ -7,11 +7,11 @@
     "url": "https://github.com/sandbaseai/sandbase-harness",
     "source": "github"
   },
-  "version": "0.3.7",
+  "version": "0.3.8",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/sandbaseai/sandbase-harness-mcp:0.3.7",
+      "identifier": "ghcr.io/sandbaseai/sandbase-harness-mcp:0.3.8",
       "transport": {
         "type": "stdio"
       },

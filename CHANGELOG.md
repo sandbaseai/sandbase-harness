@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.3.8 - 2026-08-30
 
 ### Fixes
 
@@ -10,6 +10,15 @@
   `dist/` skip the rebuild. MCP image builds install dependencies with
   `--ignore-scripts` because the Dockerfile copies `package.json` before
   `scripts/`.
+- Counts model usage once per model request in runtime metrics and persists
+  aggregate input/output token usage on each session.
+- Validates confirmed tool calls against raw AI SDK v4 stream lifecycle data,
+  rejects malformed or incomplete calls, and grants one-shot execution
+  authority only after validation.
+- Documents the maintainer and organic project-promotion workflow in
+  `AGENTS.md` and keeps the DeepSeek Harness Handbook discovery link current.
+
+## Unreleased
 
 ## 0.3.7 - 2026-08-20
 
