@@ -52,3 +52,18 @@ After `npm run build`, configure an MCP client to launch:
 
 Set `MANAGED_AGENTS_API_KEY` in `env` when authentication is enabled. Keep API
 keys out of committed configuration and screenshots.
+
+## Connect from Cline CLI
+
+After installing the [Cline CLI](https://docs.cline.bot/usage/cli-overview),
+register the published MCP bridge non-interactively:
+
+```bash
+cline mcp install sandbase-harness --transport stdio --yes -- \
+  docker run --rm -i ghcr.io/sandbaseai/sandbase-harness-mcp:0.3.8
+```
+
+The command writes a `sandbase-harness` entry to Cline's MCP settings. Docker
+must be able to pull the image, and the running Harness API must be reachable
+from the container; pass `-e MANAGED_AGENTS_URL=...` and, when required,
+`-e MANAGED_AGENTS_API_KEY=...` before the image name.
