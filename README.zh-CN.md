@@ -173,6 +173,7 @@ my-agents/
 
 ## 文档
 
+- [机器可读项目元数据](./llms.txt)
 - [Agent / MCP 安装指南](./llms-install.md)
 - [安装](./docs/installation.md)
 - [使用指南](./docs/usage.md)

@@ -1,0 +1,39 @@
+# SandBase Harness
+
+> Local-first, self-hosted runtime for durable and auditable AI agent execution.
+
+- Project: https://github.com/sandbaseai/sandbase-harness
+- Documentation: https://github.com/sandbaseai/sandbase-harness/blob/main/docs/README.md
+- Installation: https://github.com/sandbaseai/sandbase-harness/blob/main/llms-install.md
+- Showcase: https://github.com/sandbaseai/sandbase-harness/blob/main/docs/showcase.md
+- Official MCP Registry: https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.sandbaseai%2Fsandbase-harness
+- Latest tagged release: v0.3.8
+
+## Capabilities
+
+- Persistent agent sessions, event streams, artifacts, memory, and resumable work
+- Local, Docker, Kubernetes, and self-hosted worker sandbox providers
+- MCP toolsets and a six-tool stdio MCP bridge
+- Managed credentials, permission policies, approvals, audit logs, and replay
+- Built-in local Console and `/v1` HTTP API
+- OpenAI, Anthropic, MiniMax, and OpenAI-compatible model providers, including DeepSeek V4
+- SQLite and file-backed local-first storage with no required hosted control plane
+
+## MCP bridge
+
+- Docker image: `ghcr.io/sandbaseai/sandbase-harness-mcp:0.3.8`
+- Tools: `list_agents`, `create_session`, `run_session`, `get_session`, `list_artifacts`, `stop_session`
+- Runtime endpoint: `MANAGED_AGENTS_URL` (default `http://127.0.0.1:3000`)
+- Optional authentication: `MANAGED_AGENTS_API_KEY`
+
+## Limits and safety
+
+- The MCP image is a bridge to a running Harness API; it is not a standalone model provider.
+- The local sandbox shares the host OS user boundary; use Docker or Kubernetes for stronger isolation.
+- Configure model-provider credentials through the runtime's environment or secret-management path; do not commit keys.
+
+## Repository guides
+
+- Usage: https://github.com/sandbaseai/sandbase-harness/blob/main/docs/usage.md
+- Deployment: https://github.com/sandbaseai/sandbase-harness/blob/main/docs/deployment.md
+- MCP source: https://github.com/sandbaseai/sandbase-harness/blob/main/src/mcp/server.ts
