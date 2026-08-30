@@ -462,6 +462,7 @@ init smoke, and `examples/basic` startup smoke.
 
 ## Documentation
 
+- [Agent / MCP installation guide](llms-install.md)
 - [Installation](docs/installation.md)
 - [Usage Guide](docs/usage.md)
 - [API Reference](docs/api.md)
