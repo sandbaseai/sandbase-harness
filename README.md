@@ -49,6 +49,21 @@ Choose SandBase Harness when you need more than a model loop:
 If this runtime solves a real agent-infrastructure problem for you,
 [star the repository](https://github.com/sandbaseai/sandbase-harness) so other builders can find it.
 
+## Find SandBase Harness
+
+The project is also discoverable through these independent ecosystem directories:
+
+- [Official MCP Registry](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.sandbaseai%2Fsandbase-harness)
+- [PluginBench](https://pluginbench.com/mcp/io.github.sandbaseai/sandbase-harness)
+- [DSH Hub](https://dshhub.dev/plugins/sandbase-harness)
+- [DSH Packs](https://www.dshpacks.com/plugins/sandbaseai-sandbase-harness/)
+- [dshbase](https://dshbase.com/plugins/sandbase-harness/)
+- [FindHarness](https://findharness.com/plugins/sandbaseai-sandbase-harness)
+- [dsh-market](https://dshmarket.com/p/sandbaseai/sandbase-harness/)
+
+These listings are independent directories; the repository and its release metadata
+remain the source of truth.
+
 ### Try it in Codespaces
 
 [![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/sandbaseai/sandbase-harness?quickstart=1)
