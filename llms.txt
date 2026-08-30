@@ -9,6 +9,18 @@
 - Official MCP Registry: https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.sandbaseai%2Fsandbase-harness
 - Latest tagged release: v0.3.8
 
+## Discovery
+
+- PluginBench: https://pluginbench.com/mcp/io.github.sandbaseai/sandbase-harness
+- DSH Hub: https://dshhub.dev/plugins/sandbase-harness
+- DSH Packs: https://www.dshpacks.com/plugins/sandbaseai-sandbase-harness/
+- dshbase: https://dshbase.com/plugins/sandbase-harness/
+- FindHarness: https://findharness.com/plugins/sandbaseai-sandbase-harness
+- dsh-market: https://dshmarket.com/p/sandbaseai/sandbase-harness/
+
+These independent directory pages are discovery mirrors; this repository and its
+release metadata remain the source of truth.
+
 ## Capabilities
 
 - Persistent agent sessions, event streams, artifacts, memory, and resumable work
