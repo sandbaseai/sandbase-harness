@@ -252,6 +252,7 @@ Pending community review:
 - [Awesome AI Agents PR #4](https://github.com/asdfgh12345123/awesome-ai-agents/pull/4) — added SandBase Harness to Agent Tools with a canonical repository link and factual runtime description; maintainer review pending
 - [中文 Awesome AI Agents PR #13](https://github.com/Uky0Yang/awesome-ai-agents-zh/pull/13) — added SandBase Harness to MCP 生态 with generated catalog data and passing validation; maintainer review pending
 - [BestAIAgent.in PR #1](https://github.com/CodesbyFebin/BESTAIAGENT-MASTER/pull/1) — added SandBase Harness to the imported/noindex agent catalog tier with an official source link; maintainer review pending
+- [中文 Agent 清单 PR #2](https://github.com/gengyueworks/awesome-ai-agents/pull/2) — added SandBase Harness to the runtime/framework section as an independent project from DeepSeek Harness; maintainer review pending
 - [MCP Server Finder evaluation issue #4](https://github.com/ModelContextProtocol-Security/mcpserver-finder/issues/4) — requested an independent quality and security assessment of the MCP bridge; review pending
 - [Agentic DevOps MCP PR #42](https://github.com/agenticdevops/awesome-devops-mcp/pull/42) — added to Kubernetes & Containers; maintainer review pending
 - [Awesome DevOps AI PR #54](https://github.com/hammadhaqqani/awesome-devops-ai/pull/54) — added to MCP Servers for DevOps; maintainer review pending
