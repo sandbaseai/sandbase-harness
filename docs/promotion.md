@@ -2,6 +2,8 @@
 
 Last checked: 2026-08-31
 
+The latest verification on [Hugging Face agent-harness registry PR #2432](https://github.com/huggingface/huggingface.js/pull/2432) links v0.3.8 and confirms that `MANAGED_AGENTS_HOME` is a data-directory override rather than an identity marker. Cursor Bugbot is successful; the PR remains open and mergeable pending Hugging Face maintainer review. The [follow-up](https://github.com/huggingface/huggingface.js/pull/2432#issuecomment-5475166796) preserves the user-owned API and backend/deployment-dependent isolation boundary, with no endorsement or security-certification claim.
+
 The canonical [Picrew Awesome Agent Harness PR #86](https://github.com/Picrew/awesome-agent-harness/pull/86) remains open and mergeable after a current v0.3.8 source-verification follow-up. Conflicting duplicate [PR #85](https://github.com/Picrew/awesome-agent-harness/pull/85) was closed to leave one maintainer-review path; the catalog entry remains pending and is not an endorsement or security certification.
 
 The new [gVisor DeepSeek Harness integration guide PR #14517](https://github.com/google/gvisor/pull/14517) documents an explicit Docker → `runsc` → gVisor execution path for selected Harness commands. A maintainer-facing [follow-up](https://github.com/google/gvisor/pull/14517#issuecomment-5472929623) links SandBase Harness as a complementary Harness-side reference for governed sessions, MCP admission/approvals, credential scoping, audit/replay, and selectable backends. The note explicitly does not claim that SandBase replaces gVisor or provides universal kernel isolation; the PR remains open and maintainer review is pending.

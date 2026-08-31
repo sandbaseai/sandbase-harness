@@ -181,7 +181,7 @@ Pending community review:
 - [Awesome Agent-Native Services PR #116](https://github.com/haoruilee/awesome-agent-native-services/pull/116) — curator-approved dossier with v0.3.8 runtime, MCP, session, approval, credential, and audit/replay evidence; merged by the directory maintainer ([verification](https://github.com/haoruilee/awesome-agent-native-services/pull/116#issuecomment-5473455471))
 - [ToolSDK MCP Registry PR #488](https://github.com/toolsdk-ai/toolsdk-mcp-registry/pull/488) — schema and Biome checks pass; maintainer review pending
 - [MCP.Directory submission](https://mcp.directory/submit) — already submitted; directory review pending
-- [Hugging Face agent-harness registry PR #2432](https://github.com/huggingface/huggingface.js/pull/2432) — registry entry corrected to avoid treating `MANAGED_AGENTS_HOME` as an identity marker; checks pass, maintainer merge pending
+- [Hugging Face agent-harness registry PR #2432](https://github.com/huggingface/huggingface.js/pull/2432) — registry entry corrected to avoid treating `MANAGED_AGENTS_HOME` as an identity marker; Cursor Bugbot passes and maintainer merge remains pending ([verification](https://github.com/huggingface/huggingface.js/pull/2432#issuecomment-5475166796))
 - [Agent Switchboard listing PR #44](https://github.com/assafbar2/agentswitchboard.dev/pull/44) — refreshed v0.3.8 listing; maintainer verification pending
 - [Awesome AI Agents 2026 PR #16](https://github.com/Supersynergy/awesome-ai-agents-2026/pull/16) — added SandBase Harness to Agent Runtimes and Platforms; maintainer review pending
 - [Awesome AI Agent Engineering PR #1](https://github.com/sspoisk/awesome-ai-agent-engineering/pull/1) — added SandBase Harness to Deployment; maintainer review pending
