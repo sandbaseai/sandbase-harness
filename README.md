@@ -125,7 +125,7 @@ Recently verified community references:
 - [Awesome Agent Cortex — merged entry](https://github.com/0xNyk/awesome-agent-cortex/pull/72)
 - [Awesome AI Devtools — merged entry](https://github.com/yeaight7/awesome-ai-devtools/pull/33)
 - [Awesome Agent Skills — merged entry](https://github.com/VoltAgent/awesome-agent-skills/pull/946)
-- [Awesome AI Agents — merged Harness entry](https://github.com/aloth/awesome-ai-agents/pull/57)
+- [Awesome AI Agents — merged Harness entry](https://github.com/aloth/awesome-ai-agents/pull/57) (supersedes intake issue #56)
 - [WalkingLabs Awesome Harness Engineering — merged entry](https://github.com/walkinglabs/awesome-harness-engineering/pull/76)
 - [Adventure Wave Awesome Agent Security — merged entry](https://github.com/adventurewave-labs/awesome-agent-security/pull/2)
 - [Awesome Native Agent Platforms — merged Harness entry](https://github.com/sandbaseai/awesome-native-agent-platforms/pull/1)
