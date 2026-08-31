@@ -111,7 +111,7 @@
   ],
   "license": "Apache-2.0",
   "dependencies": {
-    "@ai-sdk/anthropic": "^1.0.0",
+    "@ai-sdk/anthropic": "^4.0.44",
     "@ai-sdk/openai": "^1.0.0",
     "@hono/node-server": "^2.1.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
