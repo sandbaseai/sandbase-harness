@@ -2,6 +2,8 @@
 
 Last checked: 2026-08-31
 
+The canonical [Awesome Agent OS PR #3](https://github.com/cueos/awesome-agent-os/pull/3) remains open and mergeable; older duplicate [PR #2](https://github.com/cueos/awesome-agent-os/pull/2) was closed to leave one review path. The directory workflow still requires maintainer approval for the external check, so no inclusion or endorsement is claimed.
+
 The latest verification on [Hugging Face agent-harness registry PR #2432](https://github.com/huggingface/huggingface.js/pull/2432) links v0.3.8 and confirms that `MANAGED_AGENTS_HOME` is a data-directory override rather than an identity marker. Cursor Bugbot is successful; the PR remains open and mergeable pending Hugging Face maintainer review. The [follow-up](https://github.com/huggingface/huggingface.js/pull/2432#issuecomment-5475166796) preserves the user-owned API and backend/deployment-dependent isolation boundary, with no endorsement or security-certification claim.
 
 The canonical [Picrew Awesome Agent Harness PR #86](https://github.com/Picrew/awesome-agent-harness/pull/86) remains open and mergeable after a current v0.3.8 source-verification follow-up. Conflicting duplicate [PR #85](https://github.com/Picrew/awesome-agent-harness/pull/85) was closed to leave one maintainer-review path; the catalog entry remains pending and is not an endorsement or security certification.
