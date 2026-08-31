@@ -256,6 +256,7 @@ Pending community review:
 - [Protodex MCP Directory issue #52](https://github.com/LuciferForge/mcp-directory/issues/52) — submitted SandBase Harness through the directory's public server-request workflow; maintainer/index review pending
 - [Nandanhegde MCP Directory issue #2](https://github.com/Nandanhegde1/mcp-directory/issues/2) — submitted SandBase Harness through the directory's public server submission workflow; weekly review/indexing pending
 - [Public MCP Servers PR #12](https://github.com/dev48v/public-mcp-servers/pull/12) — added the v0.3.8 Docker stdio bridge with API prerequisite and secret-scope notes; directory validation passed, maintainer review pending
+- [OpenModels MCP Registry PR #22](https://github.com/openmodelsrun/mcp/pull/22) — added a structured six-tool stdio entry with the pinned v0.3.8 Docker image, required runtime URL, and optional API-key metadata; validation passed, maintainer review pending
 - [MCP Server Finder evaluation issue #4](https://github.com/ModelContextProtocol-Security/mcpserver-finder/issues/4) — requested an independent quality and security assessment of the MCP bridge; review pending
 - [Agentic DevOps MCP PR #42](https://github.com/agenticdevops/awesome-devops-mcp/pull/42) — added to Kubernetes & Containers; maintainer review pending
 - [Awesome DevOps AI PR #54](https://github.com/hammadhaqqani/awesome-devops-ai/pull/54) — added to MCP Servers for DevOps; maintainer review pending
