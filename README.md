@@ -264,6 +264,7 @@ Pending community review:
 - [Official Discussion #116 Agent Plugin update](https://github.com/sandbaseai/sandbase-harness/discussions/116#discussioncomment-18214336) — published a bilingual integration note linking the schema-validated `agent-plugin/` bundle and its community review issue
 - [AI Systems Atlas suggestion #34](https://github.com/katagun/ai-systems-atlas/issues/34) — proposed SandBase Harness for evidence-backed review as an operational AI system; Atlas curation review pending
 - [Awesome Agent OS PR #3](https://github.com/cueos/awesome-agent-os/pull/3) — proposed SandBase Harness for the Runtimes section with a concise, source-linked description; CI and maintainer review pending
+- [Awesome Engineering AI PR #3](https://github.com/Lancetnik/awesome-engineering-ai/pull/3) — proposed SandBase Harness for Harnesses, GUIs and workspaces; GitGuardian and maintainer review pending
 - [MCP Server Finder evaluation issue #4](https://github.com/ModelContextProtocol-Security/mcpserver-finder/issues/4) — requested an independent quality and security assessment of the MCP bridge; review pending
 - [Agentic DevOps MCP PR #42](https://github.com/agenticdevops/awesome-devops-mcp/pull/42) — added to Kubernetes & Containers; maintainer review pending
 - [Awesome DevOps AI PR #54](https://github.com/hammadhaqqani/awesome-devops-ai/pull/54) — merged into MCP Servers for DevOps; the public entry now provides another source-linked discovery path
