@@ -242,11 +242,11 @@ Pending community review:
 - [Awesome Agent Sandboxes PR #9 verification](https://github.com/dloss/awesome-agent-sandboxes/pull/9#issuecomment-5473974508) — current v0.3.8 sources and backend-dependent isolation confirmed
 - [Awesome Agent Sandbox PR #4](https://github.com/fishman/awesome-agent-sandbox/pull/4) — added SandBase Harness to Container Sandboxes and the comparison table; maintainer review pending
 - [Awesome Agent Sandboxes PR #59](https://github.com/msyvr/awesome-agent-sandboxes/pull/59) — added structured SandBase Harness sandbox metadata and regenerated catalog outputs; maintainer review pending
-- [MeshKore directory submission](https://meshkore.com/submit) — accepted for review as submission #14; public profile pending
+- [MeshKore directory submission](https://meshkore.com/directory) — accepted for review as submission #15; public profile pending
 - [Awesome Agentic Open-Source Tools PR #1](https://github.com/samaybhavsar/awesome-agentic-opensource-tools/pull/1) — added to Agent Frameworks & Orchestration; maintainer review pending
 - [awesome-ai-agents-2026 PR #2](https://github.com/Dehar624/awesome-ai-agents-2026/pull/2) — added to Local Runtimes & LLM Management; maintainer review pending
 - [AgentFirst directory PR #46](https://github.com/bradvin/agentfirst.directory/pull/46) — added to Compute & Sandboxes; enrichment check passed, maintainer review pending
-- [AI Agent Tools submission](https://aiagenttools.dev/submit) — submitted to the MCP Servers category; directory review pending
+- [AI Agent Tools submission](https://aiagenttools.dev/submit) — accepted as open-source infrastructure submission `mtgu4e78fw1ja`; directory review pending
 - [MCP Server Finder evaluation issue #4](https://github.com/ModelContextProtocol-Security/mcpserver-finder/issues/4) — requested an independent quality and security assessment of the MCP bridge; review pending
 - [Agentic DevOps MCP PR #42](https://github.com/agenticdevops/awesome-devops-mcp/pull/42) — added to Kubernetes & Containers; maintainer review pending
 - [Awesome DevOps AI PR #54](https://github.com/hammadhaqqani/awesome-devops-ai/pull/54) — added to MCP Servers for DevOps; maintainer review pending
