@@ -247,6 +247,7 @@ Pending community review:
 - [awesome-ai-agents-2026 PR #2](https://github.com/Dehar624/awesome-ai-agents-2026/pull/2) — added to Local Runtimes & LLM Management; maintainer review pending
 - [AgentFirst directory PR #46](https://github.com/bradvin/agentfirst.directory/pull/46) — added to Compute & Sandboxes; enrichment check passed, maintainer review pending
 - [AI Agent Tools submission](https://aiagenttools.dev/submit) — accepted as open-source infrastructure submission `mtgu4e78fw1ja`; directory review pending
+- [AgentVerse-5K PR #3](https://github.com/mrahm65/AgentVerse-5K/pull/3) — added SandBase Harness to Coding Agents and MCP Servers; PR is clean and mergeable, maintainer review pending
 - [MCP Server Finder evaluation issue #4](https://github.com/ModelContextProtocol-Security/mcpserver-finder/issues/4) — requested an independent quality and security assessment of the MCP bridge; review pending
 - [Agentic DevOps MCP PR #42](https://github.com/agenticdevops/awesome-devops-mcp/pull/42) — added to Kubernetes & Containers; maintainer review pending
 - [Awesome DevOps AI PR #54](https://github.com/hammadhaqqani/awesome-devops-ai/pull/54) — added to MCP Servers for DevOps; maintainer review pending
