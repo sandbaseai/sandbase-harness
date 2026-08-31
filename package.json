@@ -121,7 +121,7 @@
     "nanoid": "^6.0.1",
     "prefix-safe-json": "0.4.3",
     "yaml": "^2.5.0",
-    "zod": "^3.23.0"
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@types/node": "^26.4.0",
