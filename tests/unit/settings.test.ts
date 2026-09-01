@@ -413,9 +413,10 @@ describe('Settings V2 activation', () => {
     const activated = activateRuntimeSettings(db);
 
     expect(activated.activation_status).toBe('failed');
+    // `code` is relayed verbatim from zod, which now reports this as invalid_value.
     expect(activated.activation_errors).toContainEqual(expect.objectContaining({
       path: 'schema_version',
-      code: 'invalid_literal',
+      code: 'invalid_value',
     }));
     expect(activated.effective_revision).toBe(1);
     expect(activated.effective_config.loop_engine.options.default_max_steps).toBe(25);

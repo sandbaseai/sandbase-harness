@@ -2,9 +2,9 @@
  * MCP Client Manager (Requirement 5)
  *
  * Connects to MCP servers declared in an Agent definition and exposes their
- * tools to the engine loop. Uses the Vercel AI SDK's built-in MCP client
- * (`experimental_createMCPClient`) so the returned tools plug straight into
- * `streamText`.
+ * tools to the engine loop. Uses the official MCP SDK client
+ * (`@modelcontextprotocol/sdk`), since the Vercel AI SDK removed the
+ * `experimental_createMCPClient` wrapper this used to go through.
  *
  * Transports:
  * - stdio: spawns a subprocess and speaks MCP over stdin/stdout
@@ -15,8 +15,9 @@
  * whatever tools did connect.
  */
 
-import { experimental_createMCPClient } from 'ai';
-import { Experimental_StdioMCPTransport } from 'ai/mcp-stdio';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { SSEClientTransport } from '@modelcontextprotocol/sdk/client/sse.js';
 import { resolveEnvVarsDeep } from '@/core/config/env-resolver.js';
 import type { McpServerConfig } from '@/types/agent.js';
 
@@ -212,27 +213,40 @@ export class McpManager {
   // ============================================================
 
   private async createClient(server: McpServerConfig): Promise<McpClient> {
+    let transport;
     if (server.type === 'stdio') {
       if (!server.command) {
         throw new Error(`MCP server "${server.name}": stdio transport requires "command"`);
       }
       const env = server.env ? resolveEnvVarsDeep(server.env, false) : undefined;
-      const transport = new Experimental_StdioMCPTransport({
+      transport = new StdioClientTransport({
         command: server.command,
         args: server.args ?? [],
         env,
       });
-      return experimental_createMCPClient({ transport }) as unknown as Promise<McpClient>;
+    } else {
+      if (!server.url) {
+        throw new Error(`MCP server "${server.name}": url transport requires "url"`);
+      }
+      const url = resolveEnvVarsDeep(server.url, false);
+      transport = new SSEClientTransport(new URL(url));
     }
 
-    // url transport
-    if (!server.url) {
-      throw new Error(`MCP server "${server.name}": url transport requires "url"`);
-    }
-    const url = resolveEnvVarsDeep(server.url, false);
-    return experimental_createMCPClient({
-      transport: { type: 'sse', url },
-    }) as unknown as Promise<McpClient>;
+    const client = new Client({ name: 'sandbase-harness', version: '1.0.0' });
+    await client.connect(transport);
+
+    return {
+      async tools() {
+        const { tools } = await client.listTools();
+        return Object.fromEntries(tools.map((tool) => [tool.name, {
+          description: tool.description,
+          parameters: tool.inputSchema,
+          execute: (args: unknown) =>
+            client.callTool({ name: tool.name, arguments: (args ?? {}) as Record<string, unknown> }),
+        }]));
+      },
+      close: () => client.close(),
+    };
   }
 }
 

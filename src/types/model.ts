@@ -2,10 +2,10 @@
  * Model Provider Types
  *
  * Unified interface for model providers (OpenAI, Anthropic, Ollama, vLLM, etc.)
- * All providers are abstracted through the Vercel AI SDK LanguageModelV1 interface.
+ * All providers are abstracted through the Vercel AI SDK LanguageModel interface.
  */
 
-import type { LanguageModelV1 } from 'ai';
+import type { LanguageModel } from 'ai';
 
 // ============================================================
 // Model Provider Interface
@@ -16,7 +16,7 @@ export interface ModelProvider {
   readonly type: ModelProviderType;
 
   /** Create a Vercel AI SDK-compatible LanguageModel instance */
-  createModel(config: ModelConfig): LanguageModelV1;
+  createModel(config: ModelConfig): LanguageModel;
 
   /** Health check — returns false on any error, does not throw */
   healthCheck(): Promise<boolean>;

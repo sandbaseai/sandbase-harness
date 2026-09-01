@@ -11,7 +11,7 @@
  * decide when to trigger without pulling in a tokenizer dependency.
  */
 
-import { generateText, type LanguageModelV1 } from 'ai';
+import { generateText, type LanguageModel } from 'ai';
 import type { Message } from './events-to-messages.js';
 
 /** Fire compaction when estimated tokens exceed this fraction of the window. */
@@ -61,7 +61,7 @@ export class ContextCompactor {
    * summary string via the model. Returns null if there's nothing worth
    * compacting (too few messages).
    */
-  async compact(messages: Message[], model: LanguageModelV1): Promise<CompactionResult | null> {
+  async compact(messages: Message[], model: LanguageModel): Promise<CompactionResult | null> {
     const preserveTail = this.config.preserveTailMessages ?? PRESERVE_TAIL_MESSAGES;
     if (messages.length <= preserveTail + 1) {
       return null; // not enough history to bother

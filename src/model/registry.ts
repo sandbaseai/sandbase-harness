@@ -8,7 +8,7 @@
 
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
-import { wrapLanguageModel, type LanguageModelV1, type LanguageModelV1Middleware } from 'ai';
+import { wrapLanguageModel, type LanguageModel, type LanguageModelMiddleware } from 'ai';
 import { resolveEnvVars } from '@/core/config/env-resolver.js';
 import { MINIMAX_PROVIDER, miniMaxOpenAiBaseUrl } from '@/core/model/minimax.js';
 import {
@@ -121,7 +121,7 @@ export class ModelRegistry {
    * Create a Vercel AI SDK LanguageModel instance, wrapped with the retry
    * middleware (Property 14). Resolves ${ENV_VAR} in api_key and base_url.
    */
-  createModel(name: string): LanguageModelV1 {
+  createModel(name: string): LanguageModel {
     const config = this.resolveModelConfig(name);
     if (!config.model) {
       throw new ModelNotFoundError(name, Array.from(this.models.keys()), 'Agent model id is required.');
@@ -134,12 +134,13 @@ export class ModelRegistry {
       config.model,
       resolvedApiKey,
       resolvedBaseUrl,
-      config.reasoning_effort,
     );
-    return wrapLanguageModel({
-      model: base,
-      middleware: createRetryMiddleware(this.retryPolicy),
-    });
+    const middleware: LanguageModelMiddleware[] = [createRetryMiddleware(this.retryPolicy)];
+    // Only the OpenAI-compatible branches ever took a reasoning effort.
+    if (config.reasoning_effort && config.provider !== 'anthropic' && config.provider !== MINIMAX_PROVIDER) {
+      middleware.push(createReasoningEffortMiddleware(config.reasoning_effort));
+    }
+    return wrapLanguageModel({ model: base, middleware });
   }
 
   /**
@@ -237,7 +238,7 @@ function publicBaseUrl(value?: string): string | undefined {
  * - rate limit (429): honor Retry-After, up to 3x
  * - auth (401/403): never retry
  */
-function createRetryMiddleware(policy: RetryPolicy): LanguageModelV1Middleware {
+function createRetryMiddleware(policy: RetryPolicy): LanguageModelMiddleware {
   const runWithRetry = async <T>(fn: () => PromiseLike<T>): Promise<T> => {
     let attempt = 0;
     for (;;) {
@@ -263,6 +264,22 @@ function createRetryMiddleware(policy: RetryPolicy): LanguageModelV1Middleware {
   };
 }
 
+/**
+ * Pass `reasoning_effort` as a call-time provider option: the provider dropped
+ * the constructor settings argument that used to carry it.
+ */
+function createReasoningEffortMiddleware(reasoningEffort: string): LanguageModelMiddleware {
+  return {
+    transformParams: async ({ params }) => ({
+      ...params,
+      providerOptions: {
+        ...params.providerOptions,
+        openai: { reasoningEffort, ...params.providerOptions?.openai },
+      },
+    }),
+  };
+}
+
 function extractHeaders(err: unknown): Headers | undefined {
   if (err && typeof err === 'object' && 'responseHeaders' in err) {
     const h = (err as { responseHeaders?: unknown }).responseHeaders;
@@ -282,13 +299,16 @@ function sleep(ms: number): Promise<void> {
 // Model Factory
 // ============================================================
 
+/**
+ * `.chat(model)` not `openai(model)`: the bare call now targets the Responses
+ * API, which Ollama/vLLM/DeepSeek/minimax do not implement.
+ */
 function createModelInstance(
   provider: ModelProviderType,
   model: string,
   apiKey?: string,
   baseUrl?: string,
-  reasoningEffort?: string,
-): LanguageModelV1 {
+) {
   switch (provider) {
     case 'openai':
     case 'ollama': {
@@ -296,14 +316,14 @@ function createModelInstance(
         apiKey: apiKey ?? 'ollama', // Ollama doesn't need a key
         baseURL: baseUrl,
       });
-      return openai(model, reasoningEffort ? { reasoningEffort: reasoningEffort as 'low' | 'medium' | 'high' } : undefined);
+      return openai.chat(model);
     }
     case MINIMAX_PROVIDER: {
       const minimax = createOpenAI({
         apiKey: apiKey ?? '',
         baseURL: miniMaxOpenAiBaseUrl({}, baseUrl),
       });
-      return minimax(model);
+      return minimax.chat(model);
     }
     case 'anthropic': {
       const anthropic = createAnthropic({
@@ -318,7 +338,7 @@ function createModelInstance(
         apiKey: apiKey ?? '',
         baseURL: baseUrl,
       });
-      return openaiCompat(model, reasoningEffort ? { reasoningEffort: reasoningEffort as 'low' | 'medium' | 'high' } : undefined);
+      return openaiCompat.chat(model);
     }
   }
 }

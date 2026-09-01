@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ModelRegistry } from '@/model/registry.js';
 
 describe('ModelRegistry runtime introspection', () => {
@@ -127,5 +127,86 @@ describe('ModelRegistry runtime introspection', () => {
       base_url: 'https://api.sandbase.ai/v1',
       is_default: false,
     });
+  });
+});
+
+// Guards the wiring, not just the config object: asserting only that
+// resolveModelConfig keeps the field would pass even if it never reached the model.
+describe('ModelRegistry reasoning effort wiring', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  /** Capture the request the provider would send. */
+  function stubFetch(): { body: () => Record<string, unknown>; url: () => string } {
+    let captured: Record<string, unknown> = {};
+    let url = '';
+    vi.stubGlobal('fetch', async (requestUrl: unknown, init: { body?: string }) => {
+      url = String(requestUrl);
+      captured = JSON.parse(init?.body ?? '{}');
+      return new Response(
+        JSON.stringify({
+          id: 'x',
+          created: 0,
+          model: 'm',
+          choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1 },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+    return { body: () => captured, url: () => url };
+  }
+
+  const prompt = [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'hi' }] }];
+
+  it('sends the configured reasoning effort to the provider', async () => {
+    const registry = new ModelRegistry();
+    registry.register({
+      name: 'default',
+      provider: 'openai_compatible',
+      api_key: 'test-key',
+      base_url: 'https://example.invalid/v1',
+      reasoning_effort: 'high',
+      is_default: true,
+    });
+
+    const fetchStub = stubFetch();
+    await (registry.createModel('deepseek-v4-pro') as any).doGenerate({ prompt });
+
+    expect(fetchStub.body()).toMatchObject({ reasoning_effort: 'high' });
+  });
+
+  it('omits reasoning effort when none is configured', async () => {
+    const registry = new ModelRegistry();
+    registry.register({
+      name: 'default',
+      provider: 'openai_compatible',
+      api_key: 'test-key',
+      base_url: 'https://example.invalid/v1',
+      is_default: true,
+    });
+
+    const fetchStub = stubFetch();
+    await (registry.createModel('deepseek-v4-pro') as any).doGenerate({ prompt });
+
+    expect(fetchStub.body()).not.toHaveProperty('reasoning_effort');
+  });
+
+  // DeepSeek/Ollama/vLLM/minimax implement /chat/completions but not /responses.
+  it('targets the chat completions endpoint for OpenAI-compatible providers', async () => {
+    const registry = new ModelRegistry();
+    registry.register({
+      name: 'default',
+      provider: 'openai_compatible',
+      api_key: 'test-key',
+      base_url: 'https://example.invalid/v1',
+      is_default: true,
+    });
+
+    const fetchStub = stubFetch();
+    await (registry.createModel('deepseek-v4-pro') as any).doGenerate({ prompt });
+
+    expect(fetchStub.url()).toBe('https://example.invalid/v1/chat/completions');
   });
 });

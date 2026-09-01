@@ -17,14 +17,15 @@ import { DefaultSessionExecutor } from '@/core/session/executor.js';
 import { ModelRegistry } from '@/model/registry.js';
 import { LocalSandboxProvider } from '@/sandbox/local-provider.js';
 import type { AgentStrategy, StrategyContext } from '@/types/strategy.js';
-import type { LanguageModelV1 } from 'ai';
+import type { LanguageModel } from 'ai';
 
-function fakeModel(): LanguageModelV1 {
+function fakeModel(): LanguageModel {
   return {
-    specificationVersion: 'v1', provider: 'test', modelId: 't',
-    async doGenerate() { return { text: '', finishReason: 'stop', usage: {}, rawCall: { rawPrompt: null, rawSettings: {} } } as any; },
+    specificationVersion: 'v4', provider: 'test', modelId: 't',
+    supportedUrls: {},
+    async doGenerate() { return { content: [], finishReason: { unified: 'stop', raw: 'stop' }, usage: {}, warnings: [] } as any; },
     async doStream() { throw new Error('unused'); },
-  } as unknown as LanguageModelV1;
+  } as unknown as LanguageModel;
 }
 
 describe('Tool confirmation — requires_action transition', () => {

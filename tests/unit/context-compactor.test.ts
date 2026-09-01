@@ -8,31 +8,31 @@ import {
   estimateMessagesTokens,
 } from '@/core/session/context-compactor.js';
 import type { Message } from '@/core/session/events-to-messages.js';
-import type { LanguageModelV1 } from 'ai';
+import type { LanguageModel } from 'ai';
 
 function userMsg(text: string): Message {
   return { role: 'user', content: [{ type: 'text', text }] };
 }
 
 /** A fake model that returns a fixed summary via generateText. */
-function fakeModel(summaryText: string): LanguageModelV1 {
+function fakeModel(summaryText: string): LanguageModel {
   return {
-    specificationVersion: 'v1',
+    specificationVersion: 'v4',
     provider: 'test',
     modelId: 'test-model',
-    defaultObjectGenerationMode: undefined,
+    supportedUrls: {},
     async doGenerate() {
       return {
-        text: summaryText,
-        finishReason: 'stop',
-        usage: { promptTokens: 10, completionTokens: 5 },
-        rawCall: { rawPrompt: null, rawSettings: {} },
+        content: [{ type: 'text', text: summaryText }],
+        finishReason: { unified: 'stop', raw: 'stop' },
+        usage: { inputTokens: { total: 10 }, outputTokens: { total: 5 } },
+        warnings: [],
       } as any;
     },
     async doStream() {
       throw new Error('not used');
     },
-  } as unknown as LanguageModelV1;
+  } as unknown as LanguageModel;
 }
 
 describe('ContextCompactor', () => {

@@ -1,3 +1,4 @@
+/// <reference types="node" />
 /**
  * managed-agents SDK — public client entry point.
  *

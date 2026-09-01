@@ -24,7 +24,7 @@ const mcpServerConfigSchema = z.discriminatedUnion('type', [
     name: z.string().min(1, 'MCP server name is required'),
     command: z.string().min(1, 'stdio MCP server command is required'),
     args: z.array(z.string()).optional(),
-    env: z.record(z.string()).optional(),
+    env: z.record(z.string(), z.string()).optional(),
     timeout: z.number().positive().optional(),
   }),
 ]);
@@ -97,7 +97,7 @@ export const agentDefinitionSchema = z.object({
   skills: z.array(skillRefSchema).optional(),
   mcp_servers: z.array(mcpServerConfigSchema).optional(),
   tools: z.array(agentToolsetSchema).optional(),
-  metadata: z.record(z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
   max_turns: z.number().int().positive().max(1000).optional(),
   temperature: z.number().min(0).max(2).optional(),
   delegations: z.array(z.string()).optional(),

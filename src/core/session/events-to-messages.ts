@@ -44,18 +44,20 @@ export interface SystemMessage {
 
 export type ContentPart =
   | { type: 'text'; text: string }
-  | { type: 'image'; image: string; mimeType?: string };
+  | { type: 'image'; image: string; mediaType?: string };
 
 export type AssistantContentPart =
   | { type: 'text'; text: string }
   | { type: 'reasoning'; text: string; providerOptions?: Record<string, unknown> }
-  | { type: 'tool-call'; toolCallId: string; toolName: string; args: Record<string, unknown> };
+  | { type: 'tool-call'; toolCallId: string; toolName: string; input: Record<string, unknown> };
 
 export type ToolResultPart = {
   type: 'tool-result';
   toolCallId: string;
   toolName: string;
-  result: unknown;
+  output:
+    | { type: 'text'; value: string }
+    | { type: 'json'; value: unknown };
 };
 
 export type Message = UserMessage | AssistantMessage | ToolMessage | SystemMessage;
@@ -179,7 +181,7 @@ export function eventsToMessages(
             type: 'tool-call',
             toolCallId: block.id,
             toolName: block.name,
-            args: block.input,
+            input: block.input,
           });
         }
         break;
@@ -198,7 +200,9 @@ export function eventsToMessages(
             type: 'tool-result',
             toolCallId: resultBlock.tool_use_id,
             toolName,
-            result: resultBlock.content,
+            output: typeof resultBlock.content === 'string'
+              ? { type: 'text', value: resultBlock.content }
+              : { type: 'json', value: resultBlock.content },
           });
         }
         break;
@@ -249,7 +253,7 @@ function userContentToParts(content?: ContentBlock[]): ContentPart[] {
     } else if (block.type === 'image' && 'source' in block) {
       const src = (block as any).source;
       if (src?.data) {
-        parts.push({ type: 'image', image: src.data, mimeType: src.media_type });
+        parts.push({ type: 'image', image: src.data, mediaType: src.media_type });
       } else if (src?.url) {
         parts.push({ type: 'text', text: `[Image: ${src.url}]` });
       }

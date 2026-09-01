@@ -15,7 +15,7 @@ import { ModelRegistry } from '@/model/registry.js';
 import { LocalSandboxProvider } from '@/sandbox/local-provider.js';
 import { eventsToMessages } from '@/core/session/events-to-messages.js';
 import type { AgentStrategy, StrategyContext } from '@/types/strategy.js';
-import type { LanguageModelV1 } from 'ai';
+import type { LanguageModel } from 'ai';
 
 // Strategy that just records the message count it was handed and emits nothing.
 class NoopStrategy implements AgentStrategy {
@@ -28,21 +28,22 @@ class NoopStrategy implements AgentStrategy {
   }
 }
 
-function fakeModel(): LanguageModelV1 {
+function fakeModel(): LanguageModel {
   return {
-    specificationVersion: 'v1',
+    specificationVersion: 'v4',
     provider: 'test',
     modelId: 'test',
+    supportedUrls: {},
     async doGenerate() {
       return {
-        text: 'SUMMARY: prior conversation compacted',
-        finishReason: 'stop',
-        usage: { promptTokens: 1, completionTokens: 1 },
-        rawCall: { rawPrompt: null, rawSettings: {} },
+        content: [{ type: 'text', text: 'SUMMARY: prior conversation compacted' }],
+        finishReason: { unified: 'stop', raw: 'stop' },
+        usage: { inputTokens: { total: 1 }, outputTokens: { total: 1 } },
+        warnings: [],
       } as any;
     },
     async doStream() { throw new Error('unused'); },
-  } as unknown as LanguageModelV1;
+  } as unknown as LanguageModel;
 }
 
 describe('Compaction during execution', () => {

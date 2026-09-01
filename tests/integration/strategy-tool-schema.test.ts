@@ -8,38 +8,39 @@ import { DefaultSessionExecutor } from '@/core/session/executor.js';
 import { DefaultStrategy } from '@/strategy/default-strategy.js';
 import { ModelRegistry } from '@/model/registry.js';
 import { LocalSandboxProvider } from '@/sandbox/local-provider.js';
-import type { LanguageModelV1 } from 'ai';
+import type { LanguageModel } from 'ai';
 
-function streamingTextModel(): LanguageModelV1 {
+const USAGE = { inputTokens: { total: 1 }, outputTokens: { total: 1 } };
+const STOP = { unified: 'stop', raw: 'stop' } as const;
+
+function streamingTextModel(): LanguageModel {
   return {
-    specificationVersion: 'v1',
+    specificationVersion: 'v4',
     provider: 'test',
     modelId: 'streaming-text',
+    supportedUrls: {},
     async doGenerate() {
       return {
-        text: 'ok',
-        finishReason: 'stop',
-        usage: { promptTokens: 1, completionTokens: 1 },
-        rawCall: { rawPrompt: null, rawSettings: {} },
+        content: [{ type: 'text', text: 'ok' }],
+        finishReason: STOP,
+        usage: USAGE,
+        warnings: [],
       } as any;
     },
     async doStream() {
       return {
         stream: new ReadableStream({
           start(controller) {
-            controller.enqueue({ type: 'text-delta', textDelta: 'ok' });
-            controller.enqueue({
-              type: 'finish',
-              finishReason: 'stop',
-              usage: { promptTokens: 1, completionTokens: 1 },
-            });
+            controller.enqueue({ type: 'text-start', id: 'txt_1' });
+            controller.enqueue({ type: 'text-delta', id: 'txt_1', delta: 'ok' });
+            controller.enqueue({ type: 'text-end', id: 'txt_1' });
+            controller.enqueue({ type: 'finish', finishReason: STOP, usage: USAGE });
             controller.close();
           },
         }),
-        rawCall: { rawPrompt: null, rawSettings: {} },
       } as any;
     },
-  } as unknown as LanguageModelV1;
+  } as unknown as LanguageModel;
 }
 
 describe('DefaultStrategy tool schemas', () => {

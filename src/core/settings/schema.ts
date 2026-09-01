@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { MINIMAX_PROVIDER } from '@/core/model/minimax.js';
 
-const optionsSchema = z.record(z.unknown()).default({});
+const optionsSchema = z.record(z.string(), z.unknown()).default({});
 const STORED_SECRET_PREFIX = '__managed_secret__:';
 
 export const runtimeSettingsSchema = z.object({

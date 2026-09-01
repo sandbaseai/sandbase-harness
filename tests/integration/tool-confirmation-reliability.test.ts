@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { LanguageModelV1 } from 'ai';
+import type { LanguageModel } from 'ai';
 import { Database } from '@/core/db/database.js';
 import { ModelRegistry } from '@/model/registry.js';
 import { LocalSandboxProvider } from '@/sandbox/local-provider.js';
@@ -20,13 +20,16 @@ type ToolStream = {
   rawLifecycle?: boolean;
 };
 
-function scriptedToolModel(script: ToolStream): LanguageModelV1 {
+const USAGE = { inputTokens: { total: 1 }, outputTokens: { total: 1 } };
+
+function scriptedToolModel(script: ToolStream): LanguageModel {
   let turn = 0;
 
   return {
-    specificationVersion: 'v1',
+    specificationVersion: 'v4',
     provider: 'test',
     modelId: 'scripted-tool-call',
+    supportedUrls: {},
     async doGenerate() {
       throw new Error('not used');
     },
@@ -36,42 +39,44 @@ function scriptedToolModel(script: ToolStream): LanguageModelV1 {
         stream: new ReadableStream({
           start(controller) {
             if (turn === 1) {
+              const toolName = script.toolName ?? 'write';
+              // Raw argument bytes now arrive as the tool-input lifecycle.
               if (script.rawLifecycle !== false) {
+                controller.enqueue({ type: 'tool-input-start', id: 'call_write_1', toolName });
                 controller.enqueue({
-                  type: 'tool-call-delta',
-                  toolCallType: 'function',
-                  toolCallId: 'call_write_1',
-                  toolName: script.toolName ?? 'write',
-                  argsTextDelta: script.rawArgs ?? script.args,
+                  type: 'tool-input-delta',
+                  id: 'call_write_1',
+                  delta: script.rawArgs ?? script.args,
                 });
+                controller.enqueue({ type: 'tool-input-end', id: 'call_write_1' });
               }
               controller.enqueue({
                 type: 'tool-call',
-                toolCallType: 'function',
                 toolCallId: 'call_write_1',
-                toolName: script.toolName ?? 'write',
-                args: script.args,
+                toolName,
+                input: script.args,
               });
               controller.enqueue({
                 type: 'finish',
-                finishReason: script.finishReason,
-                usage: { promptTokens: 1, completionTokens: 1 },
+                finishReason: { unified: script.finishReason, raw: script.finishReason },
+                usage: USAGE,
               });
             } else {
-              controller.enqueue({ type: 'text-delta', textDelta: 'continued' });
+              controller.enqueue({ type: 'text-start', id: 'txt_1' });
+              controller.enqueue({ type: 'text-delta', id: 'txt_1', delta: 'continued' });
+              controller.enqueue({ type: 'text-end', id: 'txt_1' });
               controller.enqueue({
                 type: 'finish',
-                finishReason: 'stop',
-                usage: { promptTokens: 1, completionTokens: 1 },
+                finishReason: { unified: 'stop', raw: 'stop' },
+                usage: USAGE,
               });
             }
             controller.close();
           },
         }),
-        rawCall: { rawPrompt: null, rawSettings: {} },
       } as any;
     },
-  } as unknown as LanguageModelV1;
+  } as unknown as LanguageModel;
 }
 
 class CountingLocalSandboxProvider extends LocalSandboxProvider {
@@ -213,10 +218,13 @@ describe('tool confirmation stream reliability', () => {
     expect(harness.sandboxProvider.writeCount).toBe(0);
   });
 
+  // An unusable tool call is now reported back to the model instead of throwing,
+  // so the turn ends idle rather than failed (same as the schema-invalid case
+  // below). What must not happen is the call being announced or executed.
   it('does not execute malformed JSON', async () => {
     const harness = createHarness({ finishReason: 'tool-calls', args: '{"path":' });
     const sessionId = await requestToolCall(harness);
-    await waitFor(() => harness.manager.get(sessionId)?.status === 'failed');
+    await waitFor(() => harness.manager.get(sessionId)?.status === 'paused');
 
     expect(harness.manager.getEventLogger().getEvents(sessionId)
       .filter((event) => event.type === 'agent.tool_use')).toHaveLength(0);
@@ -243,7 +251,7 @@ describe('tool confirmation stream reliability', () => {
       args: '{}',
     });
     const sessionId = await requestToolCall(harness);
-    await waitFor(() => harness.manager.get(sessionId)?.status === 'failed');
+    await waitFor(() => harness.manager.get(sessionId)?.status === 'paused');
 
     expect(harness.sandboxProvider.writeCount).toBe(0);
   });

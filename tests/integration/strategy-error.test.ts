@@ -13,21 +13,22 @@ import { DefaultSessionExecutor } from '@/core/session/executor.js';
 import { DefaultStrategy } from '@/strategy/default-strategy.js';
 import { ModelRegistry } from '@/model/registry.js';
 import { LocalSandboxProvider } from '@/sandbox/local-provider.js';
-import type { LanguageModelV1 } from 'ai';
+import type { LanguageModel } from 'ai';
 
 /** A model whose stream throws — simulates a provider/auth/network failure. */
-function throwingModel(): LanguageModelV1 {
+function throwingModel(): LanguageModel {
   return {
-    specificationVersion: 'v1',
+    specificationVersion: 'v4',
     provider: 'test',
     modelId: 'boom',
+    supportedUrls: {},
     async doGenerate() {
       throw new Error('401 unauthorized');
     },
     async doStream() {
       throw new Error('401 unauthorized');
     },
-  } as unknown as LanguageModelV1;
+  } as unknown as LanguageModel;
 }
 
 describe('Model error → failed turn', () => {

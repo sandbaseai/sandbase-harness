@@ -14,9 +14,9 @@
  * Reference: OMA default-loop.ts
  */
 
-import { jsonSchema, streamText } from 'ai';
+import { jsonSchema, stepCountIs, streamText } from 'ai';
 import { createAiSdkExecutionLock, type JsonSchemaLike } from 'prefix-safe-json';
-import type { LanguageModelV1 } from 'ai';
+import type { LanguageModel } from 'ai';
 import type { AgentStrategy, StrategyContext } from '@/types/strategy.js';
 import type { SessionEvent } from '@/types/session.js';
 import type { ContentBlock } from '@/types/cma-protocol.js';
@@ -168,20 +168,19 @@ export class DefaultStrategy implements AgentStrategy {
       }));
 
       const result = streamText({
-        model: model as LanguageModelV1,
+        model: model as LanguageModel,
         system: systemPrompt || undefined,
         messages: aiMessages,
         tools: Object.keys(aiTools).length > 0 ? aiTools : undefined,
-        maxSteps,
+        stopWhen: stepCountIs(maxSteps),
         temperature: config.temperature,
-        maxTokens: config.maxTokens,
-        toolCallStreaming: true,
+        maxOutputTokens: config.maxTokens,
         abortSignal,
         onStepFinish: async (step) => {
           totalSteps++;
 
-          const tokensIn = step.usage?.promptTokens ?? 0;
-          const tokensOut = step.usage?.completionTokens ?? 0;
+          const tokensIn = step.usage?.inputTokens ?? 0;
+          const tokensOut = step.usage?.outputTokens ?? 0;
           totalTokensIn += tokensIn;
           totalTokensOut += tokensOut;
 
@@ -199,7 +198,7 @@ export class DefaultStrategy implements AgentStrategy {
           eventLog.recordUsage(session.id, tokensIn, tokensOut);
 
           // Emit agent.thinking for reasoning output (extended-thinking models)
-          const reasoning = (step as { reasoning?: string }).reasoning;
+          const reasoning = step.reasoningText;
           if (reasoning && reasoning.trim()) {
             const thinkingEvent = eventLog.append(session.id, {
               type: 'agent.thinking',
@@ -242,7 +241,7 @@ export class DefaultStrategy implements AgentStrategy {
                   type: 'tool_use',
                   id: toolCall.toolCallId,
                   name: toolCall.toolName,
-                  input: toolCall.args as Record<string, unknown>,
+                  input: toolCall.input as Record<string, unknown>,
                 }] as ContentBlock[],
                 tokensIn,
                 tokensOut,
@@ -255,9 +254,9 @@ export class DefaultStrategy implements AgentStrategy {
           if (step.toolResults && step.toolResults.length > 0) {
             for (const toolResult of step.toolResults) {
               const isMcp = toolResult.toolName?.startsWith('mcp_') ?? false;
-              const raw = typeof toolResult.result === 'string'
-                ? toolResult.result
-                : JSON.stringify(toolResult.result);
+              const raw = typeof toolResult.output === 'string'
+                ? toolResult.output
+                : JSON.stringify(toolResult.output);
               const capped = raw.length > MAX_TOOL_RESULT_CHARS
                 ? raw.slice(0, MAX_TOOL_RESULT_CHARS) + `\n\n[truncated: ${raw.length - MAX_TOOL_RESULT_CHARS} more chars]`
                 : raw;
@@ -305,10 +304,10 @@ export class DefaultStrategy implements AgentStrategy {
           broadcast(
             transientEvent(session.id, 'agent.message_chunk', {
               message_id: messageId,
-              delta: part.textDelta,
+              delta: part.text,
             }),
           );
-        } else if (part.type === 'step-finish' || part.type === 'finish') {
+        } else if (part.type === 'finish-step' || part.type === 'finish') {
           if (streaming) {
             broadcast(transientEvent(session.id, 'agent.message_stream_end', { message_id: messageId }));
             streaming = false;
@@ -393,14 +392,20 @@ export class DefaultStrategy implements AgentStrategy {
   }
 }
 
+/**
+ * Translate this codebase's `parameters` convention to the SDK's `inputSchema`.
+ * A tool left on `parameters` is not rejected — it reaches the model with an
+ * empty argument schema — so this conversion cannot be skipped.
+ */
 function toAiTool(tool: any): any {
   if (!tool || typeof tool !== 'object') return tool;
+  if (tool.inputSchema) return tool;
   if (!tool.parameters || typeof tool.parameters !== 'object') return tool;
-  if (isAiSdkSchema(tool.parameters)) return tool;
 
+  const { parameters, ...rest } = tool;
   return {
-    ...tool,
-    parameters: jsonSchema(tool.parameters),
+    ...rest,
+    inputSchema: isAiSdkSchema(parameters) ? parameters : jsonSchema(parameters),
   };
 }
 

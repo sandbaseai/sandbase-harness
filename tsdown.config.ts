@@ -1,8 +1,8 @@
-import { defineConfig } from 'tsup';
+import { defineConfig } from 'tsdown';
+import { writeFileSync, readFileSync } from 'node:fs';
 
 export default defineConfig([
   {
-    // CLI entry (needs the shebang)
     entry: { index: 'src/index.ts', 'mcp/index': 'src/mcp/index.ts' },
     format: ['esm'],
     dts: true,
@@ -10,11 +10,10 @@ export default defineConfig([
     clean: true,
     platform: 'node',
     target: 'node22',
-    splitting: false,
+    outExtensions: () => ({ js: '.js', dts: '.d.ts' }),
     banner: { js: '#!/usr/bin/env node' },
   },
   {
-    // SDK entry (library import, no shebang)
     entry: { sdk: 'src/sdk/index.ts' },
     format: ['esm'],
     dts: true,
@@ -22,6 +21,11 @@ export default defineConfig([
     clean: false,
     platform: 'node',
     target: 'node22',
-    splitting: false,
+    outExtensions: () => ({ js: '.js', dts: '.d.ts' }),
+    onSuccess: async () => {
+      const dtsPath = 'dist/sdk.d.ts';
+      const content = readFileSync(dtsPath, 'utf-8');
+      writeFileSync(dtsPath, `/// <reference types="node" />\n${content}`);
+    },
   },
 ]);

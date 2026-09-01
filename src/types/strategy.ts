@@ -5,7 +5,7 @@
  * context building → LLM call → response parsing → tool execution → loop.
  */
 
-import type { LanguageModelV1 } from 'ai';
+import type { LanguageModel } from 'ai';
 import type { SandboxInstance } from './sandbox.js';
 import type { Session, SessionEvent } from './session.js';
 
@@ -33,7 +33,7 @@ export interface StrategyContext {
   /** Agent system prompt (with any injected skills). Sent to the model. */
   systemPrompt: string;
   messages: CoreMessage[];
-  model: LanguageModelV1;
+  model: LanguageModel;
   tools: Record<string, CoreTool>;
   sandbox: SandboxInstance;
   eventLog: EventLogWriter;
