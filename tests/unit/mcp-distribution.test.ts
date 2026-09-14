@@ -34,6 +34,8 @@ describe('MCP OCI distribution', () => {
     expect(workflow).not.toContain('npm publish');
     expect(dockerfile).toContain('io.modelcontextprotocol.server.name="io.github.sandbaseai/sandbase-harness"');
     expect(dockerfile).toContain('RUN npm ci --ignore-scripts');
+    expect(dockerfile).toContain('COPY tsconfig.json tsconfig.tests.json tsdown.config.ts ./');
+    expect(dockerfile).not.toContain('tsup.config.ts');
     expect(dockerfile).toContain('RUN npm run build:runtime && npm prune --omit=dev');
   });
 

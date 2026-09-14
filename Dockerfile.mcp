@@ -6,7 +6,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
 
-COPY tsconfig.json tsconfig.tests.json tsup.config.ts ./
+COPY tsconfig.json tsconfig.tests.json tsdown.config.ts ./
 COPY src ./src
 RUN npm run build:runtime && npm prune --omit=dev
 
