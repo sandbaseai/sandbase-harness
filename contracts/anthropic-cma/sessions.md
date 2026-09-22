@@ -2,8 +2,9 @@
 
 Contract area: `/v1/sessions` — lifecycle, status transitions, initial events,
 resources, budget.
-Status: `supported` for lifecycle and initial events; session budget is
-`not_applicable`, see §4.
+Status: `supported` for lifecycle and initial events. The session budget is a
+separate contract area with its own status and is not claimed here; see
+`budget.md` and §4.
 Source: `src/api/routes/sessions.ts`, `src/api/routes/initial-events.ts`,
 `src/api/standard.ts`, `src/core/session/session-manager.ts`.
 

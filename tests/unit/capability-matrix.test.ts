@@ -92,9 +92,17 @@ describe('capability matrix', () => {
       'dreams',
       'mcp-tunnel',
     ]));
-    // Session budget itself is no longer a non-goal: it is implemented with a
-    // documented deviation, so a `not_applicable` status would understate it.
-    expect(capabilityEntry('session-budget').status).toBe('partial');
+  });
+
+  it('marks the designed session budget as planned rather than implemented', () => {
+    // Session budget is neither a non-goal nor a shipped behaviour: the design
+    // is published as budget.md, while nothing in the runtime prices model
+    // consumption or enforces a ceiling. `partial` would claim enforcement that
+    // does not exist, and `not_applicable` would deny work that is scheduled.
+    expect(capabilityEntry('session-budget').status).toBe('planned');
+    expect(capabilityEntry('session-budget').contract).toBe('contracts/anthropic-cma/budget.md');
+    // The entry has to say what is missing, not only carry a status.
+    expect(capabilityEntry('session-budget').reason.toLowerCase()).toContain('not implemented');
   });
 
   it('covers the areas that are described by prose contracts but easy to omit', () => {
@@ -148,11 +156,9 @@ describe('capability matrix', () => {
     expect(capabilityEntry('threads-and-coordinator').contract).toBe('contracts/anthropic-cma/threads.md');
   });
 
-  it('names the deviation that keeps the budget and thread entries from being supported', () => {
+  it('names the deviation that keeps the thread entry from being supported', () => {
     // `partial` without a readable deviation is indistinguishable from
     // `supported`, so the specific limitation is pinned rather than trusted.
-    expect(capabilityEntry('session-budget').reason.toLowerCase()).toContain('cost profile');
-    expect(capabilityEntry('session-budget').contract).toBe('contracts/anthropic-cma/budget.md');
     expect(capabilityEntry('threads-and-coordinator').reason.toLowerCase())
       .toContain('delegations list');
   });

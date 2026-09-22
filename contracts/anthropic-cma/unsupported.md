@@ -81,7 +81,8 @@ unsupported capability and its reason, and separating "not implemented" from
 
 Mixed, per the table in §2. Three entries are `not_applicable` by design and two
 are `unavailable`. Every one is recorded in the capability matrix with its reason
-rather than being omitted. The two entries that used to
-be here and are no longer — session budget and threads / coordinator / advisor —
-are `partial` in their own contract files, not withdrawn: this file's subject is
-behaviour that is absent, and they are not.
+rather than being omitted. The two entries that used to be here and are no longer
+have their own contract files rather than being withdrawn: threads / coordinator /
+advisor is `partial`, and session budget is `planned`, because its design is
+published while nothing implements it. This file's subject is behaviour that is
+absent, and neither of them is.

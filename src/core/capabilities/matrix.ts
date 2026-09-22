@@ -146,8 +146,8 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
   {
     area: 'budget',
     id: 'session-budget',
-    status: 'partial',
-    reason: 'Enforcement, pause semantics, the settlement-event whitelist and the session-wide ceiling follow the published contract. Cost is priced from an operator-supplied local cost profile rather than official list prices: a session whose models the profile cannot price is refused a budget, and usage.list_cost is withheld while any used model is unpriced.',
+    status: 'planned',
+    reason: 'Designed but not implemented: nothing prices model consumption and no session accepts a budget, so a session has no spending ceiling and usage reports neither a list cost nor a budget.',
     contract: 'contracts/anthropic-cma/budget.md',
   },
   {

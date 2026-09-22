@@ -219,6 +219,14 @@
 - Adds `seq` and immutable `metadata` to public event responses and aligns SSE
   envelopes with REST. Model-attributed event projections include the selected
   model and provider stop reason when available.
+- Records the session budget capability as `planned` instead of `partial`. The
+  matrix entry claimed enforcement, pause semantics, the settlement-event
+  whitelist, a session-wide ceiling and an operator-supplied cost profile, while
+  `session-budget.ts`, `cost-profile.ts`, and their tests are absent from the
+  tree: nothing priced model consumption and no session accepted a budget. The
+  contract documents disagreed with each other as well, `sessions.md` calling the
+  budget `not_applicable` and `unsupported.md` calling it `partial`. The entry and
+  both documents now state that the design is published and nothing implements it.
 
 ### Security
 
