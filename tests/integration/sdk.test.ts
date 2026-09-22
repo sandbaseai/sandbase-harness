@@ -19,6 +19,10 @@ describe('Client SDK', () => {
   let tmpDir: string;
   let dataDir: string;
   let client: ManagedAgentsClient;
+  // Delays opening an SSE request, so a test can reproduce a slow runner where
+  // the stream is not yet subscribed when a message is sent. 0 keeps every
+  // other case on the normal path.
+  let streamOpenDelayMs = 0;
 
   beforeAll(async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'ma-sdk-'));
@@ -34,14 +38,20 @@ describe('Client SDK', () => {
     );
 
     const sessionManager = new SessionManager(db);
-    // Executor that emits one agent.message then lets the session go idle
+    // Executor that emits one agent.message then lets the session go idle.
+    // It mirrors DefaultStrategy: the reply is appended to the event log and
+    // then broadcast. A reply that existed only as a transient broadcast would
+    // never reach a tail() client at all — the SSE route forwards transient
+    // (seq 0) events as opted-in preview frames only — so the fixture must
+    // persist it to exercise the real delivery path.
     const executor: SessionExecutor = {
       // eslint-disable-next-line require-yield
       async *execute(session, _event, options) {
-        options?.broadcast?.({
-          id: 'e1', sessionId: session.id, seq: 100, type: 'agent.message',
-          content: [{ type: 'text', text: 'hello from agent' }], createdAt: new Date(),
+        const reply = sessionManager.getEventLogger().append(session.id, {
+          type: 'agent.message',
+          content: [{ type: 'text', text: 'hello from agent' }],
         });
+        options?.broadcast?.(reply);
         return;
       },
       async cleanupSession() {},
@@ -69,6 +79,9 @@ describe('Client SDK', () => {
       // return a Response synchronously, which is not assignable on its own.
       fetch: async (input, init) => {
         const url = new URL(typeof input === 'string' ? input : input.toString());
+        if (streamOpenDelayMs > 0 && url.pathname.endsWith('/events/stream')) {
+          await new Promise((r) => setTimeout(r, streamOpenDelayMs));
+        }
         return app.request(`${url.pathname}${url.search}`, init);
       },
     });
@@ -120,8 +133,8 @@ describe('Client SDK', () => {
     await new Promise((r) => setTimeout(r, 60));
     const { data } = await client.sessions.events(s.id);
     const types = data.map((e) => e.type);
-    // user.message is persisted; the mock executor only broadcasts its reply
-    // (transient), so the agent.message is asserted via tail() below.
+    // The user turn is persisted, so it is read back from the log here; the
+    // agent reply is asserted through the live stream in the tail() case below.
     expect(types).toContain('user.message');
   });
 
@@ -150,26 +163,44 @@ describe('Client SDK', () => {
   });
 
   it('tails the live stream and receives the agent reply', async () => {
-    const s = await client.sessions.create({ agent: 'agent_echo' });
+    // A fresh tail is opened by an asynchronous request, so a fixed "give the
+    // stream a moment" sleep cannot prove the server has subscribed yet. Force
+    // that slow path here: the SSE request is not even dispatched until long
+    // after the old 50 ms sleep would have elapsed and sent the message.
+    streamOpenDelayMs = 250;
+    try {
+      const s = await client.sessions.create({ agent: 'agent_echo' });
 
-    const received: string[] = [];
-    const streamPromise = (async () => {
-      for await (const ev of client.sessions.tail(s.id)) {
-        received.push(ev.type);
-        if (ev.type === 'session.status_idle') break;
-      }
-    })();
+      // Readiness anchor. The SSE route subscribes before it replays the stored
+      // log, so a persisted event that already exists can only reach this stream
+      // once the server-side subscription is live. `user.interrupt` appends and
+      // broadcasts without starting a turn, which keeps the anchor inert.
+      await client.sessions.interrupt(s.id);
 
-    // Give the stream a moment to open, then send
-    await new Promise((r) => setTimeout(r, 50));
-    await client.sessions.sendMessage(s.id, 'go');
+      const received: string[] = [];
+      const ready = deferred();
+      const tailPromise = (async () => {
+        for await (const ev of client.sessions.tail(s.id)) {
+          if (ev.type === 'user.interrupt') {
+            ready.resolve();
+            continue;
+          }
+          received.push(ev.type);
+          if (ev.type === 'session.status_idle') return;
+        }
+      })();
 
-    await Promise.race([
-      streamPromise,
-      new Promise((r) => setTimeout(r, 2000)),
-    ]);
+      // Send only once the subscription is proven, never on a timer.
+      await withDeadline(ready.promise, 2000, 'the live-stream subscription to open');
+      await client.sessions.sendMessage(s.id, 'go');
+      await withDeadline(tailPromise, 2000, 'the tailed turn to reach session.status_idle');
 
-    expect(received).toContain('agent.message');
+      expect(received).toContain('user.message');
+      expect(received).toContain('agent.message');
+      expect(received).toContain('session.status_idle');
+    } finally {
+      streamOpenDelayMs = 0;
+    }
   });
 
   it('stops a session', async () => {
@@ -220,3 +251,30 @@ describe('Client SDK', () => {
     await expect(client.sessions.get('sess_nope')).rejects.toThrow(/API error 404/);
   });
 });
+
+/**
+ * Reject once `ms` elapses without `work` settling, so a stream that never
+ * delivers its terminal event names the condition it waited for instead of
+ * surfacing as a generic test timeout on a later assertion.
+ */
+async function withDeadline<T>(work: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`timed out after ${ms}ms waiting for ${label}`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
