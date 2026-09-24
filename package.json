@@ -118,7 +118,7 @@
     "ai": "^7.0.0",
     "commander": "^15.0.0",
     "escape-html": "1.0.3",
-    "hono": "^4.6.0",
+    "hono": "^4.13.8",
     "nanoid": "^6.0.1",
     "prefix-safe-json": "0.4.3",
     "react-markdown": "^10.1.0",
