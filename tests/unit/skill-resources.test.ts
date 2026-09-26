@@ -58,6 +58,38 @@ describe('skill resource helpers', () => {
       if (!mismatch.ok) expect(mismatch.message).toContain('different filter');
     }
   });
+
+  it('exposes one pagination rule on every page, with no local field left behind', () => {
+    // The doc on `skillPage` names the shape this replaced: a body that carried the
+    // local `has_more` / `first_id` / `last_id` fields *and* a `next_page` cursor at
+    // once, "which let two clients paginate by two different rules from the same
+    // body". The cases above check `has_more` and `first_id`, on the first page only,
+    // so `last_id` - the third name in that sentence - and every page after the first
+    // could carry a legacy field unnoticed.
+    const skills = [testSkill('a'), testSkill('b'), testSkill('c')];
+    const legacyFields = ['has_more', 'first_id', 'last_id'];
+
+    const pages = [];
+    let cursor: string | null | undefined;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const result = skillPage(skills, { limit: '2', ...(cursor ? { page: cursor } : {}) });
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      pages.push(result.page);
+      cursor = result.page.next_page;
+      if (!cursor) break;
+    }
+
+    // Following the cursors reached both pages, so both are asserted below. A caller
+    // that follows `next_page` is the one at risk of paginating by two rules.
+    expect(pages).toHaveLength(2);
+    for (const page of pages) {
+      for (const field of legacyFields) expect(page).not.toHaveProperty(field);
+      // One rule means the canonical cursor fields are the ones that are present.
+      expect(page).toHaveProperty('next_page');
+      expect(page).toHaveProperty('prev_page');
+    }
+  });
 });
 
 function testSkill(name: string): Skill {
