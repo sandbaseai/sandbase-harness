@@ -283,6 +283,24 @@ describe('ModelRegistry qualified model reference on the wire', () => {
     expect(resolvedModelIdOf(registry.createModel('deepseek-v4-flash')))
       .toBe('deepseek-v4-flash');
   });
+
+  it('keeps two resolved models apart when both are alive at once', () => {
+    // The readback above creates a model and reads it in the same statement, so it
+    // would still pass if the registry kept one "last resolved" id: each assertion
+    // sees its own write. `registry.ts:172-176` says why that is not enough - "one
+    // registry serves concurrent sessions, and a single 'last resolved' field would
+    // report whichever turn resolved most recently" - and concurrent sessions means
+    // two instances held at the same time. Creating both before reading either is
+    // what makes the difference observable.
+    const registry = gatewayRegistry();
+    const qualified = registry.createModel('deepseek/deepseek-v4-flash');
+    const bare = registry.createModel('deepseek-v4-flash');
+
+    expect(resolvedModelIdOf(qualified)).toBe('deepseek/deepseek-v4-flash');
+    expect(resolvedModelIdOf(bare)).toBe('deepseek-v4-flash');
+    // Reading one must not disturb the other, in either order.
+    expect(resolvedModelIdOf(qualified)).toBe('deepseek/deepseek-v4-flash');
+  });
 });
 
 // Guards the wiring, not just the config object: asserting only that
