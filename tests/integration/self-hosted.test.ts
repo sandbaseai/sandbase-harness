@@ -201,4 +201,38 @@ describe('Worker HTTP endpoints', () => {
     });
     expect(res.status).toBe(400);
   });
+
+  it('distinguishes an unknown work item from one claimed by another worker', async () => {
+    // Both refusals on this route exist, and only the 409 half was driven: the case
+    // above completes an item another worker holds. Nothing reached the 404, because
+    // the only request in the suite carrying an unknown id also omitted worker_id and
+    // was refused earlier, at the request-shape check.
+    //
+    // The two answers must stay different. A worker told 409 knows another worker owns
+    // the item and that its own claim was never valid; a worker told 404 knows the id
+    // is gone and there is nothing left to retry. Collapsing them into one answer would
+    // leave a worker unable to tell "not yours" from "not there".
+    const id = queue.enqueue('s', 'read', { path: 'f' });
+    queue.claim('w1');
+
+    const foreign = await app.request('/complete', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, worker_id: 'w2', result: 'x' }),
+    });
+    expect(foreign.status).toBe(409);
+
+    const missing = await app.request('/complete', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: 'work_missing', worker_id: 'w2', result: 'x' }),
+    });
+    expect(missing.status).toBe(404);
+    const body = await missing.json() as { error: { type: string; message: string } };
+    // The unknown item answers with the runtime's canonical not_found envelope, not
+    // with the conflict the neighbouring case sees.
+    expect(body.error.type).toBe('not_found');
+    expect(body.error.message).toBe('work item not found');
+    // And the refusal changed nothing: the real item is still w1's to complete.
+    expect(queue.get(id)!.status).toBe('claimed');
+    expect(queue.get(id)!.claimedBy).toBe('w1');
+  });
 });
