@@ -104,14 +104,15 @@ describe('credential network policy', () => {
       locations?: string[];
       value?: string;
       invalidCiphertext?: boolean;
+      mcpServerUrl?: string;
     }) {
       const value = opts.value ?? 'super-secret-value';
       const encrypted = encryptSecret(value);
       db.prepare(
         `INSERT INTO credential_records (
           id, vault_id, name, auth_type, variable_name, value_hint, network,
-          injection_locations, secret_ciphertext, secret_nonce, secret_tag, status, metadata, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', '{}', ?, ?)`,
+          injection_locations, secret_ciphertext, secret_nonce, secret_tag, mcp_server_url, status, metadata, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', '{}', ?, ?)`,
       ).run(
         opts.id,
         vaultId,
@@ -124,6 +125,7 @@ describe('credential network policy', () => {
         opts.invalidCiphertext ? 'not-valid-ciphertext' : encrypted.ciphertext,
         opts.invalidCiphertext ? 'not-valid-nonce' : encrypted.nonce,
         opts.invalidCiphertext ? 'not-valid-tag' : encrypted.tag,
+        opts.mcpServerUrl ?? null,
         new Date().toISOString(),
         new Date().toISOString(),
       );
@@ -201,6 +203,43 @@ describe('credential network policy', () => {
       const bundle = resolveSessionCredentialInjections(db, 'sess_test', { targetHost: 'api.example.com' });
       expect(bundle.request_headers.Authorization).toBe('Bearer super-secret-value');
       expect(bundle.request_body.crd_bearer).toBe('super-secret-value');
+    });
+
+    it('does not decrypt a credential that belongs to another server', () => {
+      // The boundary says of a credential keyed by `mcp_server_url` that "the check
+      // sits above the decrypt call, the secret is not even decrypted". The suite
+      // already shows the *outcome* for an inapplicable credential - no header, no
+      // denial, no audit row - and neither of those observations can tell whether
+      // the ciphertext was touched, because not injecting it looks the same either
+      // way. It can be told by handing the inapplicable row a ciphertext that cannot
+      // be decrypted: reaching the decrypt would then throw, so resolving at all is
+      // the evidence. This is the same instrument the host-policy case uses above.
+      insertCredential({
+        id: 'crd_other',
+        network: { type: 'unrestricted', allowed_hosts: [] },
+        authType: 'bearer_token',
+        mcpServerUrl: 'https://other.example.com/mcp',
+        invalidCiphertext: true,
+      });
+      insertCredential({
+        id: 'crd_here',
+        network: { type: 'unrestricted', allowed_hosts: [] },
+        authType: 'bearer_token',
+        mcpServerUrl: 'https://here.example.com/mcp',
+      });
+
+      const bundle = resolveSessionCredentialInjections(db, 'sess_test', {
+        mcpServerUrl: 'https://here.example.com/mcp',
+        targetHost: 'https://here.example.com/mcp',
+      });
+
+      // The credential for this server is the only one that arrives.
+      expect(bundle.request_headers.Authorization).toBe('Bearer super-secret-value');
+      expect(bundle.credentials.map((entry) => entry.id)).toEqual(['crd_here']);
+      // Being inapplicable is still not a refusal, and it left no audit trail.
+      expect(bundle.denied).toEqual([]);
+      expect(auditActions('crd_other')).toEqual([]);
+      expect((db.prepare('SELECT last_used_at FROM credential_records WHERE id = ?').get('crd_other') as { last_used_at: string | null }).last_used_at).toBeNull();
     });
   });
 });
