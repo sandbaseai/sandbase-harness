@@ -249,11 +249,20 @@ being left claimed. Useful flags:
 | --- | --- |
 | `--once` | Claim and run at most one item, then exit. |
 | `--interval-ms <ms>` | Delay between polls when the queue is empty (default `1000`, minimum `250`). |
+| `--heartbeat-ms <ms>` | Renew the claim on this interval while an item runs (default `20000`, minimum `25`). |
 | `--worker-id <id>` | Identity reported on the claim and the completion (default `worker_<pid>`). |
 
-An unusable `--port` or `--interval-ms` stops the worker at startup with a message
-naming the option, which matters for a long-running process on someone else's
-machine: a `--interval-ms` that does not parse would otherwise poll with no delay
+A claim carries a lease window (60s by default), so a worker that executed a long
+item silently would have it reclaimed and handed to a second worker while the first
+was still running it. While an item runs, the worker therefore renews its own claim
+every `--heartbeat-ms`, and stops renewing when the item finishes. A failed renewal
+is logged and the command keeps running: the server refuses a completion from a worker
+that no longer holds the claim, and stopping a command halfway on a suspicion that the
+claim lapsed would leave a half-applied side effect.
+
+An unusable `--port`, `--interval-ms` or `--heartbeat-ms` stops the worker at startup
+with a message naming the option, which matters for a long-running process on someone
+else's machine: a `--interval-ms` that does not parse would otherwise poll with no delay
 at all instead of failing.
 
 ## Operational Checks

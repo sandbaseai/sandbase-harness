@@ -1516,8 +1516,11 @@ Pass `--once` to claim and run at most one item and exit, which is also what mak
 the command usable from a test or a cron job; without it the worker polls until it
 is stopped. `--interval-ms` sets the delay between polls when the queue is empty
 and `--worker-id` sets the identity reported on both the claim and the completion
-(default `worker_<pid>`). An unusable `--port` or `--interval-ms` stops the worker
-at startup with a message naming the option: an unparseable interval would
+(default `worker_<pid>`). While an item runs the worker renews its own claim every
+`--heartbeat-ms` (default `20000`), because the claim carries a lease window and a
+long item would otherwise be reclaimed and handed to a second worker while the first
+was still running it. An unusable `--port`, `--interval-ms` or `--heartbeat-ms` stops
+the worker at startup with a message naming the option: an unparseable interval would
 otherwise become a poll loop with no delay at all.
 
 ### Self-hosted worker keys

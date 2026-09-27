@@ -391,6 +391,7 @@ describe('CLI program', () => {
       '--api-key',
       '--environment-id',
       '--environment-key',
+      '--heartbeat-ms',
       '--interval-ms',
       '--once',
       '--port',
@@ -400,7 +401,7 @@ describe('CLI program', () => {
     // The options the documented invocation relies on, with their documented defaults,
     // asserted by value rather than by the list above, which would pass on any
     // option that happened to have the right name.
-    expect(poll!.opts()).toMatchObject({ port: '3000', workdir: '.', intervalMs: '1000', once: false });
+    expect(poll!.opts()).toMatchObject({ port: '3000', workdir: '.', intervalMs: '1000', once: false, heartbeatMs: '20000' });
   });
 
   it('passes default start options to the runtime starter', async () => {

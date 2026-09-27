@@ -5,7 +5,7 @@
  * `--workdir`, and reports each result to `POST /v1/x/worker/complete`. The server
  * never runs them — this process does.
  *
- * Two invariants this file has to hold, neither of which it held before:
+ * Three invariants this file has to hold, none of which it held before:
  *
  * 1. `complete` carries the same `worker_id` that `claim` sent. The route requires
  *    it (`src/api/routes/worker.ts:44`) and matches the row on it
@@ -14,6 +14,11 @@
  * 2. Options are validated before the loop starts. `setTimeout(fn, NaN)` fires
  *    immediately, so a malformed `--interval-ms` used to become a busy loop against
  *    the server instead of an error.
+ * 3. A claimed item is renewed while it runs. The claim carries a lease window
+ *    (60s by default) and an `exec` item may take up to its own 300s timeout, so a
+ *    worker that executed silently past the window had its item reclaimed and handed
+ *    to a second worker while the first was still running it — the work happened
+ *    twice on the operator's machine, and only then was the first completion refused.
  */
 
 import { execFile } from 'node:child_process';
@@ -25,6 +30,17 @@ const MIN_POLL_INTERVAL_MS = 250;
 
 const DEFAULT_POLL_INTERVAL_MS = 1000;
 
+/**
+ * The interval is a third of the queue's default lease window, which is the same
+ * relationship the session file lease uses between its heartbeat and staleness
+ * (`src/strategy/pi/session-lease.ts:80-89`): frequent enough that a running worker
+ * renews several times inside one window, sparse enough that an idle window costs
+ * nothing.
+ */
+const MIN_HEARTBEAT_MS = 25;
+
+const DEFAULT_HEARTBEAT_MS = 20_000;
+
 export type WorkerPollOptions = {
   port: string;
   apiKey?: string;
@@ -34,6 +50,7 @@ export type WorkerPollOptions = {
   workdir: string;
   once?: boolean;
   intervalMs?: string;
+  heartbeatMs?: string;
 };
 
 /** `WorkerPollOptions` with every default applied and every value checked. */
@@ -46,6 +63,7 @@ export type ResolvedWorkerPollOptions = {
   root: string;
   once: boolean;
   intervalMs: number;
+  heartbeatMs: number;
 };
 
 /**
@@ -70,6 +88,13 @@ export function resolveWorkerPollOptions(opts: WorkerPollOptions): ResolvedWorke
     );
   }
 
+  const heartbeatMs = Number(opts.heartbeatMs ?? DEFAULT_HEARTBEAT_MS);
+  if (!Number.isFinite(heartbeatMs) || heartbeatMs < MIN_HEARTBEAT_MS) {
+    throw new Error(
+      `Invalid --heartbeat-ms value "${opts.heartbeatMs}". Expected a number of at least ${MIN_HEARTBEAT_MS}.`,
+    );
+  }
+
   return {
     port: String(port),
     apiKey: opts.apiKey,
@@ -79,6 +104,7 @@ export function resolveWorkerPollOptions(opts: WorkerPollOptions): ResolvedWorke
     root: resolve(opts.workdir),
     once: opts.once === true,
     intervalMs,
+    heartbeatMs,
   };
 }
 
@@ -97,7 +123,10 @@ export async function workerPollCommand(opts: WorkerPollOptions) {
     const item = await claimWorkItem(config);
     if (item) {
       try {
-        await completeWorkItem(config, item, { status: 'fulfilled', value: await executeWorkItem(item, config.root) });
+        await completeWorkItem(config, item, {
+          status: 'fulfilled',
+          value: await renewWhileRunning(config, item.id, () => executeWorkItem(item, config.root)),
+        });
       } catch (error) {
         await completeWorkItem(config, item, { status: 'rejected', reason: error });
       }
@@ -109,6 +138,44 @@ export async function workerPollCommand(opts: WorkerPollOptions) {
     if (config.once) return;
     await sleep(config.intervalMs);
   }
+}
+
+/**
+ * Run one work item while renewing its claim on `heartbeatMs`.
+ *
+ * The renewal is deliberately best-effort: a failed heartbeat is logged and the item
+ * keeps running. A lease that has genuinely been lost is refused by the server on the
+ * completion anyway, and stopping a command halfway through on a *suspicion* that the
+ * claim lapsed would leave a half-applied side effect - the same conservative rule
+ * the session file lease states, where a failed renewal may only make the lease look
+ * stale later rather than make it immediately stealable.
+ */
+export async function renewWhileRunning<T>(
+  opts: ResolvedWorkerPollOptions,
+  itemId: string,
+  run: () => Promise<T>,
+): Promise<T> {
+  const timer = setInterval(() => {
+    void renewClaim(opts, itemId).catch((error) => {
+      console.warn(`renewal failed for ${itemId}: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }, opts.heartbeatMs);
+  // The renewal must never be the reason the process stays alive once the item is done.
+  timer.unref?.();
+  try {
+    return await run();
+  } finally {
+    clearInterval(timer);
+  }
+}
+
+async function renewClaim(opts: ResolvedWorkerPollOptions, itemId: string): Promise<void> {
+  const res = await fetch(`http://localhost:${opts.port}/v1/x/worker/heartbeat`, {
+    method: 'POST',
+    headers: jsonHeaders(opts),
+    body: JSON.stringify({ id: itemId, worker_id: opts.workerId }),
+  });
+  if (!res.ok) throw new Error(`worker heartbeat failed: ${res.status} ${await res.text()}`);
 }
 
 export async function executeWorkItem(item: WorkerItem, root: string): Promise<unknown> {

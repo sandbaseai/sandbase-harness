@@ -24,7 +24,7 @@ import { Database } from '@/core/db/database.js';
 import { SessionManager } from '@/core/session/session-manager.js';
 import { createServer } from '@/api/server.js';
 import { WorkQueue } from '@/sandbox/self-hosted-provider.js';
-import { resolveWorkerPollOptions, workerPollCommand } from '@/cli/worker-commands.js';
+import { resolveWorkerPollOptions, renewWhileRunning, workerPollCommand } from '@/cli/worker-commands.js';
 
 /** Run `fn` with `console.log` captured, so the poller's output stays out of the report. */
 async function withCapturedLog<T>(fn: () => Promise<T>): Promise<string[]> {
@@ -142,6 +142,92 @@ describe('worker poll CLI', () => {
       workerPollCommand({ port: String(port), workdir, once: true, environmentId: 'env_a' }));
 
     expect(queue.get(id)!.status).toBe('pending');
+  });
+
+  it('renews its claim while an item runs, stops when it ends, and survives a failed renewal', async () => {
+    // The claim carries a lease window (60s by default) and an `exec` item may take up
+    // to its own 300s timeout, so a worker that executed silently past the window had
+    // the item reclaimed and handed to a second worker while the first was still
+    // running it. The renewal is the machine-side half of that window, and this case is
+    // the only thing that drives it.
+    const { queue, port, workdir } = await startRuntime();
+    writeFileSync(join(workdir, 'greeting.txt'), 'hello', 'utf8');
+    const id = queue.enqueue('sess_worker', 'read', { path: 'greeting.txt' });
+
+    // The claim the poller would have made, taken here so the test controls the row.
+    expect(queue.claim('worker_test')?.id).toBe(id);
+    const opts = resolveWorkerPollOptions({ port: String(port), workdir, workerId: 'worker_test', heartbeatMs: '60' });
+
+    // Every renewal the CLI sends goes to the real route, so the assertions below read
+    // the effect out of SQLite rather than trusting the request count.
+    const renewals: string[] = [];
+    const realFetch = globalThis.fetch;
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(((input: unknown, init?: unknown) => {
+      const url = String(input);
+      if (url.endsWith('/v1/x/worker/heartbeat')) renewals.push(url);
+      return realFetch(input as Parameters<typeof realFetch>[0], init as Parameters<typeof realFetch>[1]);
+    }) as typeof realFetch);
+
+    try {
+      // Start from a claim that is already past the window: without a renewal the item
+      // is claimable by anyone, which is what makes the renewal observable at all.
+      db!.prepare("UPDATE work_items SET claimed_at = datetime('now', '-60 minutes') WHERE id = ?").run(id);
+      const value = await renewWhileRunning(opts, id, () => new Promise((r) => setTimeout(() => r('executed'), 400)));
+      expect(value).toBe('executed');
+      expect(renewals.length).toBeGreaterThanOrEqual(2);
+      // The renewal reached the row: the abandoned claim is inside its window again, so
+      // a second worker polling right now is handed nothing.
+      expect(queue.claim('other_worker')).toBeNull();
+      expect(queue.get(id)!.claimedBy).toBe('worker_test');
+    } finally {
+      spy.mockRestore();
+    }
+
+    // ...and it stops with the item: a renewal that outlived its run would keep
+    // renewing a claim that is about to be completed, once per finished item.
+    const settled = renewals.length;
+    await new Promise((r) => setTimeout(r, 200));
+    expect(renewals.length).toBe(settled);
+
+    // A renewal the server refuses is not fatal to the work. The port is closed, so
+    // every renewal fails; the item must still run to completion and report why.
+    const dead = resolveWorkerPollOptions({ port: '9', workdir, workerId: 'worker_test', heartbeatMs: '30' });
+    const warnings: string[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warnings.push(args.join(' ')); });
+    try {
+      expect(await renewWhileRunning(dead, id, () => new Promise((r) => setTimeout(() => r('ran anyway'), 150)))).toBe('ran anyway');
+    } finally {
+      warn.mockRestore();
+    }
+    expect(warnings.join('\n')).toContain(`renewal failed for ${id}`);
+
+    // And the poll loop is what renews, which the assertions above cannot show on their
+    // own: they call the wrapper directly, so a loop that never wrapped its execution
+    // would leave them all green. This drives the real command and observes the renewal
+    // being scheduled with the configured interval.
+    const intervals: number[] = [];
+    const realSetInterval = globalThis.setInterval;
+    const scheduled = vi.spyOn(globalThis, 'setInterval').mockImplementation(((fn: () => void, ms?: number) => {
+      intervals.push(Number(ms));
+      return realSetInterval(fn as never, ms as never);
+    }) as typeof realSetInterval);
+    try {
+      const polled = queue.enqueue('sess_worker', 'read', { path: 'greeting.txt' });
+      await withCapturedLog(() => workerPollCommand({
+        port: String(port), workdir, once: true, workerId: 'worker_test', heartbeatMs: '60',
+      }));
+      expect(queue.get(polled)!.status).toBe('done');
+    } finally {
+      scheduled.mockRestore();
+    }
+    expect(intervals).toContain(60);
+
+    // The option is validated like every other one, before the loop starts.
+    for (const bad of ['abc', '', 'NaN', '-1', '0', '24']) {
+      expect(() => resolveWorkerPollOptions({ port: '3000', workdir: '.', heartbeatMs: bad })).toThrow(/heartbeat-ms/);
+    }
+    expect(resolveWorkerPollOptions({ port: '3000', workdir: '.' }).heartbeatMs).toBe(20_000);
+    expect(resolveWorkerPollOptions({ port: '3000', workdir: '.', heartbeatMs: '25' }).heartbeatMs).toBe(25);
   });
 
   it('refuses an unusable --interval-ms instead of polling with no delay', () => {
