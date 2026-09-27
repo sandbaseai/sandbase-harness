@@ -85,6 +85,15 @@ const TERMINAL_SESSION_STATUSES: string[] = Object.entries(SESSION_TRANSITIONS)
   .map(([status]) => status);
 
 /**
+ * The same statuses as a SQL list, for the predicates that have to read them per row.
+ *
+ * Derived from the constant above rather than typed out again, and safe to interpolate
+ * because the values are keys of `SESSION_TRANSITIONS` - literals in this repository -
+ * never caller input.
+ */
+const TERMINAL_SESSION_STATUS_SQL = TERMINAL_SESSION_STATUSES.map((status) => `'${status}'`).join(', ');
+
+/**
  * Queue primitives shared by the provider (enqueue/await) and the HTTP worker
  * endpoints (claim/complete).
  */
@@ -138,14 +147,31 @@ export class WorkQueue {
    * Work whose session has ended is excluded here rather than filtered out of a
    * result: a stopped item must not be selectable, because selecting it and then
    * refusing it would leave the transaction holding a row it cannot hand over.
+   *
+   * "Ended" is read from the session's own status, not only from the marker on the
+   * row. `stop()` writes that marker, but it is reached through the sandbox release,
+   * and a terminal session is allowed to skip the release - `cleanup_pending` does, to
+   * retain the workspace until child-tree cleanup can be proven - while a session that
+   * simply finishes its turn never releases one at all. Reading the status here makes
+   * the exclusion independent of which path ended the session, and covers rows that
+   * are already sitting unmarked in an existing database.
    */
   claim(workerId: string, sessionId?: string, environmentId?: string): WorkItem | null {
     // SQLite has no `milliseconds` modifier - `datetime('now', '-60000 milliseconds')`
     // is NULL and every comparison against it is NULL, which reads as "nothing is ever
     // reclaimable". Seconds, with a fractional part, is the modifier that exists.
     const leaseModifier = `-${this.leaseMs / 1000} seconds`;
-    const claimable = (prefix: string): string =>
+    // The row's own condition: unstopped, and either pending or a claim whose lease ran out.
+    const rowClaimable = (prefix: string): string =>
       `(${prefix}stopped_at IS NULL AND (${prefix}status = 'pending' OR (${prefix}status = 'claimed' AND ${prefix}claimed_at IS NOT NULL AND ${prefix}claimed_at <= datetime('now', ?))))`;
+    // The session's condition, as a correlated subquery so one fragment serves the
+    // scoped and unscoped selections and the guarded update alike. `IS NULL` keeps work
+    // for an unknown session id claimable: an id with no row is a caller's mistake
+    // rather than an ended session.
+    const sessionLive = (prefix: string): string =>
+      `((SELECT ss.status FROM sessions ss WHERE ss.id = ${prefix}session_id) IS NULL
+        OR (SELECT ss.status FROM sessions ss WHERE ss.id = ${prefix}session_id) NOT IN (${TERMINAL_SESSION_STATUS_SQL}))`;
+    const claimable = (prefix: string): string => `(${rowClaimable(prefix)} AND ${sessionLive(prefix)})`;
     return this.db.transaction(() => {
       let candidate: { id: string } | undefined;
       if (sessionId) {

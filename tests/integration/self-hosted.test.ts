@@ -255,6 +255,70 @@ describe('WorkQueue', () => {
     expect(queue.stop('sess_released')).toBe(0);
   });
 
+  it('does not hand out work queued for a session that ended without releasing its sandbox', () => {
+    // `queue.stop()` is reached only through the sandbox release. `cleanup_pending`
+    // deliberately skips that release - the workspace is retained until child-tree cleanup
+    // can be proven - and a session that simply finishes its turn never releases one at
+    // all, so a session can reach a terminal status with its queued work unmarked. The
+    // claim has to read the session's own status, or the work runs anyway.
+    db.prepare("INSERT INTO environments (id, name, description, config, metadata) VALUES ('env_a', 'a', '', '{}', '{}')").run();
+    db.prepare("INSERT INTO agents (id, name, definition) VALUES ('agent_x', 'x', '{}')").run();
+    const mkSession = (id: string, status: string): void => {
+      db.prepare("INSERT INTO sessions (id, agent_id, agent_name, environment_id, status) VALUES (?, 'agent_x', 'x', 'env_a', ?)").run(id, status);
+    };
+
+    mkSession('sess_parked', 'running');
+    const parked = queue.enqueue('sess_parked', 'exec', { command: 'nobody wants this' });
+    mkSession('sess_held', 'running');
+    const held = queue.enqueue('sess_held', 'exec', { command: 'already running' });
+    expect(queue.claim('w1', 'sess_held')?.id).toBe(held);
+    // The holder stops renewing here; its lease lapses, which is the moment the item
+    // becomes a candidate for a second worker.
+    backdateClaim(db, held, 24 * 60);
+
+    // The session ends through the path that never tells the queue.
+    db.prepare("UPDATE sessions SET status = 'cleanup_pending' WHERE id IN ('sess_parked','sess_held')").run();
+    // Nothing marked these rows. That absence is the precondition of the defect, and it is
+    // why reading the marker alone was not enough.
+    expect(queue.get(parked)!.stoppedAt).toBeNull();
+    expect(queue.get(held)!.stoppedAt).toBeNull();
+
+    // Not on a first claim, in any of the three scopes ...
+    expect(queue.claim('w1')).toBeNull();
+    expect(queue.claim('w1', 'sess_parked')).toBeNull();
+    expect(queue.claim('w1', undefined, 'env_a')).toBeNull();
+    // ... and not on a reclaim either: `held` is expired and would otherwise be handed to a
+    // second worker to run for a session that is over.
+    expect(queue.claim('w2')).toBeNull();
+
+    // The holder may still report what actually happened. The session ending says the work
+    // is not wanted any more, not that the effect did not occur.
+    expect(queue.complete(held, 'w1', { exitCode: 0, stdout: 'ran while it was still wanted' })).toBe('completed');
+
+    // A terminal row must not block the queue behind it. `parked` is the oldest row here, so
+    // a predicate that refused it in the update but left it selectable would find nothing it
+    // could hand over and would starve every worker of the work that is still wanted.
+    mkSession('sess_alive', 'running');
+    const live = queue.enqueue('sess_alive', 'read', { path: 'still wanted' });
+    expect(queue.claim('w3')!.id).toBe(live);
+
+    // A status with an outbound transition is not an ended session, even when no release
+    // ever ran for it: `failed` is retried, and a retry has to be able to run the tools it
+    // calls.
+    mkSession('sess_retry', 'failed');
+    const retried = queue.enqueue('sess_retry', 'exec', { command: 'retry me' });
+    expect(queue.claim('w4', 'sess_retry')!.id).toBe(retried);
+    queue.complete(retried, 'w4', { exitCode: 0 });
+
+    // And a session that ends by finishing its turn - the path that releases no sandbox at
+    // all - is refused the same way, with no marker of its own.
+    mkSession('sess_finished', 'running');
+    const finished = queue.enqueue('sess_finished', 'exec', { command: 'too late' });
+    db.prepare("UPDATE sessions SET status = 'completed' WHERE id = 'sess_finished'").run();
+    expect(queue.get(finished)!.stoppedAt).toBeNull();
+    expect(queue.claim('w5', 'sess_finished')).toBeNull();
+  });
+
   it('tells a worker its lease is lost once the session stopped the work', () => {
     // A worker executing a long item asks whether the work is still wanted by renewing
     // its claim. Once the session has ended - possibly in another process, where no
