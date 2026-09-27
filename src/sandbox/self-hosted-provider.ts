@@ -63,6 +63,55 @@ export type WorkCompletionResult = 'completed' | 'not_found' | 'not_claimed_by_w
 export type WorkLeaseResult = 'renewed' | 'not_found' | 'not_claimed_by_worker' | 'work_lease_lost';
 
 /**
+ * Machine-readable reasons a bounded wait ends without a result (item 11b).
+ *
+ * `await` gives up on a deadline, and the failure it raised said only that time had
+ * passed. Three situations that call for opposite responses were indistinguishable in
+ * it, and the difference is safety rather than detail:
+ *
+ * - `work_queue_timeout` — the row is still `pending`, so no worker ever took it.
+ *   Nothing has run and submitting the intent again is safe.
+ * - `work_outcome_unknown` — an executor held it and the lease lapsed with no result.
+ *   The effect may already have happened on the operator's machine, so a blind replay
+ *   can duplicate a side effect. It is this queue's spelling of the `outcome_unknown`
+ *   the SDK already refuses to replay for the same reason.
+ * - `work_lease_lost` — the session ended and stopped the work, so no result is wanted
+ *   at all. That is the fact a refused renewal reports, so it is the same code rather
+ *   than a third one meaning the same thing.
+ */
+export const WORK_QUEUE_TIMEOUT_CODE = 'work_queue_timeout';
+export const WORK_OUTCOME_UNKNOWN_CODE = 'work_outcome_unknown';
+
+/**
+ * The stop code, spelled here as well as at the worker endpoint because this second
+ * emit site has to be visible to the error-code module attribution scan, which models
+ * `_CODE = '<literal>'` and cannot see a literal passed as a positional argument. The
+ * endpoint keeps its own literal for the same reason: replacing it with this constant
+ * would hide a real emit site from that scan rather than remove it.
+ */
+export const WORK_LEASE_LOST_CODE = 'work_lease_lost';
+
+/**
+ * Raised by a bounded wait that gave up.
+ *
+ * It carries `code` for the same reason every other failure in this runtime does:
+ * `session.error.type` and its `retry_status` are derived from the code, so a caller
+ * reads the reason and its disposition instead of parsing a message. A caller told only
+ * that time passed has to guess, and both guesses are wrong — treating the timeout as
+ * safe to replay duplicates a side effect, and treating it as unsafe abandons work that
+ * never ran.
+ */
+export class WorkWaitTimeoutError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(`${message} (${code})`);
+    this.name = 'WorkWaitTimeoutError';
+    this.code = code;
+  }
+}
+
+/**
  * How long a claim may stand without the claiming worker finishing the item.
  *
  * A worker that dies mid-item leaves its claim behind, and nothing else can read
@@ -328,7 +377,16 @@ export class WorkQueue {
     return Object.fromEntries((rows as Array<{ status: string; count: number }>).map((row) => [row.status, Number(row.count)]));
   }
 
-  /** Await a work item's completion by polling (server side of provision). */
+  /**
+   * Await a work item's completion by polling (server side of provision).
+   *
+   * The wait is bounded, and when the bound passes the reason is read from the row the
+   * loop already fetched — after the completion check, so a result that arrives in time
+   * still wins, including for work the session has stopped: the marker says the result
+   * is not wanted, not that the effect did not happen. Classifying from the earlier read
+   * rather than a fresh query also means the reason describes the same snapshot the loop
+   * decided on.
+   */
   async await(id: string, opts: { timeoutMs: number; pollMs?: number }): Promise<unknown> {
     const poll = opts.pollMs ?? 200;
     const deadline = Date.now() + opts.timeoutMs;
@@ -338,9 +396,44 @@ export class WorkQueue {
         if (item.status === 'failed') throw new Error(`work item ${id} failed: ${JSON.stringify(item.result)}`);
         return item.result;
       }
-      if (Date.now() > deadline) throw new Error(`work item ${id} timed out`);
+      if (Date.now() > deadline) throw this.waitFailure(id, item);
       await sleep(poll);
     }
+  }
+
+  /**
+   * Why a bounded wait ended without a result, from what the row records.
+   *
+   * The order of these three checks is the decision, not an accident of writing:
+   *
+   * 1. **stopped first**, because a stopped item that was never claimed is still
+   *    `pending`, and reporting it as "no worker ever took it, submit again" would
+   *    invite a caller to resubmit work for a session that has already ended. The stop
+   *    is the cause; `pending` is only the state it was in when the cause landed.
+   * 2. **`pending` next**, and this is the one case that is provably safe to replay:
+   *    a row becomes `claimed` when it is handed out and nothing ever moves it back, so
+   *    `pending` at the deadline means no executor has seen it.
+   * 3. **everything else is unknown**, including a row that cannot be read at all.
+   *    Absence proves nothing about whether the work ran, and of the two ways to be
+   *    wrong, replaying an effect that already happened is the expensive one.
+   */
+  private waitFailure(id: string, item: WorkItem | null): WorkWaitTimeoutError {
+    if (item?.stoppedAt) {
+      return new WorkWaitTimeoutError(
+        WORK_LEASE_LOST_CODE,
+        `work item ${id} timed out and was stopped: the session that queued it has ended`,
+      );
+    }
+    if (item?.status === 'pending') {
+      return new WorkWaitTimeoutError(
+        WORK_QUEUE_TIMEOUT_CODE,
+        `work item ${id} timed out without an executor: no worker ever claimed it`,
+      );
+    }
+    return new WorkWaitTimeoutError(
+      WORK_OUTCOME_UNKNOWN_CODE,
+      `work item ${id} timed out after it was claimed: the outcome is unknown and must not be replayed`,
+    );
   }
 }
 

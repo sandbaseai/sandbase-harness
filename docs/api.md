@@ -911,8 +911,8 @@ message as a text block, so a client that only renders content keeps working.
 
 | Value | Meaning | Codes |
 | --- | --- | --- |
-| `retryable` | Transient; the same request may succeed. | `pi_session_busy` |
-| `not_retryable` | The runtime will refuse this request again. | `pi_cleanup_pending`, `pi_timed_out`, `pi_rpc_gate_unavailable`, `pi_rpc_gate_lost`, `pi_rpc_approval_not_pending`, `pi_always_ask_not_supported`, `pi_tool_policy_not_supported`, `pi_sandbox_provider_not_supported`, `pi_user_event_not_supported`, `pi_message_content_not_supported`, `loop_engine_not_supported`, `loop_engine_invalid`, `unsupported_capability` |
+| `retryable` | Transient; the same request may succeed. | `pi_session_busy`, `work_queue_timeout` |
+| `not_retryable` | The runtime will refuse this request again. | `pi_cleanup_pending`, `pi_timed_out`, `pi_rpc_gate_unavailable`, `pi_rpc_gate_lost`, `pi_rpc_approval_not_pending`, `pi_always_ask_not_supported`, `pi_tool_policy_not_supported`, `pi_sandbox_provider_not_supported`, `pi_user_event_not_supported`, `pi_message_content_not_supported`, `loop_engine_not_supported`, `loop_engine_invalid`, `unsupported_capability`, `work_outcome_unknown`, `work_lease_lost` |
 | `unknown` | Not classified. Treat as possibly retryable. | any other code, including a failure with no code |
 
 `pi_always_ask_not_supported` is retained in that table but is no longer produced:
@@ -1529,6 +1529,19 @@ suspicion and leaves the item running: a command stopped halfway leaves a half-a
 side effect, and the work is still wanted. An unusable `--port`, `--interval-ms` or
 `--heartbeat-ms` stops the worker at startup with a message naming the option: an
 unparseable interval would otherwise become a poll loop with no delay at all.
+
+The server waits on a work item with a bound of its own, and when that bound passes
+the failure carries a code rather than only a message, because the three ways it can
+end call for opposite responses. `work_queue_timeout` means the item was still
+`pending`, so no worker ever took it and submitting the intent again is safe.
+`work_outcome_unknown` means an executor held it and the lease lapsed with no result,
+so the effect may already have happened on the operator's machine and a blind replay
+can duplicate it. `work_lease_lost` means the session ended and stopped the work, so
+no result is wanted at all. A stop is reported ahead of the item's state, because an
+item the session stopped while nobody held it is still `pending`, and reporting that
+as "submit it again" would send work back to a session that has ended. A result
+reported before the deadline still resolves the wait, stopped work included: the
+marker says the result is not wanted, not that the effect did not happen.
 
 ### Self-hosted worker keys
 

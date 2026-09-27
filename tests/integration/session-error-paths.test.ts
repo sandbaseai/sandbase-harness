@@ -199,6 +199,28 @@ describe('session.error production paths', () => {
     }
   });
 
+  it('classifies each way a self-hosted wait can give up by what it proves', async () => {
+    // The disposition follows from which failure it is, not from the fact that a deadline
+    // passed. Only the unclaimed case proves that nothing ran, so only that one is safe to
+    // submit again; an item an executor held may already have had its effect on the
+    // operator's machine, and an item the session stopped is not wanted at all. Leaving
+    // these to fall through to `unknown` would invite a client to replay precisely the two
+    // failures that must not be replayed.
+    const { projected: retryable } = await errorEventFor(
+      () => coded('work_queue_timeout', 'no worker ever claimed the item'),
+    );
+    expect(retryable.error?.retry_status).toBe('retryable');
+    expect(retryable.error?.type).toBe('work_queue_timeout');
+
+    for (const code of ['work_outcome_unknown', 'work_lease_lost']) {
+      const { projected } = await errorEventFor(() => coded(code, `${code} ended the wait`));
+      expect(projected.error?.retry_status, `${code} should be not_retryable`).toBe('not_retryable');
+      // The code must survive into `type`; a classification that only worked because the
+      // code was dropped would report `internal_error`.
+      expect(projected.error?.type, `${code} should be reported as itself`).toBe(code);
+    }
+  });
+
   it('marks an untrusted Pi frame not retryable rather than unknown', async () => {
     // A protocol error is raised from the read loop, so the command may already
     // have reached the engine: the transport's own comment for that situation is

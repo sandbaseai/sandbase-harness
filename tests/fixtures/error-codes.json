@@ -59,6 +59,8 @@
     "too_many_initial_events",
     "too_many_stores",
     "unresolved_env_reference",
-    "work_lease_lost"
+    "work_lease_lost",
+    "work_outcome_unknown",
+    "work_queue_timeout"
   ]
 }

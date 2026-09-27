@@ -59,6 +59,8 @@
     "too_many_initial_events": ["src/api/routes/initial-events.ts"],
     "too_many_stores": ["src/core/memory/semantics.ts"],
     "unresolved_env_reference": ["src/core/settings/schema.ts"],
-    "work_lease_lost": ["src/api/routes/worker.ts"]
+    "work_lease_lost": ["src/api/routes/worker.ts", "src/sandbox/self-hosted-provider.ts"],
+    "work_outcome_unknown": ["src/sandbox/self-hosted-provider.ts"],
+    "work_queue_timeout": ["src/sandbox/self-hosted-provider.ts"]
   }
 }

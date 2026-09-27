@@ -103,6 +103,11 @@ import {
   sandboxProviderForEnvironmentConfig,
 } from '@/sandbox/provider-names.js';
 import {
+  WORK_LEASE_LOST_CODE,
+  WORK_OUTCOME_UNKNOWN_CODE,
+  WORK_QUEUE_TIMEOUT_CODE,
+} from '@/sandbox/self-hosted-provider.js';
+import {
   MODEL_AUTH_FAILED_CODE,
   MODEL_CONFIG_INVALID_CODE,
   MODEL_NOT_FOUND_CODE,
@@ -1734,6 +1739,11 @@ function sessionErrorMetadata(error: unknown, code: string | undefined): Record<
 function retryStatusFor(code: string | undefined): SessionErrorRetryStatus {
   switch (code) {
     case PI_SESSION_BUSY_CODE:
+    // A work item nobody claimed is that same kind of condition in the self-hosted queue:
+    // the bounded wait expired because no worker was there yet, nothing ran, and the
+    // intent is safe to submit again. It is the one way that wait can end with no
+    // possible side effect, which is exactly what makes the reason worth reporting.
+    case WORK_QUEUE_TIMEOUT_CODE:
       return 'retryable';
     case PI_CLEANUP_PENDING_CODE:
     case PI_TIMED_OUT_CODE:
@@ -1762,6 +1772,14 @@ function retryStatusFor(code: string | undefined): SessionErrorRetryStatus {
     // left to fall through.
     case PI_RPC_TIMEOUT_CODE:
     case PI_RPC_OUTCOME_UNKNOWN_CODE:
+    // The two remaining ways a bounded self-hosted wait can end without a result belong
+    // here for the reason just stated, not by analogy: one reports that an executor held
+    // the item and never answered, so the effect may already have happened on the
+    // operator's machine, and the other reports that the session ended and stopped the
+    // work, so no result is wanted at all. Reporting `unknown` for either invites a
+    // client to replay precisely what must not be replayed.
+    case WORK_OUTCOME_UNKNOWN_CODE:
+    case WORK_LEASE_LOST_CODE:
     case PI_TOOL_POLICY_UNSUPPORTED_CODE:
     case PI_SANDBOX_UNSUPPORTED_CODE:
     case PI_USER_EVENT_UNSUPPORTED_CODE:

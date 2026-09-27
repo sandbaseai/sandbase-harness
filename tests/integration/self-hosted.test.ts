@@ -99,6 +99,73 @@ describe('WorkQueue', () => {
     await expect(queue.await(id, { timeoutMs: 60, pollMs: 10 })).rejects.toThrow(/timed out/);
   });
 
+  it('reports why a bounded wait gave up instead of only that it did', async () => {
+    // Three situations, three opposite responses, and one message before this change:
+    // "work item X timed out". A caller that guessed "safe to retry" for an item an
+    // executor had already taken could duplicate a side effect on the operator's machine,
+    // and one that guessed "unsafe" for an item nobody ever claimed would abandon work
+    // that never ran. The reason is now read from the row.
+    const unclaimed = queue.enqueue('sess_unclaimed', 'exec', { command: 'nobody here' });
+    await expect(queue.await(unclaimed, { timeoutMs: 60, pollMs: 10 }))
+      .rejects.toMatchObject({ code: 'work_queue_timeout' });
+    // The reason is additive: the same failure still reads as a timeout in prose, because
+    // a log line and a code answer different questions.
+    await expect(queue.await(unclaimed, { timeoutMs: 60, pollMs: 10 })).rejects.toThrow(/timed out/);
+
+    // Claimed and never reported. The item is still `claimed` afterwards on purpose - the
+    // work is alive for whoever holds it - and the reason says only that this caller no
+    // longer knows the outcome, which is why it must not be replayed blindly.
+    const abandoned = queue.enqueue('sess_abandoned', 'exec', { command: 'maybe ran' });
+    expect(queue.claim('w1', 'sess_abandoned')!.id).toBe(abandoned);
+    await expect(queue.await(abandoned, { timeoutMs: 60, pollMs: 10 }))
+      .rejects.toMatchObject({ code: 'work_outcome_unknown' });
+    expect(queue.get(abandoned)!.status).toBe('claimed');
+
+    // Stopped: the session ended and the work is not wanted at all. This is the fact a
+    // refused renewal already reports, so it reuses that engine-neutral code rather than
+    // adding a third one meaning the same thing.
+    const stopped = queue.enqueue('sess_stopped', 'exec', { command: 'not wanted' });
+    expect(queue.claim('w2', 'sess_stopped')!.id).toBe(stopped);
+    expect(queue.stop('sess_stopped')).toBe(1);
+    await expect(queue.await(stopped, { timeoutMs: 60, pollMs: 10 }))
+      .rejects.toMatchObject({ code: 'work_lease_lost' });
+  });
+
+  it('classifies a stopped item by the stop, not by the state it was in', async () => {
+    // A stopped item that nobody had claimed is still `pending`, so a classification that
+    // tested the state before the marker would report the one reason that promises a
+    // retry is safe - and tell a caller to resubmit work for a session that has ended.
+    // The marker is the cause; `pending` is only where the item happened to be.
+    const id = queue.enqueue('sess_never_claimed', 'exec', { command: 'too late' });
+    expect(queue.get(id)!.status).toBe('pending');
+    expect(queue.stop('sess_never_claimed')).toBe(1);
+
+    await expect(queue.await(id, { timeoutMs: 60, pollMs: 10 }))
+      .rejects.toMatchObject({ code: 'work_lease_lost' });
+  });
+
+  it('lets a result that arrived before the deadline win over the reason', async () => {
+    // The reason is read after the completion check, and for stopped work that order is
+    // the whole point: the marker says the session does not want the result, not that the
+    // effect did not happen. A holder that finished the command before the deadline still
+    // reports it, and the wait must not overwrite a real result with a guess about one.
+    const id = queue.enqueue('sess_race', 'exec', { command: 'raced' });
+    expect(queue.claim('w1', 'sess_race')!.id).toBe(id);
+    expect(queue.stop('sess_race')).toBe(1);
+    expect(queue.complete(id, 'w1', { exitCode: 0, stdout: 'done' })).toBe('completed');
+
+    await expect(queue.await(id, { timeoutMs: 500, pollMs: 10 }))
+      .resolves.toMatchObject({ stdout: 'done' });
+  });
+
+  it('treats a wait on a row it cannot read as an unknown outcome, not a safe retry', async () => {
+    // Absence proves nothing about whether the work ran. Of the two ways to be wrong,
+    // inviting a replay of an effect that may already have happened is the expensive one,
+    // so the conservative classification is the one that does not promise a free retry.
+    await expect(queue.await('work_missing', { timeoutMs: 60, pollMs: 10 }))
+      .rejects.toMatchObject({ code: 'work_outcome_unknown' });
+  });
+
   it('reclaims a claim whose lease window has passed, and refuses the late owner', () => {
     // A worker that dies mid-item leaves its claim behind. Nothing used to read
     // `claimed_at`, so that claim stood forever and the session waiting on the item
