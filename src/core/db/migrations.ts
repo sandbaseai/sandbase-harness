@@ -977,6 +977,25 @@ const M044_WEBHOOK_FAILING_SINCE = `
 ALTER TABLE webhooks ADD COLUMN failing_since TEXT;
 `;
 
+/**
+ * Stop marker for queued self-hosted work.
+ *
+ * A pending work item is a tool call the session asked for. When the session ends -
+ * a user stop included - nothing is waiting for that call any more, and without a
+ * persisted marker the item stays claimable forever: a worker would execute it on
+ * the operator's machine after the conversation was over.
+ *
+ * The marker is deliberately a timestamp rather than a new `status` value. The
+ * queue's status vocabulary is frozen to be replaced by the accepted/applied
+ * lifecycle, and "must not be handed out" is a fact about the item that has to hold
+ * whichever queue state it is in. Existing rows are left unmarked: a session that is
+ * still running has not stopped its work, so an absent marker must read as "not
+ * stopped" rather than as an unknown.
+ */
+const M045_WORK_ITEM_STOP = `
+ALTER TABLE work_items ADD COLUMN stopped_at TEXT;
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: '001_initial', sql: M001_INITIAL },
   { version: 2, name: '002_memory', sql: M002_MEMORY },
@@ -1022,4 +1041,5 @@ export const MIGRATIONS: Migration[] = [
   { version: 42, name: '042_scheduled_paused_reason', sql: M042_SCHEDULED_PAUSED_REASON },
   { version: 43, name: '043_webhook_disabled_reason', sql: M043_WEBHOOK_DISABLED_REASON },
   { version: 44, name: '044_webhook_failing_since', sql: M044_WEBHOOK_FAILING_SINCE },
+  { version: 45, name: '045_work_item_stop', sql: M045_WORK_ITEM_STOP },
 ];

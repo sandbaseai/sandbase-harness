@@ -157,6 +157,37 @@ describe('Database migrations', () => {
     upgraded.close();
   });
 
+  it('adds the work-item stop marker to a fresh workspace and to an existing one', () => {
+    // Fresh: the column exists as soon as migrations run.
+    const fresh = new Database(dbPath);
+    fresh.runMigrations();
+    expect(columnsOf(fresh, 'work_items')).toContain('stopped_at');
+    expect(fresh.prepare('SELECT name FROM _migrations WHERE version = 45').get()).toEqual({
+      name: '045_work_item_stop',
+    });
+    fresh.close();
+
+    // Existing: a workspace that stopped at the migration before it, holding work that
+    // was queued and never claimed. The upgrade must leave that row **unmarked**, because
+    // an absent marker has to mean "not stopped" - the session that queued it may still
+    // be running, and back-filling a stop would strand work nobody had stopped.
+    const upgradedPath = join(tmpDir, 'upgraded-stop.db');
+    const upgraded = new Database(upgradedPath);
+    upgraded.runMigrations(MIGRATIONS.filter((migration) => migration.version <= 44));
+    expect(columnsOf(upgraded, 'work_items')).not.toContain('stopped_at');
+    upgraded.exec(`
+      INSERT INTO work_items (id, session_id, kind, payload)
+      VALUES ('work_u', 'sess_u', 'exec', '{"command":"echo hi"}')
+    `);
+
+    upgraded.runMigrations();
+    expect(columnsOf(upgraded, 'work_items')).toContain('stopped_at');
+    expect(
+      upgraded.prepare('SELECT status, stopped_at FROM work_items WHERE id = ?').get('work_u'),
+    ).toEqual({ status: 'pending', stopped_at: null });
+    upgraded.close();
+  });
+
   it('transaction rolls back on error', () => {
     const db = new Database(dbPath);
     db.runMigrations();

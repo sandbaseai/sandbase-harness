@@ -36,6 +36,11 @@ export interface WorkItem {
   createdAt?: string;
   claimedAt?: string | null;
   completedAt?: string | null;
+  /**
+   * When the owning session ended and its still-unclaimed work was stopped. A marked
+   * item stays `pending` - it was never handed out - but no worker will be given it.
+   */
+  stoppedAt?: string | null;
 }
 
 export type WorkCompletionResult = 'completed' | 'not_found' | 'not_claimed_by_worker';
@@ -87,6 +92,10 @@ export class WorkQueue {
    * selection, so two concurrent workers can never claim the same item (H2) and
    * a claim that has expired is reclaimed by exactly one of them. Only the
    * worker whose UPDATE actually flips the row wins.
+   *
+   * Work whose session has ended is excluded here rather than filtered out of a
+   * result: a stopped item must not be selectable, because selecting it and then
+   * refusing it would leave the transaction holding a row it cannot hand over.
    */
   claim(workerId: string, sessionId?: string, environmentId?: string): WorkItem | null {
     // SQLite has no `milliseconds` modifier - `datetime('now', '-60000 milliseconds')`
@@ -94,7 +103,7 @@ export class WorkQueue {
     // reclaimable". Seconds, with a fractional part, is the modifier that exists.
     const leaseModifier = `-${this.leaseMs / 1000} seconds`;
     const claimable = (prefix: string): string =>
-      `(${prefix}status = 'pending' OR (${prefix}status = 'claimed' AND ${prefix}claimed_at IS NOT NULL AND ${prefix}claimed_at <= datetime('now', ?)))`;
+      `(${prefix}stopped_at IS NULL AND (${prefix}status = 'pending' OR (${prefix}status = 'claimed' AND ${prefix}claimed_at IS NOT NULL AND ${prefix}claimed_at <= datetime('now', ?))))`;
     return this.db.transaction(() => {
       let candidate: { id: string } | undefined;
       if (sessionId) {
@@ -171,6 +180,29 @@ export class WorkQueue {
   get(id: string): WorkItem | null {
     const r = this.db.prepare('SELECT * FROM work_items WHERE id = ?').get(id) as RawWorkItem | undefined;
     return r ? toWorkItem(r) : null;
+  }
+
+  /**
+   * Stop the work a session queued but nobody has taken, returning how many items
+   * were marked. Called when the session's sandbox is released, which happens on any
+   * terminal state - a user stop included.
+   *
+   * A pending item carries a tool call the session asked for and no longer wants.
+   * Without a persisted marker it stays claimable forever, so a worker would execute
+   * it on the operator's own machine after the conversation had ended, and nothing
+   * would be waiting for the result.
+   *
+   * **Only `pending` items are marked, and that limit is the honest one.** An item a
+   * worker already claimed may be executing right now; no marker can un-run it. It
+   * stays with the worker holding it and is recorded when that worker reports, which
+   * is why this returns a count rather than claiming to have stopped everything.
+   * Releasing the same session twice marks nothing the second time.
+   */
+  stop(sessionId: string): number {
+    const res = this.db
+      .prepare("UPDATE work_items SET stopped_at = datetime('now') WHERE session_id = ? AND status = 'pending' AND stopped_at IS NULL")
+      .run(sessionId) as { changes: number };
+    return res.changes;
   }
 
   list(opts: { environmentId?: string; limit?: number } = {}): WorkItem[] {
@@ -275,6 +307,13 @@ class SelfHostedSandboxInstance implements SandboxInstance {
 
   async cleanup(): Promise<void> {
     // Nothing to tear down server-side; the Worker owns the actual resources.
+    //
+    // What this session does own is the work it queued. Releasing the sandbox means
+    // the session is over, so anything still waiting for a worker must not be handed
+    // out afterwards: the tool call it carries belongs to a conversation that has
+    // ended, and executing it on the operator's machine would be work nobody asked
+    // for any more.
+    this.queue.stop(this.sessionId);
   }
 }
 
@@ -293,6 +332,7 @@ interface RawWorkItem {
   created_at: string;
   claimed_at: string | null;
   completed_at: string | null;
+  stopped_at: string | null;
 }
 
 function toWorkItem(r: RawWorkItem): WorkItem {
@@ -307,6 +347,7 @@ function toWorkItem(r: RawWorkItem): WorkItem {
     createdAt: r.created_at,
     claimedAt: r.claimed_at ?? null,
     completedAt: r.completed_at ?? null,
+    stoppedAt: r.stopped_at ?? null,
   };
 }
 

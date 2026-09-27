@@ -138,6 +138,33 @@ describe('WorkQueue', () => {
     backdateClaim(db, defaulted, 24 * 60);
     expect(queue.claim('w2')?.claimedBy).toBe('w2');
   });
+
+  it('stops a session\'s unclaimed work and leaves everything else claimable', () => {
+    // An item queued for a session nobody is waiting on any more is a tool call that
+    // must not happen: it would run on the operator's own machine after the session
+    // ended. The marker is the exclusion the claim predicate reads, so the refusal has
+    // to hold at the row and not only in the caller that set it.
+    const held = queue.enqueue('sess_stop', 'exec', { command: 'held' });
+    expect(queue.claim('w1')?.id).toBe(held);
+    const unclaimed = queue.enqueue('sess_stop', 'exec', { command: 'never' });
+    const elsewhere = queue.enqueue('sess_live', 'exec', { command: 'still wanted' });
+
+    expect(queue.stop('sess_stop')).toBe(1);
+    // Marked, and still `pending`: it was never handed out, so recording it as done or
+    // failed would invent an outcome for work that simply stopped being wanted.
+    expect(queue.get(unclaimed)!.status).toBe('pending');
+    expect(queue.get(unclaimed)!.stoppedAt).toBeTruthy();
+    // Stopping is about the session's *unclaimed* work. An item a worker already holds
+    // may be running right now and no marker can un-run it, so the holder keeps it and
+    // its late result is still recorded; another session's queue is untouched.
+    expect(queue.get(held)!.stoppedAt).toBeNull();
+    expect(queue.get(elsewhere)!.stoppedAt).toBeNull();
+    expect(queue.stop('sess_stop')).toBe(0);
+
+    expect(queue.claim('w2', 'sess_stop')).toBeNull();
+    expect(queue.claim('w2')?.id).toBe(elsewhere);
+    expect(queue.complete(held, 'w1', { exitCode: 0, stdout: 'ran before the stop' })).toBe('completed');
+  });
 });
 
 describe('SelfHostedSandboxProvider', () => {
@@ -175,6 +202,24 @@ describe('SelfHostedSandboxProvider', () => {
     const result = await sandbox.execute('echo test');
     await workerLoop;
     expect(result.stdout).toBe('from worker');
+  });
+
+  it('stops the work a session queued when its sandbox is released', async () => {
+    // The lifecycle reaches the queue through the instance's cleanup, which the runtime
+    // calls when a session reaches a terminal state - a user stop included. Without
+    // this wiring the marker exists but nothing ever sets it, and the same test written
+    // against the queue alone would pass while the runtime still handed the work out.
+    const queue = new WorkQueue(db);
+    const provider = new SelfHostedSandboxProvider(queue);
+    const queued = queue.enqueue('sess_released', 'exec', { command: 'echo late' });
+    const sandbox = await provider.provision('sess_released', { name: 'sh', sandbox_provider: 'self_hosted' });
+
+    expect(queue.get(queued)!.stoppedAt).toBeNull();
+    await sandbox.cleanup();
+    expect(queue.get(queued)!.stoppedAt).toBeTruthy();
+    // Marked, not completed: the item was never handed out, and the record says so
+    // rather than pretending the work happened or that it was thrown away.
+    expect(queue.get(queued)!.status).toBe('pending');
   });
 });
 
