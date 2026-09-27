@@ -58,6 +58,7 @@
     "store_unavailable",
     "too_many_initial_events",
     "too_many_stores",
-    "unresolved_env_reference"
+    "unresolved_env_reference",
+    "work_lease_lost"
   ]
 }

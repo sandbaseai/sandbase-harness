@@ -51,8 +51,15 @@ export type WorkCompletionResult = 'completed' | 'not_found' | 'not_claimed_by_w
  * Outcome of renewing a claim. `renewed` rather than `completed`, because a
  * heartbeat and a completion are different events and a caller that conflates them
  * would stop a long item by accident.
+ *
+ * `work_lease_lost` is the engine-neutral code a worker acts on (item 11b's frozen
+ * naming): the work itself is no longer wanted, because the session that queued it
+ * has ended and stopped it. It is deliberately distinct from `not_claimed_by_worker`,
+ * which says this caller does not hold the item while the work continues for whoever
+ * does - a worker that conflated the two would abandon live work, and one that
+ * ignored the difference would keep running work nobody is waiting for.
  */
-export type WorkLeaseResult = 'renewed' | 'not_found' | 'not_claimed_by_worker';
+export type WorkLeaseResult = 'renewed' | 'not_found' | 'not_claimed_by_worker' | 'work_lease_lost';
 
 /**
  * How long a claim may stand without the claiming worker finishing the item.
@@ -170,13 +177,28 @@ export class WorkQueue {
    * reclaimed by another worker is therefore not renewable by the superseded one —
    * that renewal reports `not_claimed_by_worker`, and the item belongs to the new
    * holder.
+   *
+   * Stopped work is the one refusal that is about the work rather than about the
+   * caller: `work_lease_lost`. A session that has ended stops the work it queued,
+   * claimed or not, and that marker is the evidence a running worker needs - without
+   * an answer it can act on, a worker told nothing keeps executing a command the
+   * session no longer wants, and no local abort controller can substitute for it
+   * because the stop may have been issued by a different process entirely.
    */
   heartbeat(id: string, workerId: string): WorkLeaseResult {
+    // The renewal is one conditional UPDATE, so the stop predicate is a fence rather
+    // than a check the write can slip past: a stop that lands while this statement is
+    // in flight simply leaves the row un-renewed instead of being overwritten by it.
     const update = this.db
-      .prepare("UPDATE work_items SET claimed_at = datetime('now') WHERE id = ? AND status = 'claimed' AND claimed_by = ?")
+      .prepare("UPDATE work_items SET claimed_at = datetime('now') WHERE id = ? AND status = 'claimed' AND claimed_by = ? AND stopped_at IS NULL")
       .run(id, workerId) as { changes: number };
     if (update.changes === 1) return 'renewed';
-    return this.get(id) ? 'not_claimed_by_worker' : 'not_found';
+    // The failed write is classified afterwards, and the work-level fact comes first:
+    // whether the caller ever held the item, a stopped item's lease is gone.
+    const row = this.get(id);
+    if (!row) return 'not_found';
+    if (row.stoppedAt) return 'work_lease_lost';
+    return 'not_claimed_by_worker';
   }
 
   get(id: string): WorkItem | null {

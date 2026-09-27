@@ -2085,7 +2085,7 @@ Extension endpoints expose local runtime operations.
 | `GET` | `/v1/x/metrics/summary` | JSON runtime summary for Dashboard monitoring and SDK helpers. |
 | `GET` | `/v1/x/mcp/status?session_id=...` | MCP connection status for a session. |
 | `POST` | `/v1/x/worker/claim` | Self-hosted sandbox worker claims pending tool-execution work. The claim carries a lease window; a claim older than the window is treated as abandoned and may be claimed again. |
-| `POST` | `/v1/x/worker/heartbeat` | Self-hosted sandbox worker renews the lease on work it still holds, so an item that outlives the window is not handed to another worker while it is still running. A renewal from a worker that does not hold the item is refused with `409`. |
+| `POST` | `/v1/x/worker/heartbeat` | Self-hosted sandbox worker renews the lease on work it still holds, so an item that outlives the window is not handed to another worker while it is still running. A renewal from a worker that does not hold the item is refused with `409`. A renewal on work whose session has ended is refused with `409` and the engine-neutral code `work_lease_lost`, which tells a worker that is already executing the item to stop: the stop marker is persisted server-side, and this response is the only channel through which the process running the command learns of it. |
 | `POST` | `/v1/x/worker/complete` | Self-hosted sandbox worker reports completed or failed work. A completion from a worker that does not hold the claim is refused with `409`, and an unknown item answers `404`. |
 | `POST` | `/v1/x/sessions/{session_id}/handoff-bundle` | Export a session as a replayable handoff bundle. |
 | `GET` | `/v1/x/handoff-bundles?session_id=...&limit=...` | List stored handoff bundles, newest first. |

@@ -11,7 +11,11 @@
  *
  * A worker running an item that outlives the claim lease renews it with
  * `heartbeat`; otherwise the item is treated as abandoned and handed to another
- * worker while the first one is still executing it.
+ * worker while the first one is still executing it. A renewal on work whose session
+ * has ended answers 409 with the engine-neutral `work_lease_lost` code, which is the
+ * runtime's way of telling a worker that is already executing something to stop: the
+ * stop marker is persisted server-side, and this is the only channel through which
+ * the process holding the command ever learns about it.
  */
 
 import { Hono } from 'hono';
@@ -52,6 +56,19 @@ export function workerRoutes(queue: WorkQueue, db?: Database) {
     const outcome = queue.heartbeat(body.id, body.worker_id);
     if (outcome === 'not_found') {
       return c.json({ error: { type: 'not_found', message: 'work item not found' } }, 404);
+    }
+    if (outcome === 'work_lease_lost') {
+      // The code, not the message, is what a caller acts on: a worker that reads prose
+      // would keep executing a command the session has already stopped. The status stays
+      // 409 because the request conflicts with the row's current state; the code says
+      // which conflict, and this one is about the work rather than about the caller.
+      return c.json({
+        error: {
+          type: 'conflict',
+          code: 'work_lease_lost',
+          message: 'this work was stopped because the session that queued it has ended',
+        },
+      }, 409);
     }
     if (outcome === 'not_claimed_by_worker') {
       return c.json({ error: { type: 'conflict', message: 'work item is not claimed by this worker' } }, 409);

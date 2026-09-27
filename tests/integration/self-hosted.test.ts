@@ -175,6 +175,38 @@ describe('WorkQueue', () => {
     expect(queue.complete(held, 'w1', { exitCode: 0, stdout: 'ran before the stop' })).toBe('completed');
     expect(queue.get(held)!.stoppedAt).toBeTruthy();
   });
+
+  it('tells a worker its lease is lost once the session stopped the work', () => {
+    // A worker executing a long item asks whether the work is still wanted by renewing
+    // its claim. Once the session has ended - possibly in another process, where no
+    // local abort controller can reach - the stop marker is the only evidence there is.
+    // Without an answer a worker can act on, it keeps executing a command the session
+    // no longer wants.
+    const held = queue.enqueue('sess_done', 'exec', { command: 'long' });
+    expect(queue.claim('w1')?.id).toBe(held);
+    expect(queue.heartbeat(held, 'w1')).toBe('renewed');
+    const claimedAt = (db.prepare('SELECT claimed_at FROM work_items WHERE id = ?').get(held) as { claimed_at: string }).claimed_at;
+
+    expect(queue.stop('sess_done')).toBe(1);
+    // The refusal is about the work rather than about the caller: a worker that never
+    // held the item gets the same answer, because nobody wants the item any more.
+    expect(queue.heartbeat(held, 'w1')).toBe('work_lease_lost');
+    expect(queue.heartbeat(held, 'w2')).toBe('work_lease_lost');
+    // The stop predicate is a fence, not a check the write slipped past: the timestamp
+    // is untouched, so a stopped item's claim cannot be kept alive by renewing it.
+    expect((db.prepare('SELECT claimed_at FROM work_items WHERE id = ?').get(held) as { claimed_at: string }).claimed_at).toBe(claimedAt);
+
+    // And the older refusal still means what it meant. An item nobody stopped, held by
+    // someone else, is `not_claimed_by_worker`: the work is alive for its holder, so a
+    // worker must not read it as permission to abandon anything.
+    const other = queue.enqueue('sess_live', 'exec', { command: 'wanted' });
+    expect(queue.heartbeat(other, 'w9')).toBe('not_claimed_by_worker');
+    expect(queue.heartbeat('work_missing', 'w1')).toBe('not_found');
+
+    // The holder may still report what it ran. The marker says the work is not wanted;
+    // it does not say the effect did not happen.
+    expect(queue.complete(held, 'w1', { exitCode: 0, stdout: 'finished anyway' })).toBe('completed');
+  });
 });
 
 describe('SelfHostedSandboxProvider', () => {
@@ -387,5 +419,46 @@ describe('Worker HTTP endpoints', () => {
     expect(shape.status).toBe(400);
     // None of the refusals handed the item to anyone, so it is still w1's to finish.
     expect(leased.complete(id, 'w1', { exitCode: 0 })).toBe('completed');
+  });
+
+  it('carries the lease is lost code when a renewal targets stopped work', async () => {
+    // The code is the contract, because a worker's decision to abandon a command that is
+    // already running has to be made from data and not from prose. The stop is what
+    // produces it; the neighbouring refusal must keep its own shape, or a worker could
+    // not tell "not yours" from "not wanted" and would abandon live work.
+    const id = queue.enqueue('sess_over', 'exec', { command: 'long' });
+    expect(queue.claim('w1')?.id).toBe(id);
+
+    // Before the session ends the same request is an ordinary success, so what this case
+    // observes is the stop arriving rather than the route refusing renewals in general.
+    const before = await app.request('/heartbeat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, worker_id: 'w1' }),
+    });
+    expect(before.status).toBe(200);
+
+    queue.stop('sess_over');
+    const after = await app.request('/heartbeat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, worker_id: 'w1' }),
+    });
+    expect(after.status).toBe(409);
+    const body = await after.json() as { error: { type: string; code?: string; message: string } };
+    expect(body.error.code).toBe('work_lease_lost');
+    expect(body.error.type).toBe('conflict');
+    expect(body.error.message).toContain('stopped');
+
+    // The other 409 stays code-less on purpose: this item is alive, held by w9, and
+    // renewing it from anywhere else is not a reason to stop executing it.
+    const alive = queue.enqueue('sess_alive', 'exec', { command: 'wanted' });
+    expect(queue.claim('w9')?.id).toBe(alive);
+    const foreign = await app.request('/heartbeat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: alive, worker_id: 'w1' }),
+    });
+    expect(foreign.status).toBe(409);
+    const foreignBody = await foreign.json() as { error: { type: string; code?: string } };
+    expect(foreignBody.error.code).toBeUndefined();
+    expect(foreignBody.error.type).toBe('conflict');
   });
 });
