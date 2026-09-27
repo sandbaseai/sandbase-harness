@@ -109,14 +109,16 @@ describe('Pi session-file lease', () => {
     clock = 50_000;
     await new Promise((resolve) => setTimeout(resolve, 1_300));
 
+    // The file itself is checked before it is read, so a suspend that withdrew the
+    // lease is reported as that rather than surfacing as an ENOENT from a read.
+    expect(existsSync(leasePath)).toBe(true);
     // Half one: no further renewal was written. (This can only fail if a heartbeat
     // really did run after the suspend, so the wait cannot produce a false failure.)
     const after = JSON.parse(readFileSync(leasePath, 'utf8')) as { heartbeatAt: string; expiresAt: string };
     expect(after.heartbeatAt).toBe(before.heartbeatAt);
     expect(after.expiresAt).toBe(before.expiresAt);
-    // Half two: suspending is not releasing - the lease is still there, still live
-    // at a time before its expiry, and still refusing another owner.
-    expect(existsSync(leasePath)).toBe(true);
+    // Half two: suspending is not releasing - the lease is still live at a time
+    // before its expiry, and still refusing another owner.
     await expect(acquirePiSessionFileLease(sessionFile, { ownerId: 'owner-b', now: () => 1_500, staleAfterMs: 60_000 }))
       .rejects.toMatchObject({ code: 'pi_session_busy' } satisfies Partial<PiSessionBusyError>);
   });
