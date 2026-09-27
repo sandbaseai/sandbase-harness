@@ -57,4 +57,35 @@ describe('Pi session-file lease', () => {
     await expect(acquirePiSessionFileLease(sessionFile, { ownerId: 'owner-b', now: () => 2_000, staleAfterMs: 60_000 }))
       .rejects.toMatchObject({ code: 'pi_session_busy' } satisfies Partial<PiSessionBusyError>);
   });
+
+  it('leaves a lease that another owner has taken over in place', async () => {
+    // The other half of the same refusal: release removes only a lease that still
+    // names this owner. A lease can legitimately belong to somebody else by the time
+    // a late release runs - this owner was declared stale, another owner recovered it
+    // through the rename, and this one is only now cleaning up. Removing it would
+    // cancel the exclusion the *new* owner is relying on. The cases above never see
+    // this branch: they always release a lease whose owner id still matches, or one
+    // that cannot be read at all.
+    const directory = mkdtempSync(join(tmpdir(), 'ma-pi-lease-taken-'));
+    directories.push(directory);
+    const sessionFile = join(directory, 'session.jsonl');
+    const first = await acquirePiSessionFileLease(sessionFile, { ownerId: 'owner-a', now: () => 1_000, staleAfterMs: 60_000 });
+    const takeover = {
+      version: 1 as const,
+      ownerId: 'owner-b',
+      pid: 4242,
+      host: 'other-host',
+      acquiredAt: new Date(2_000).toISOString(),
+      heartbeatAt: new Date(2_000).toISOString(),
+      expiresAt: new Date(62_000).toISOString(),
+    };
+    writeFileSync(`${sessionFile}.lease`, JSON.stringify(takeover));
+
+    await first.release();
+
+    // The file survives, and it is still the new owner's record - not a leftover.
+    expect(existsSync(`${sessionFile}.lease`)).toBe(true);
+    await expect(acquirePiSessionFileLease(sessionFile, { ownerId: 'owner-c', now: () => 3_000, staleAfterMs: 60_000 }))
+      .rejects.toMatchObject({ code: 'pi_session_busy', owner: { ownerId: 'owner-b' } });
+  });
 });
