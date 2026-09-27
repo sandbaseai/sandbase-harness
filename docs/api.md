@@ -1519,9 +1519,16 @@ and `--worker-id` sets the identity reported on both the claim and the completio
 (default `worker_<pid>`). While an item runs the worker renews its own claim every
 `--heartbeat-ms` (default `20000`), because the claim carries a lease window and a
 long item would otherwise be reclaimed and handed to a second worker while the first
-was still running it. An unusable `--port`, `--interval-ms` or `--heartbeat-ms` stops
-the worker at startup with a message naming the option: an unparseable interval would
-otherwise become a poll loop with no delay at all.
+was still running it. A renewal refused with `work_lease_lost` - the session that
+queued the work has ended and stopped it - stops the item instead: the command is
+signalled and the item is reported failed with that code, because continuing would be
+running work nobody is waiting for, and the renewal is the only way the stop reaches
+the process holding the command. Every other renewal failure, including a transport
+error and the refusal that means the item belongs to another worker, is only a
+suspicion and leaves the item running: a command stopped halfway leaves a half-applied
+side effect, and the work is still wanted. An unusable `--port`, `--interval-ms` or
+`--heartbeat-ms` stops the worker at startup with a message naming the option: an
+unparseable interval would otherwise become a poll loop with no delay at all.
 
 ### Self-hosted worker keys
 

@@ -19,6 +19,11 @@
  *    worker that executed silently past the window had its item reclaimed and handed
  *    to a second worker while the first was still running it — the work happened
  *    twice on the operator's machine, and only then was the first completion refused.
+ * 4. A renewal refused with `work_lease_lost` stops the item. The stop is decided by
+ *    the session that queued the work, possibly in another process, so this response
+ *    is the only way it reaches the command being run - and a worker that kept going
+ *    would be executing work nobody is waiting for. Every other renewal failure is a
+ *    suspicion and leaves the item running.
  */
 
 import { execFile } from 'node:child_process';
@@ -125,7 +130,7 @@ export async function workerPollCommand(opts: WorkerPollOptions) {
       try {
         await completeWorkItem(config, item, {
           status: 'fulfilled',
-          value: await renewWhileRunning(config, item.id, () => executeWorkItem(item, config.root)),
+          value: await renewWhileRunning(config, item.id, (signal) => executeWorkItem(item, config.root, signal)),
         });
       } catch (error) {
         await completeWorkItem(config, item, { status: 'rejected', reason: error });
@@ -143,29 +148,62 @@ export async function workerPollCommand(opts: WorkerPollOptions) {
 /**
  * Run one work item while renewing its claim on `heartbeatMs`.
  *
- * The renewal is deliberately best-effort: a failed heartbeat is logged and the item
- * keeps running. A lease that has genuinely been lost is refused by the server on the
- * completion anyway, and stopping a command halfway through on a *suspicion* that the
- * claim lapsed would leave a half-applied side effect - the same conservative rule
- * the session file lease states, where a failed renewal may only make the lease look
- * stale later rather than make it immediately stealable.
+ * A failed renewal is best-effort: the heartbeat is logged and the item keeps running,
+ * because a transport failure is only a *suspicion* that the claim lapsed, and stopping a
+ * command halfway through on a suspicion would leave a half-applied side effect - the same
+ * conservative rule the session file lease states, where a failed renewal may only make the
+ * lease look stale later rather than make it immediately stealable.
+ *
+ * `work_lease_lost` is not a suspicion. The server has stated that the session ended and
+ * stopped the work, so continuing would run a command nobody is waiting for, and the
+ * renewal is the only channel that can carry that decision here. The run function is handed
+ * a signal so the stop reaches the child process instead of being noticed after it exits.
  */
 export async function renewWhileRunning<T>(
   opts: ResolvedWorkerPollOptions,
   itemId: string,
-  run: () => Promise<T>,
+  run: (signal: AbortSignal) => Promise<T>,
 ): Promise<T> {
+  const controller = new AbortController();
+  let leaseLost: WorkLeaseLostError | null = null;
   const timer = setInterval(() => {
     void renewClaim(opts, itemId).catch((error) => {
+      if (error instanceof WorkLeaseLostError) {
+        // Recorded rather than thrown: this callback has no caller to throw to, and the
+        // reason has to outlive the run so the item is reported with it. The first
+        // answer wins - a later renewal cannot un-stop the work.
+        leaseLost ??= error;
+        controller.abort();
+        return;
+      }
       console.warn(`renewal failed for ${itemId}: ${error instanceof Error ? error.message : String(error)}`);
     });
   }, opts.heartbeatMs);
   // The renewal must never be the reason the process stays alive once the item is done.
   timer.unref?.();
   try {
-    return await run();
+    const value = await run(controller.signal);
+    if (leaseLost) throw leaseLost;
+    return value;
+  } catch (error) {
+    // The stop explains the symptom: a command killed by the abort exits non-zero, and
+    // "the session ended" is the reason an operator needs, not the exit code it produced.
+    if (leaseLost) throw leaseLost;
+    throw error;
   } finally {
     clearInterval(timer);
+  }
+}
+
+/**
+ * The server refused a renewal because the work was stopped, not because this worker's
+ * request was wrong. Distinct from every other renewal failure on purpose: the caller
+ * aborts a running item for this error and for nothing else.
+ */
+export class WorkLeaseLostError extends Error {
+  constructor(itemId: string) {
+    super(`renewal refused for ${itemId}: the session that queued this work has ended (work_lease_lost)`);
+    this.name = 'WorkLeaseLostError';
   }
 }
 
@@ -175,10 +213,24 @@ async function renewClaim(opts: ResolvedWorkerPollOptions, itemId: string): Prom
     headers: jsonHeaders(opts),
     body: JSON.stringify({ id: itemId, worker_id: opts.workerId }),
   });
-  if (!res.ok) throw new Error(`worker heartbeat failed: ${res.status} ${await res.text()}`);
+  if (res.ok) return;
+  const body = await res.text();
+  // The code is what a caller decides on; the message only explains it. Matching on the
+  // status alone would treat "this item is not yours" as a stop, and that refusal means the
+  // work is alive for its holder.
+  if (res.status === 409 && stoppedWorkCode(body)) throw new WorkLeaseLostError(itemId);
+  throw new Error(`worker heartbeat failed: ${res.status} ${body}`);
 }
 
-export async function executeWorkItem(item: WorkerItem, root: string): Promise<unknown> {
+function stoppedWorkCode(body: string): boolean {
+  try {
+    return (JSON.parse(body) as { error?: { code?: unknown } })?.error?.code === 'work_lease_lost';
+  } catch {
+    return false;
+  }
+}
+
+export async function executeWorkItem(item: WorkerItem, root: string, signal?: AbortSignal): Promise<unknown> {
   if (item.kind === 'read') {
     return readFile(safePath(root, stringPayload(item.payload.path, 'path')), 'utf8');
   }
@@ -196,6 +248,10 @@ export async function executeWorkItem(item: WorkerItem, root: string): Promise<u
       cwd: item.payload.cwd ? safePath(root, String(item.payload.cwd)) : root,
       timeoutMs: typeof item.payload.timeout === 'number' ? item.payload.timeout : 300_000,
       env: objectOfStrings(item.payload.env),
+      // Only the long-running kind is abortable. The file kinds are bounded operations, and
+      // an interrupted `write` is a partial side effect where a completed one is not: the
+      // stop is about not starting or continuing work, not about leaving a file half written.
+      signal,
     });
   }
   throw new Error(`Unsupported work item kind: ${item.kind}`);
@@ -236,19 +292,25 @@ async function completeWorkItem(
   if (!res.ok) throw new Error(`worker complete failed: ${res.status} ${await res.text()}`);
 }
 
-async function execShell(command: string, opts: { cwd: string; timeoutMs: number; env: Record<string, string> }) {
+async function execShell(command: string, opts: { cwd: string; timeoutMs: number; env: Record<string, string>; signal?: AbortSignal }) {
   if (!command.trim()) throw new Error('exec work item requires command');
   return new Promise((resolve) => {
     execFile('/bin/sh', ['-lc', command], {
       cwd: opts.cwd,
       timeout: opts.timeoutMs,
       env: { ...process.env, ...opts.env },
+      // Node kills the child when the signal aborts, so the stop reaches the command
+      // rather than only the promise waiting on it.
+      signal: opts.signal,
     }, (error, stdout, stderr) => {
       resolve({
         exitCode: typeof (error as { code?: unknown } | null)?.code === 'number' ? (error as { code: number }).code : 0,
         stdout,
         stderr,
         timedOut: Boolean((error as { killed?: boolean } | null)?.killed),
+        // Reported separately from `timedOut`: an operator reading the queue should be able
+        // to tell a command that ran out of its own time from one the runtime stopped.
+        aborted: (error as { name?: string } | null)?.name === 'AbortError',
       });
     });
   });

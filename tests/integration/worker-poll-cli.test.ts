@@ -24,7 +24,7 @@ import { Database } from '@/core/db/database.js';
 import { SessionManager } from '@/core/session/session-manager.js';
 import { createServer } from '@/api/server.js';
 import { WorkQueue } from '@/sandbox/self-hosted-provider.js';
-import { resolveWorkerPollOptions, renewWhileRunning, workerPollCommand } from '@/cli/worker-commands.js';
+import { resolveWorkerPollOptions, renewWhileRunning, workerPollCommand, executeWorkItem } from '@/cli/worker-commands.js';
 
 /** Run `fn` with `console.log` captured, so the poller's output stays out of the report. */
 async function withCapturedLog<T>(fn: () => Promise<T>): Promise<string[]> {
@@ -228,6 +228,75 @@ describe('worker poll CLI', () => {
     }
     expect(resolveWorkerPollOptions({ port: '3000', workdir: '.' }).heartbeatMs).toBe(20_000);
     expect(resolveWorkerPollOptions({ port: '3000', workdir: '.', heartbeatMs: '25' }).heartbeatMs).toBe(25);
+  });
+
+  it('stops running an item when the server says its lease is gone', async () => {
+    // A renewal has two kinds of failure and they must not be treated alike. A transport
+    // failure is a suspicion that the claim may have lapsed; `work_lease_lost` is the server
+    // stating that the session ended and stopped the work. The renewal is the only channel
+    // that can carry that decision to the process holding the command.
+    const { queue, port, workdir } = await startRuntime();
+    const id = queue.enqueue('sess_stopped', 'read', { path: 'greeting.txt' });
+    expect(queue.claim('worker_test')?.id).toBe(id);
+    const opts = resolveWorkerPollOptions({ port: String(port), workdir, workerId: 'worker_test', heartbeatMs: '25' });
+    expect(queue.stop('sess_stopped')).toBe(1);
+
+    let observed: AbortSignal | undefined;
+    const started = Date.now();
+    await expect(renewWhileRunning(opts, id, (signal) => {
+      observed = signal;
+      return new Promise<string>((resolvePromise) => {
+        const timer = setTimeout(() => resolvePromise('ran to the end'), 8_000);
+        signal.addEventListener('abort', () => { clearTimeout(timer); resolvePromise('stopped early'); }, { once: true });
+      });
+    })).rejects.toThrow(/work_lease_lost/);
+
+    // Two things make this real: the run was handed a signal it can act on, and the decision
+    // arrived and aborted it long before the item would have finished on its own. The reason
+    // names the code so the queue record explains itself.
+    expect(observed?.aborted).toBe(true);
+    expect(Date.now() - started).toBeLessThan(2_000);
+
+    // The other 409 is not a stop. An item held by another worker is alive, so a worker that
+    // read that refusal as "stop" would abandon work that is still wanted - it is logged and
+    // the item keeps running.
+    const alive = queue.enqueue('sess_alive', 'read', { path: 'greeting.txt' });
+    expect(queue.claim('other_worker')?.id).toBe(alive);
+    const warnings: string[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warnings.push(args.join(' ')); });
+    let otherSignal: AbortSignal | undefined;
+    let ran: string;
+    try {
+      ran = await renewWhileRunning(opts, alive, (signal) => {
+        otherSignal = signal;
+        return new Promise<string>((resolvePromise) => setTimeout(() => resolvePromise('ran anyway'), 150));
+      });
+    } finally {
+      warn.mockRestore();
+    }
+    expect(ran).toBe('ran anyway');
+    expect(otherSignal?.aborted).toBe(false);
+    expect(warnings.join('\n')).toContain(`renewal failed for ${alive}`);
+  });
+
+  // `execShell` runs `/bin/sh`, so the kill can only be observed where that shell exists. CI
+  // runs this suite on ubuntu-latest as well as windows-latest, so the behaviour is exercised
+  // there; on Windows the result would measure the absence of a shell rather than the abort.
+  it.skipIf(process.platform === 'win32')('kills the shell of an exec item when its lease is lost', async () => {
+    const { queue, port, workdir } = await startRuntime();
+    // Thirty seconds of work that only ends early if it is signalled.
+    const id = queue.enqueue('sess_stopped', 'exec', { command: 'sleep 30', timeout: 60_000 });
+    expect(queue.claim('worker_test')?.id).toBe(id);
+    const opts = resolveWorkerPollOptions({ port: String(port), workdir, workerId: 'worker_test', heartbeatMs: '25' });
+    expect(queue.stop('sess_stopped')).toBe(1);
+
+    const item = { id, kind: 'exec' as const, payload: { command: 'sleep 30', timeout: 60_000 } };
+    const started = Date.now();
+    await expect(renewWhileRunning(opts, id, (signal) => executeWorkItem(item, workdir, signal)))
+      .rejects.toThrow(/work_lease_lost/);
+    // Reaching here in a fraction of the thirty seconds is the kill rather than the command
+    // finishing or timing out on its own.
+    expect(Date.now() - started).toBeLessThan(10_000);
   });
 
   it('refuses an unusable --interval-ms instead of polling with no delay', () => {
