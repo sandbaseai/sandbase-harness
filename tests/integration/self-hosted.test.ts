@@ -13,6 +13,16 @@ import { Database } from '@/core/db/database.js';
 import { WorkQueue, SelfHostedSandboxProvider } from '@/sandbox/self-hosted-provider.js';
 import { workerRoutes } from '@/api/routes/worker.js';
 
+/**
+ * Age a claim. `claimed_at` is written by SQLite at second precision, so a test
+ * cannot reach the end of a lease window by shortening the window and waiting
+ * without sleeping for whole seconds; moving the claim's own timestamp back is the
+ * deterministic way to be past it.
+ */
+function backdateClaim(db: Database, id: string, minutes: number): void {
+  db.prepare("UPDATE work_items SET claimed_at = datetime('now', ?) WHERE id = ?").run(`-${minutes} minutes`, id);
+}
+
 describe('WorkQueue', () => {
   let db: Database;
   let queue: WorkQueue;
@@ -29,16 +39,6 @@ describe('WorkQueue', () => {
     db.close();
     rmSync(tmpDir, { recursive: true, force: true });
   });
-
-  /**
-   * Age a claim. `claimed_at` is written by SQLite at second precision, so a test
-   * cannot reach the end of a lease window by shortening the window and waiting
-   * without sleeping for whole seconds; moving the claim's own timestamp back is the
-   * deterministic way to be past it.
-   */
-  function backdateClaim(id: string, minutes: number): void {
-    db.prepare("UPDATE work_items SET claimed_at = datetime('now', ?) WHERE id = ?").run(`-${minutes} minutes`, id);
-  }
 
   it('enqueue → claim → complete → await round-trip', async () => {
     const id = queue.enqueue('sess_1', 'exec', { command: 'echo hi' });
@@ -113,11 +113,11 @@ describe('WorkQueue', () => {
     expect(leased.claim('w2')).toBeNull();
 
     // Ten minutes into a thirty-minute window, still respected.
-    backdateClaim(id, 10);
+    backdateClaim(db, id, 10);
     expect(leased.claim('w2')).toBeNull();
 
     // Past the window the claim is abandoned and the item is handed to the next worker.
-    backdateClaim(id, 60);
+    backdateClaim(db, id, 60);
     const reclaimed = leased.claim('w2');
     expect(reclaimed?.id).toBe(id);
     expect(reclaimed?.claimedBy).toBe('w2');
@@ -135,7 +135,7 @@ describe('WorkQueue', () => {
     // default has to be a real duration rather than "never".
     const defaulted = queue.enqueue('s', 'exec', { command: 'y' });
     expect(queue.claim('w1')?.id).toBe(defaulted);
-    backdateClaim(defaulted, 24 * 60);
+    backdateClaim(db, defaulted, 24 * 60);
     expect(queue.claim('w2')?.claimedBy).toBe('w2');
   });
 });
@@ -284,5 +284,53 @@ describe('Worker HTTP endpoints', () => {
     // And the refusal changed nothing: the real item is still w1's to complete.
     expect(queue.get(id)!.status).toBe('claimed');
     expect(queue.get(id)!.claimedBy).toBe('w1');
+  });
+
+  it('lets only the holder renew a claim, and the renewal re-arms its lease', async () => {
+    // The lease window introduced with reclaiming forces a choice: set it above the
+    // longest item a worker will ever run, or let a slow item be reclaimed while it is
+    // still executing. Renewal is the way out - a worker running a long item says so,
+    // and the window restarts from the renewal instead of from the original claim.
+    const leased = new WorkQueue(db, { leaseMs: 30 * 60_000 });
+    const id = leased.enqueue('s', 'exec', { command: 'long' });
+    expect(leased.claim('w1')?.id).toBe(id);
+    const claimedAt = (db.prepare('SELECT claimed_at FROM work_items WHERE id = ?').get(id) as { claimed_at: string }).claimed_at;
+
+    // A renewal from a worker that does not hold the item is refused...
+    const foreign = await app.request('/heartbeat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, worker_id: 'w2' }),
+    });
+    expect(foreign.status).toBe(409);
+    // ...and it must not so much as touch the timestamp: a foreign worker cannot keep
+    // someone else's claim alive, nor extend its own reach over the item.
+    expect((db.prepare('SELECT claimed_at FROM work_items WHERE id = ?').get(id) as { claimed_at: string }).claimed_at).toBe(claimedAt);
+    expect(leased.get(id)!.claimedBy).toBe('w1');
+
+    // Past the window, the holder renews and the claim is its own again. This is the
+    // assertion that makes the renewal real: if it were a no-op the window would still
+    // have elapsed and the item would be handed over below.
+    backdateClaim(db, id, 60);
+    const own = await app.request('/heartbeat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id, worker_id: 'w1' }),
+    });
+    expect(own.status).toBe(200);
+    expect(await own.json()).toEqual({ ok: true });
+    expect(leased.claim('w2')).toBeNull();
+
+    // The two refusals stay distinguishable, and the request shape is checked first.
+    const missing = await app.request('/heartbeat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: 'work_missing', worker_id: 'w1' }),
+    });
+    expect(missing.status).toBe(404);
+    const shape = await app.request('/heartbeat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id }),
+    });
+    expect(shape.status).toBe(400);
+    // None of the refusals handed the item to anyone, so it is still w1's to finish.
+    expect(leased.complete(id, 'w1', { exitCode: 0 })).toBe('completed');
   });
 });

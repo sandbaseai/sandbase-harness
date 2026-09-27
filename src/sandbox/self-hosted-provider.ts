@@ -41,6 +41,13 @@ export interface WorkItem {
 export type WorkCompletionResult = 'completed' | 'not_found' | 'not_claimed_by_worker';
 
 /**
+ * Outcome of renewing a claim. `renewed` rather than `completed`, because a
+ * heartbeat and a completion are different events and a caller that conflates them
+ * would stop a long item by accident.
+ */
+export type WorkLeaseResult = 'renewed' | 'not_found' | 'not_claimed_by_worker';
+
+/**
  * How long a claim may stand without the claiming worker finishing the item.
  *
  * A worker that dies mid-item leaves its claim behind, and nothing else can read
@@ -135,6 +142,29 @@ export class WorkQueue {
       .prepare("UPDATE work_items SET status = ?, result = ?, completed_at = datetime('now') WHERE id = ? AND status = 'claimed' AND claimed_by = ?")
       .run(failed ? 'failed' : 'done', JSON.stringify(result), id, workerId) as { changes: number };
     if (update.changes === 1) return 'completed';
+    return this.get(id) ? 'not_claimed_by_worker' : 'not_found';
+  }
+
+  /**
+   * Renew a claim this worker holds, restarting its lease window.
+   *
+   * Without this, the lease window has to exceed the longest item a worker will ever
+   * run, or a slow item gets reclaimed while it is still executing and its work is
+   * handed to a second worker. A worker running a long item renews instead, and the
+   * claim stays its own for as long as it keeps renewing.
+   *
+   * The renewal is guarded by `claimed_by`, like completion: a worker that does not
+   * hold the item cannot move the timestamp, so it cannot keep someone else's claim
+   * alive, and it cannot take an item by touching it. A lease that has already been
+   * reclaimed by another worker is therefore not renewable by the superseded one —
+   * that renewal reports `not_claimed_by_worker`, and the item belongs to the new
+   * holder.
+   */
+  heartbeat(id: string, workerId: string): WorkLeaseResult {
+    const update = this.db
+      .prepare("UPDATE work_items SET claimed_at = datetime('now') WHERE id = ? AND status = 'claimed' AND claimed_by = ?")
+      .run(id, workerId) as { changes: number };
+    if (update.changes === 1) return 'renewed';
     return this.get(id) ? 'not_claimed_by_worker' : 'not_found';
   }
 

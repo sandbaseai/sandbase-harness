@@ -44,7 +44,7 @@ describe('v1 local-first architecture spec', () => {
     expect(docsIndex).not.toContain('[Sandbox Providers]');
 
     expect(apiMatrix).toContain('| Runtime settings | `/v1/x/settings` | Supported |');
-    expect(apiMatrix).toContain('| Worker queue | `/v1/x/worker/claim`, `/v1/x/worker/complete` | Advanced |');
+    expect(apiMatrix).toContain('| Worker queue | `/v1/x/worker/claim`, `/v1/x/worker/heartbeat`, `/v1/x/worker/complete` | Advanced |');
     expect(apiMatrix).not.toContain('| Model providers | `/v1/x/model-providers` |');
     expect(apiMatrix).not.toContain('| Memory providers | `/v1/x/memory-providers` |');
     expect(apiMatrix).not.toContain('| Storage providers | `/v1/x/storage-providers` |');

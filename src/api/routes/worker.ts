@@ -6,7 +6,12 @@
  * user's own infrastructure — the server never runs them.
  *
  *   POST /v1/x/worker/claim     { worker_id, session_id? } → work item | 204
+ *   POST /v1/x/worker/heartbeat { id, worker_id } → { ok: true }
  *   POST /v1/x/worker/complete  { id, worker_id, result, failed? } → { ok: true }
+ *
+ * A worker running an item that outlives the claim lease renews it with
+ * `heartbeat`; otherwise the item is treated as abandoned and handed to another
+ * worker while the first one is still executing it.
  */
 
 import { Hono } from 'hono';
@@ -37,6 +42,21 @@ export function workerRoutes(queue: WorkQueue, db?: Database) {
     );
     if (!item) return c.body(null, 204);
     return c.json(item);
+  });
+
+  app.post('/heartbeat', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.id || typeof body.id !== 'string' || !body.worker_id || typeof body.worker_id !== 'string') {
+      return c.json({ error: { type: 'invalid_request_error', message: 'id and worker_id are required' } }, 400);
+    }
+    const outcome = queue.heartbeat(body.id, body.worker_id);
+    if (outcome === 'not_found') {
+      return c.json({ error: { type: 'not_found', message: 'work item not found' } }, 404);
+    }
+    if (outcome === 'not_claimed_by_worker') {
+      return c.json({ error: { type: 'conflict', message: 'work item is not claimed by this worker' } }, 409);
+    }
+    return c.json({ ok: true });
   });
 
   app.post('/complete', async (c) => {
