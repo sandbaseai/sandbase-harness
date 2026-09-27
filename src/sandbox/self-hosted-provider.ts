@@ -41,11 +41,29 @@ export interface WorkItem {
 export type WorkCompletionResult = 'completed' | 'not_found' | 'not_claimed_by_worker';
 
 /**
+ * How long a claim may stand without the claiming worker finishing the item.
+ *
+ * A worker that dies mid-item leaves its claim behind, and nothing else can read
+ * `claimed_at`, so the item would stay claimed forever and the session waiting on
+ * it would only ever end in a timeout. After this window the claim is assumed
+ * abandoned and the item may be claimed again; the superseded worker's late
+ * completion is then refused by the existing `claimed_by` fence. The window is a
+ * constructor option so a deployment (and a test) can state it explicitly.
+ */
+export const DEFAULT_WORK_LEASE_MS = 60_000;
+
+/**
  * Queue primitives shared by the provider (enqueue/await) and the HTTP worker
  * endpoints (claim/complete).
  */
 export class WorkQueue {
-  constructor(private readonly db: Database) {}
+  private readonly leaseMs: number;
+
+  constructor(private readonly db: Database, options: { leaseMs?: number } = {}) {
+    this.leaseMs = typeof options.leaseMs === 'number' && Number.isFinite(options.leaseMs) && options.leaseMs > 0
+      ? Math.floor(options.leaseMs)
+      : DEFAULT_WORK_LEASE_MS;
+  }
 
   enqueue(sessionId: string, kind: WorkItemKind, payload: Record<string, unknown>): string {
     const id = `work_${nanoid(16)}`;
@@ -56,12 +74,20 @@ export class WorkQueue {
   }
 
   /**
-   * Claim the oldest pending item (optionally scoped to a session). Uses a
-   * single atomic conditional UPDATE guarded by `status='pending'` so two
-   * concurrent workers can never claim the same item (H2). Only the worker
-   * whose UPDATE actually flips the row wins.
+   * Claim the oldest claimable item (optionally scoped to a session): a pending
+   * item, or one whose previous claim has outlived the lease window. Uses a
+   * single atomic conditional UPDATE carrying the same predicate as the
+   * selection, so two concurrent workers can never claim the same item (H2) and
+   * a claim that has expired is reclaimed by exactly one of them. Only the
+   * worker whose UPDATE actually flips the row wins.
    */
   claim(workerId: string, sessionId?: string, environmentId?: string): WorkItem | null {
+    // SQLite has no `milliseconds` modifier - `datetime('now', '-60000 milliseconds')`
+    // is NULL and every comparison against it is NULL, which reads as "nothing is ever
+    // reclaimable". Seconds, with a fractional part, is the modifier that exists.
+    const leaseModifier = `-${this.leaseMs / 1000} seconds`;
+    const claimable = (prefix: string): string =>
+      `(${prefix}status = 'pending' OR (${prefix}status = 'claimed' AND ${prefix}claimed_at IS NOT NULL AND ${prefix}claimed_at <= datetime('now', ?)))`;
     return this.db.transaction(() => {
       let candidate: { id: string } | undefined;
       if (sessionId) {
@@ -70,31 +96,33 @@ export class WorkQueue {
             ? `SELECT wi.id
                FROM work_items wi
                JOIN sessions s ON s.id = wi.session_id
-               WHERE wi.status = 'pending' AND wi.session_id = ? AND s.environment_id = ?
+               WHERE ${claimable('wi.')} AND wi.session_id = ? AND s.environment_id = ?
                ORDER BY wi.created_at ASC, wi.rowid ASC
                LIMIT 1`
-            : "SELECT id FROM work_items WHERE status = 'pending' AND session_id = ? ORDER BY created_at ASC, rowid ASC LIMIT 1",
-        ).get(...(environmentId ? [sessionId, environmentId] : [sessionId])) as { id: string } | undefined;
+            : `SELECT id FROM work_items WHERE ${claimable('')} AND session_id = ? ORDER BY created_at ASC, rowid ASC LIMIT 1`,
+        ).get(...(environmentId ? [leaseModifier, sessionId, environmentId] : [leaseModifier, sessionId])) as { id: string } | undefined;
       } else if (environmentId) {
         candidate = this.db.prepare(
           `SELECT wi.id
            FROM work_items wi
            JOIN sessions s ON s.id = wi.session_id
-           WHERE wi.status = 'pending' AND s.environment_id = ?
+           WHERE ${claimable('wi.')} AND s.environment_id = ?
            ORDER BY wi.created_at ASC, wi.rowid ASC
            LIMIT 1`,
-        ).get(environmentId) as { id: string } | undefined;
+        ).get(leaseModifier, environmentId) as { id: string } | undefined;
       } else {
         candidate = this.db.prepare(
-          "SELECT id FROM work_items WHERE status = 'pending' ORDER BY created_at ASC, rowid ASC LIMIT 1",
-        ).get() as { id: string } | undefined;
+          `SELECT id FROM work_items WHERE ${claimable('')} ORDER BY created_at ASC, rowid ASC LIMIT 1`,
+        ).get(leaseModifier) as { id: string } | undefined;
       }
       if (!candidate) return null;
 
-      // Guarded update: only succeeds if the row is still pending.
+      // Guarded update: the row must still be pending, or claimed by a worker whose
+      // lease has run out. A claim that was renewed, or completed, in between fails
+      // the predicate and this worker loses the race.
       const res = this.db
-        .prepare("UPDATE work_items SET status = 'claimed', claimed_by = ?, claimed_at = datetime('now') WHERE id = ? AND status = 'pending'")
-        .run(workerId, candidate.id) as { changes: number };
+        .prepare(`UPDATE work_items SET status = 'claimed', claimed_by = ?, claimed_at = datetime('now') WHERE id = ? AND ${claimable('')}`)
+        .run(workerId, candidate.id, leaseModifier) as { changes: number };
       if (res.changes !== 1) return null; // lost the race — someone else claimed it
 
       const r = this.db.prepare('SELECT * FROM work_items WHERE id = ?').get(candidate.id) as unknown as RawWorkItem;

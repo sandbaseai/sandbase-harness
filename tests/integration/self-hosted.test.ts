@@ -30,6 +30,16 @@ describe('WorkQueue', () => {
     rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  /**
+   * Age a claim. `claimed_at` is written by SQLite at second precision, so a test
+   * cannot reach the end of a lease window by shortening the window and waiting
+   * without sleeping for whole seconds; moving the claim's own timestamp back is the
+   * deterministic way to be past it.
+   */
+  function backdateClaim(id: string, minutes: number): void {
+    db.prepare("UPDATE work_items SET claimed_at = datetime('now', ?) WHERE id = ?").run(`-${minutes} minutes`, id);
+  }
+
   it('enqueue → claim → complete → await round-trip', async () => {
     const id = queue.enqueue('sess_1', 'exec', { command: 'echo hi' });
 
@@ -87,6 +97,46 @@ describe('WorkQueue', () => {
   it('await times out if never completed', async () => {
     const id = queue.enqueue('s', 'exec', { command: 'slow' });
     await expect(queue.await(id, { timeoutMs: 60, pollMs: 10 })).rejects.toThrow(/timed out/);
+  });
+
+  it('reclaims a claim whose lease window has passed, and refuses the late owner', () => {
+    // A worker that dies mid-item leaves its claim behind. Nothing used to read
+    // `claimed_at`, so that claim stood forever and the session waiting on the item
+    // could only ever end in a timeout. The lease window is what turns "claimed" into
+    // "claimed, but abandoned if nobody finishes it".
+    const leased = new WorkQueue(db, { leaseMs: 30 * 60_000 });
+    const id = leased.enqueue('s', 'exec', { command: 'x' });
+
+    expect(leased.claim('w1')?.claimedBy).toBe('w1');
+    // Inside the window the claim is still respected: this is what keeps the window
+    // from becoming a licence to steal live work.
+    expect(leased.claim('w2')).toBeNull();
+
+    // Ten minutes into a thirty-minute window, still respected.
+    backdateClaim(id, 10);
+    expect(leased.claim('w2')).toBeNull();
+
+    // Past the window the claim is abandoned and the item is handed to the next worker.
+    backdateClaim(id, 60);
+    const reclaimed = leased.claim('w2');
+    expect(reclaimed?.id).toBe(id);
+    expect(reclaimed?.claimedBy).toBe('w2');
+    expect(reclaimed?.status).toBe('claimed');
+
+    // And the superseded owner cannot land its result on the item it lost: the
+    // claimed_by fence refuses it, so a worker that comes back to life cannot
+    // overwrite the result of the worker that actually holds the item.
+    expect(leased.complete(id, 'w1', { exitCode: 0, stdout: 'from the dead worker' })).toBe('not_claimed_by_worker');
+    expect(leased.get(id)!.result).toBeUndefined();
+    expect(leased.complete(id, 'w2', { exitCode: 0, stdout: 'from the live worker' })).toBe('completed');
+    expect((leased.get(id)!.result as { stdout: string }).stdout).toBe('from the live worker');
+
+    // The window is configurable, and an unconfigured queue must still reclaim: the
+    // default has to be a real duration rather than "never".
+    const defaulted = queue.enqueue('s', 'exec', { command: 'y' });
+    expect(queue.claim('w1')?.id).toBe(defaulted);
+    backdateClaim(defaulted, 24 * 60);
+    expect(queue.claim('w2')?.claimedBy).toBe('w2');
   });
 });
 
