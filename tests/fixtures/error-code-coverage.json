@@ -28,7 +28,7 @@
     "model_not_found": ["tests/integration/model-qualified-reference.test.ts", "tests/unit/model-auth-failed.test.ts"],
     "model_provider_not_configured": ["tests/integration/model-qualified-reference.test.ts", "tests/unit/model-error.test.ts"],
     "not_found": ["tests/conformance/unserved-route-envelope.test.ts",
-        "tests/integration/agent-versions-pagination.test.ts", "tests/integration/deployment-archived-event.test.ts", "tests/integration/deployment-path-aliases.test.ts", "tests/integration/deployment-runs-collection.test.ts", "tests/integration/sdk-error-envelope.test.ts", "tests/integration/session-artifacts-query-admission.test.ts", "tests/integration/unrouted-path-404.test.ts", "tests/integration/vault-path-aliases.test.ts", "tests/unit/orchestrator.test.ts", "tests/unit/session-resource-instances.test.ts"],
+        "tests/integration/agent-versions-pagination.test.ts", "tests/integration/deployment-archived-event.test.ts", "tests/integration/deployment-path-aliases.test.ts", "tests/integration/deployment-runs-collection.test.ts", "tests/integration/sdk-error-envelope.test.ts", "tests/integration/self-hosted.test.ts", "tests/integration/session-artifacts-query-admission.test.ts", "tests/integration/unrouted-path-404.test.ts", "tests/integration/vault-path-aliases.test.ts", "tests/unit/orchestrator.test.ts", "tests/unit/session-resource-instances.test.ts"],
     "outcome_evaluator_unavailable": ["tests/integration/outcome-grading.test.ts", "tests/unit/outcome-evaluation.test.ts"],
     "outcome_grader_unavailable": ["tests/integration/outcome-loop.test.ts"],
     "outcome_rubric_file_not_found": ["tests/unit/unpinned-wire-codes.test.ts"],
