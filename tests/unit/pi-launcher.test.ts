@@ -102,13 +102,60 @@ function launchRequest(workDir: string, sessionId: string) {
  */
 const UNCHECKED_POLICY_FINGERPRINT = 'unchecked-policy-fingerprint';
 
+/**
+ * Wait until the fixture's result file holds a complete document.
+ *
+ * Existence is not readiness. The fixtures write with `writeFileSync`, which creates the
+ * path before the bytes are in it, so a caller that returned on the first `existsSync`
+ * hit could parse an empty or half-written file. That is what produced an intermittent
+ * `SyntaxError: Unexpected end of JSON input` in a full-suite run - never in isolation,
+ * because the window is only as wide as the gap between the fixture creating the file
+ * and finishing the write, and load widens it.
+ *
+ * Every caller of this helper parses the file as JSON, so readiness is exactly "the bytes
+ * parse", which also covers a reader that arrives while the fixture is still writing and
+ * any future caller that reads the same way.
+ */
 async function waitForFile(path: string): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (existsSync(path)) return;
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (existsSync(path)) {
+      try {
+        JSON.parse(readFileSync(path, 'utf8'));
+        return;
+      } catch {
+        // Present but not yet complete: keep waiting rather than hand the caller a
+        // document it cannot read.
+      }
+    }
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
   }
-  throw new Error(`Timed out waiting for ${path}`);
+  throw new Error(`Timed out waiting for a complete document at ${path}`);
 }
+
+describe('Pi launcher fixture result file', () => {
+  it('waits for a complete document rather than for the path to appear', async () => {
+    // The defect this covers is a race, so the assertion holds the partial state still
+    // instead of hoping to lose the race: a file that exists and cannot be parsed is
+    // exactly what the fixture exposes between creating the path and finishing the write.
+    const directory = mkdtempSync(join(tmpdir(), 'ma-pi-wait-'));
+    directories.push(directory);
+    const resultPath = join(directory, 'rpc-argv.json');
+    writeFileSync(resultPath, '{"args":["--policy"');
+
+    let settled = false;
+    const waiting = waitForFile(resultPath).then(() => { settled = true; });
+    // Long enough for the previous implementation's 10ms poll to have returned several
+    // times over. Against that implementation this is the assertion that fails.
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 60));
+    expect(settled).toBe(false);
+
+    // Completing the document is what releases the wait, so the helper is not merely
+    // slower - it is waiting for the condition its callers actually need.
+    writeFileSync(resultPath, JSON.stringify({ args: ['--policy', 'none'] }));
+    await waiting;
+    expect(settled).toBe(true);
+  });
+});
 
 describe('Pi launcher', () => {
   it('resolves host model settings into a managed config and launches one selected print-mode child', async () => {
