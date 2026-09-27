@@ -205,6 +205,33 @@ describe('credential network policy', () => {
       expect(bundle.request_body.crd_bearer).toBe('super-secret-value');
     });
 
+    it('does not give a keyed credential a position its record excluded', () => {
+      // The boundary's rule for keyed credentials has two halves: "for a keyed row
+      // an empty list means 'not specified' rather than 'nowhere'", and "a list that
+      // was given is still respected as written, including one that enables the body
+      // only, so a keyed credential never gains a position its record explicitly
+      // excluded". The case above shows the second half failing open for an *unkeyed*
+      // row, where the list is consulted either way, so it cannot see this: the
+      // keyed default is the branch that would hand out a header the record refused.
+      insertCredential({
+        id: 'crd_body_only',
+        network: { type: 'unrestricted', allowed_hosts: [] },
+        authType: 'bearer_token',
+        mcpServerUrl: 'https://here.example.com/mcp',
+        locations: ['request_body'],
+      });
+
+      const bundle = resolveSessionCredentialInjections(db, 'sess_test', {
+        mcpServerUrl: 'https://here.example.com/mcp',
+        targetHost: 'https://here.example.com/mcp',
+      });
+
+      // The list was given, so the empty-location default does not apply to it.
+      expect(bundle.request_headers.Authorization).toBeUndefined();
+      expect(bundle.request_body.crd_body_only).toBe('super-secret-value');
+      expect(bundle.credentials.map((entry) => entry.injection_locations)).toEqual([['request_body']]);
+    });
+
     it('does not decrypt a credential that belongs to another server', () => {
       // The boundary says of a credential keyed by `mcp_server_url` that "the check
       // sits above the decrypt call, the secret is not even decrypted". The suite
