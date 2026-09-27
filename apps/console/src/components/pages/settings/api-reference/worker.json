@@ -28,6 +28,35 @@
     ]
   },
   {
+    "id": "worker-heartbeat",
+    "group": "Worker",
+    "title": "Renew work item claim",
+    "method": "POST",
+    "path": "/v1/x/worker/heartbeat",
+    "summary": "Renews the claim lease on a work item this worker still holds, so an item that outlives the lease window is not reclaimed and handed to another worker while it is still running.",
+    "parameters": [
+      {
+        "name": "id",
+        "type": "string",
+        "required": true,
+        "description": "Claimed work item id."
+      },
+      {
+        "name": "worker_id",
+        "type": "string",
+        "required": true,
+        "description": "Worker identity that owns the claim."
+      }
+    ],
+    "response": [
+      {
+        "name": "ok",
+        "type": "boolean",
+        "description": "True when the lease was renewed."
+      }
+    ]
+  },
+  {
     "id": "worker-complete",
     "group": "Worker",
     "title": "Complete work item",
