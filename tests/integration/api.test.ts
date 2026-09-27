@@ -468,15 +468,24 @@ describe('Managed Agents API', () => {
     });
 
     it('accepts standard agent refs, resources, vault ids, and redacts repository tokens', async () => {
-      const { body: store } = await postJson('/v1/memory_stores', {
+      // Both of these are inputs to the create below, and both are asserted at the
+      // step that produces them. Without this the case could only report the 400 it
+      // gets one step later, when `file_id` or `memory_store_id` arrives undefined -
+      // which is what happened once under load, and left the fault unnamed.
+      const { res: storeRes, body: store } = await postJson('/v1/memory_stores', {
         name: 'Session resource memory',
         description: 'Mounted session memory.',
       });
-      const { body: file } = await postJson('/v1/files', {
+      expect(storeRes.status, 'creating the memory store the session mounts').toBe(201);
+      expect(typeof store.id, 'the created memory store carries an id').toBe('string');
+
+      const { res: fileRes, body: file } = await postJson('/v1/files', {
         name: 'resource.txt',
         media_type: 'text/plain',
         content: 'session resource',
       });
+      expect(fileRes.status, 'creating the file the session mounts').toBe(201);
+      expect(typeof file.id, 'the created file carries an id').toBe('string');
       const { res, body } = await postJson('/v1/sessions', {
         title: 'resource run',
         agent: { id: 'agent_echo-agent', type: 'agent', version: 1 },
@@ -496,7 +505,12 @@ describe('Managed Agents API', () => {
         metadata: { source: 'contract-test' },
       });
 
-      expect(res.status).toBe(201);
+      // Name the inputs and echo the reason, so a refusal here says which of the
+      // three references it rejected rather than only that the status was 400.
+      expect(
+        res.status,
+        `creating the session over store=${store.id} file=${file.id}: ${body?.error?.message ?? 'no error message'}`,
+      ).toBe(201);
       expect(body.agent.id).toBe('agent_echo-agent');
       expect(body.environment_id).toBe('env_default');
       expect(body.title).toBe('resource run');
