@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { acquirePiSessionFileLease, PiSessionBusyError } from '@/strategy/pi/session-lease.js';
@@ -87,5 +87,37 @@ describe('Pi session-file lease', () => {
     expect(existsSync(`${sessionFile}.lease`)).toBe(true);
     await expect(acquirePiSessionFileLease(sessionFile, { ownerId: 'owner-c', now: () => 3_000, staleAfterMs: 60_000 }))
       .rejects.toMatchObject({ code: 'pi_session_busy', owner: { ownerId: 'owner-b' } });
+  });
+
+  it('stops renewing on suspendHeartbeat but keeps the lease', async () => {
+    // suspendHeartbeat carries the contract "Stop heartbeats without deleting the
+    // lease when cleanup ownership is unknown", and the launcher calls it when a
+    // cleanup is still pending, so the lease has to outlive the heartbeat. Neither
+    // half was exercised anywhere: the suite never called it, and a grep of the whole
+    // test tree found no reference to it at all.
+    const directory = mkdtempSync(join(tmpdir(), 'ma-pi-lease-suspend-'));
+    directories.push(directory);
+    const sessionFile = join(directory, 'session.jsonl');
+    const leasePath = `${sessionFile}.lease`;
+    // A second is the shortest heartbeat interval the module will use, so the clock
+    // is advanced past it to make a still-running heartbeat visible in the file.
+    let clock = 1_000;
+    const first = await acquirePiSessionFileLease(sessionFile, { ownerId: 'owner-a', now: () => clock, staleAfterMs: 1_000 });
+    const before = JSON.parse(readFileSync(leasePath, 'utf8')) as { heartbeatAt: string; expiresAt: string };
+
+    first.suspendHeartbeat();
+    clock = 50_000;
+    await new Promise((resolve) => setTimeout(resolve, 1_300));
+
+    // Half one: no further renewal was written. (This can only fail if a heartbeat
+    // really did run after the suspend, so the wait cannot produce a false failure.)
+    const after = JSON.parse(readFileSync(leasePath, 'utf8')) as { heartbeatAt: string; expiresAt: string };
+    expect(after.heartbeatAt).toBe(before.heartbeatAt);
+    expect(after.expiresAt).toBe(before.expiresAt);
+    // Half two: suspending is not releasing - the lease is still there, still live
+    // at a time before its expiry, and still refusing another owner.
+    expect(existsSync(leasePath)).toBe(true);
+    await expect(acquirePiSessionFileLease(sessionFile, { ownerId: 'owner-b', now: () => 1_500, staleAfterMs: 60_000 }))
+      .rejects.toMatchObject({ code: 'pi_session_busy' } satisfies Partial<PiSessionBusyError>);
   });
 });
