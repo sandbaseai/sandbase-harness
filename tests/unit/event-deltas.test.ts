@@ -147,6 +147,55 @@ describe('event delta projector', () => {
     expect(next).toHaveLength(1);
   });
 
+  it('keeps one session\'s previews open when another session reconciles', () => {
+    // `event-deltas.ts:82-88` states the use case this class exists for: "Keyed by
+    // session so a projector instance can be reused across a filtered broadcast
+    // without leaking previews between sessions." The tests above all drive one
+    // connection, so nothing exercised the reuse. Note that `started` is keyed by
+    // the previewed id alone - the session never enters the key - so what this case
+    // actually pins is that the sharing is safe: reconciling one session's buffered
+    // event must not close another session's open preview, because the two previews
+    // are distinct ids and each is tracked on its own.
+    const projector = new EventDeltaProjector(['agent.message']);
+
+    // Session A opens a preview and streams into it.
+    expect(projector.framesFor(carrier('agent.message_stream_start', { message_id: 'sevt_a', sessionId: 'sess_a' })))
+      .toEqual([{ type: 'event_start', event: { type: 'agent.message', id: 'sevt_a' } }]);
+    expect(projector.framesFor(carrier('agent.message_chunk', { message_id: 'sevt_a', sessionId: 'sess_a', delta: 'A' })))
+      .toHaveLength(1);
+
+    // Session B's own preview opens on the same instance: A's state must not
+    // suppress it, and B's frames must name B's id.
+    const bStart = projector.framesFor(carrier('agent.message_stream_start', { message_id: 'sevt_b', sessionId: 'sess_b' }));
+    expect(bStart).toEqual([{ type: 'event_start', event: { type: 'agent.message', id: 'sevt_b' } }]);
+    const bDelta = projector.framesFor(carrier('agent.message_chunk', { message_id: 'sevt_b', sessionId: 'sess_b', delta: 'B' }));
+    expect(bDelta.map((frame) => frame.event_id ?? (frame.event as { id?: string } | undefined)?.id))
+      .toEqual(['sevt_b']);
+
+    // Session A's buffered event lands. It reconciles A's preview and nothing else.
+    projector.reconcile({
+      id: 'sevt_a',
+      sessionId: 'sess_a',
+      seq: 9,
+      type: 'agent.message',
+      createdAt: new Date(),
+    } as SessionEvent);
+
+    // B's preview is still open: a repeat start is still suppressed, and a further
+    // chunk is still a delta rather than a second opening frame.
+    expect(projector.framesFor(carrier('agent.message_stream_start', { message_id: 'sevt_b', sessionId: 'sess_b' })))
+      .toEqual([]);
+    const afterReconcile = projector.framesFor(carrier('agent.message_chunk', { message_id: 'sevt_b', sessionId: 'sess_b', delta: 'B2' }));
+    expect(afterReconcile).toHaveLength(1);
+    expect(afterReconcile[0]!.type).toBe('event_delta');
+
+    // And A may open a fresh draft, which must not disturb B either.
+    expect(projector.framesFor(carrier('agent.message_stream_start', { message_id: 'sevt_a', sessionId: 'sess_a' })))
+      .toHaveLength(1);
+    expect(projector.framesFor(carrier('agent.message_chunk', { message_id: 'sevt_b', sessionId: 'sess_b', delta: 'B3' })))
+      .toHaveLength(1);
+  });
+
   it('reads the content-block index from the carrier when one is supplied', () => {
     const projector = new EventDeltaProjector(['agent.message']);
     const frames = projector.framesFor(
