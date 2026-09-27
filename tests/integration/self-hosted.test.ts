@@ -176,6 +176,85 @@ describe('WorkQueue', () => {
     expect(queue.get(held)!.stoppedAt).toBeTruthy();
   });
 
+  it('records an item enqueued for an already-ended session as stopped, and still queues work for a live one', () => {
+    // The marker `stop()` writes covers the work that existed at that moment. Work that
+    // arrives afterwards - a tool call from a turn that was still in flight, or one
+    // enqueued by the second process this protocol exists to tolerate - used to be
+    // inserted fresh and claimable, so a worker executed it for a session that was
+    // already over. The decision belongs to the session, so the insert has to carry it.
+    // The session rows here are real, because the predicate reads their status; this
+    // database enforces its foreign keys, so the parents are created first.
+    db.prepare("INSERT INTO environments (id, name, description, config, metadata) VALUES ('env_a', 'a', '', '{}', '{}')").run();
+    db.prepare("INSERT INTO agents (id, name, definition) VALUES ('agent_x', 'x', '{}')").run();
+    const mkSession = (id: string, status: string): void => {
+      db.prepare("INSERT INTO sessions (id, agent_id, agent_name, environment_id, status) VALUES (?, 'agent_x', 'x', 'env_a', ?)").run(id, status);
+    };
+
+    mkSession('sess_ended', 'completed');
+    const late = queue.enqueue('sess_ended', 'exec', { command: 'never' });
+    // Recorded, and still `pending`: the intent is kept and marked as unwanted rather than
+    // invented as done or failed, exactly as `stop()` treats the rows it marks.
+    expect(queue.get(late)!.stoppedAt).toBeTruthy();
+    expect(queue.get(late)!.status).toBe('pending');
+    expect(queue.claim('w1', 'sess_ended')).toBeNull();
+    // The session's decision already covers it, so there is nothing left for a second stop
+    // to mark - otherwise the guarantee would depend on someone remembering to call it.
+    expect(queue.stop('sess_ended')).toBe(0);
+
+    // Every terminal status behaves the same way, and they are read from the state machine
+    // rather than listed here, so `timed_out` and `cleanup_pending` count too.
+    for (const status of ['cancelled', 'timed_out', 'cleanup_pending']) {
+      mkSession(`sess_${status}`, status);
+      const id = queue.enqueue(`sess_${status}`, 'read', { path: status });
+      expect(queue.get(id)!.stoppedAt).toBeTruthy();
+      expect(queue.claim('w1', `sess_${status}`)).toBeNull();
+    }
+
+    // A status with an outbound transition is resumable, so its work is still wanted.
+    // `failed` is the one that matters: it has a transition back to `running`, and a
+    // session that is being retried must not lose the work it queued.
+    for (const status of ['queued', 'running', 'paused', 'requires_action', 'failed']) {
+      mkSession(`sess_${status}`, status);
+      const id = queue.enqueue(`sess_${status}`, 'read', { path: status });
+      expect(queue.get(id)!.stoppedAt).toBeNull();
+      expect(queue.claim('w1', `sess_${status}`)!.id).toBe(id);
+      queue.complete(id, 'w1', { exitCode: 0 });
+    }
+
+    // An id with no session row is a caller's mistake rather than a stop, so it stays
+    // claimable - which is also how every other test in this file enqueues work.
+    const unknown = queue.enqueue('sess_absent', 'read', { path: 'x' });
+    expect(queue.get(unknown)!.stoppedAt).toBeNull();
+    expect(queue.claim('w1', 'sess_absent')!.id).toBe(unknown);
+    queue.complete(unknown, 'w1', { exitCode: 0 });
+
+    // The boundary, stated rather than assumed: rows that were already queued are the queue
+    // stop's business, not this predicate's, and this change deliberately does not reach
+    // backwards to refuse work that was legitimate when it was written. (The one path where
+    // that leaves a gap - a terminal session that skips its sandbox release, so nothing
+    // ever calls `queue.stop()` for it - is #631 and is not this change.)
+    mkSession('sess_released', 'running');
+    const beforeEnd = queue.enqueue('sess_released', 'exec', { command: 'x' });
+    expect(queue.stop('sess_released')).toBe(1);
+    expect(queue.get(beforeEnd)!.stoppedAt).toBeTruthy();
+
+    // A sandbox released for a session that is still resumable marks only what existed
+    // then: the session has not ended, and a turn that resumes has to be able to run the
+    // tools it calls. Reading a queue-level stop as a session-level end would strand it.
+    const afterRelease = queue.enqueue('sess_released', 'exec', { command: 'y' });
+    expect(queue.get(afterRelease)!.stoppedAt).toBeNull();
+    expect(queue.claim('w1', 'sess_released')!.id).toBe(afterRelease);
+    queue.complete(afterRelease, 'w1', { exitCode: 0 });
+
+    // Once that same session does end, later work is refused by the insert itself: no
+    // second stop call, and nothing that depends on who was watching at the time.
+    db.prepare("UPDATE sessions SET status = 'completed' WHERE id = 'sess_released'").run();
+    const afterEnd = queue.enqueue('sess_released', 'exec', { command: 'z' });
+    expect(queue.get(afterEnd)!.stoppedAt).toBeTruthy();
+    expect(queue.claim('w1', 'sess_released')).toBeNull();
+    expect(queue.stop('sess_released')).toBe(0);
+  });
+
   it('tells a worker its lease is lost once the session stopped the work', () => {
     // A worker executing a long item asks whether the work is still wanted by renewing
     // its claim. Once the session has ended - possibly in another process, where no

@@ -14,6 +14,7 @@
 
 import { nanoid } from 'nanoid';
 import type { Database } from '@/core/db/database.js';
+import { SESSION_TRANSITIONS } from '@/types/session.js';
 import {
   sandboxCapabilities,
   type SandboxProvider,
@@ -74,6 +75,16 @@ export type WorkLeaseResult = 'renewed' | 'not_found' | 'not_claimed_by_worker' 
 export const DEFAULT_WORK_LEASE_MS = 60_000;
 
 /**
+ * Session statuses that have no outbound transition, read from the state machine rather
+ * than repeated here. A second list would silently fall behind the first, and this is the
+ * predicate that decides whether a session's work can still be claimed, so a status added
+ * as terminal has to reach it without anyone remembering to edit this file.
+ */
+const TERMINAL_SESSION_STATUSES: string[] = Object.entries(SESSION_TRANSITIONS)
+  .filter(([, next]) => next.length === 0)
+  .map(([status]) => status);
+
+/**
  * Queue primitives shared by the provider (enqueue/await) and the HTTP worker
  * endpoints (claim/complete).
  */
@@ -86,11 +97,33 @@ export class WorkQueue {
       : DEFAULT_WORK_LEASE_MS;
   }
 
+  /**
+   * Queue an item for a session.
+   *
+   * The stop is a decision about the session, not only about the rows that happened to
+   * exist when it was taken. `stop()` marks the work already queued; this insert carries
+   * the same decision forward, so an item that arrives afterwards - a tool call from a
+   * turn that was still in flight, or one enqueued by the second process this protocol
+   * exists to tolerate - is recorded as stopped and can never be claimed. Without that, a
+   * worker executes it for a session that is already over.
+   *
+   * The status is read inside the same statement as the insert. Reading it first and then
+   * inserting would leave a window in which the session ends between the two, and the row
+   * written in that window is exactly the one this is about.
+   *
+   * A session id with no row is left claimable. An unknown id is a caller's mistake rather
+   * than a stop, so treating it as ended would refuse work that is still wanted.
+   */
   enqueue(sessionId: string, kind: WorkItemKind, payload: Record<string, unknown>): string {
     const id = `work_${nanoid(16)}`;
+    const terminalPlaceholders = TERMINAL_SESSION_STATUSES.map(() => '?').join(', ');
     this.db
-      .prepare('INSERT INTO work_items (id, session_id, kind, payload) VALUES (?, ?, ?, ?)')
-      .run(id, sessionId, kind, JSON.stringify(payload));
+      .prepare(
+        `INSERT INTO work_items (id, session_id, kind, payload, stopped_at)
+         SELECT ?, ?, ?, ?, CASE WHEN (SELECT status FROM sessions WHERE id = ?) IN (${terminalPlaceholders})
+           THEN datetime('now') ELSE NULL END`,
+      )
+      .run(id, sessionId, kind, JSON.stringify(payload), sessionId, ...TERMINAL_SESSION_STATUSES);
     return id;
   }
 
