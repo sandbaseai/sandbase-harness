@@ -89,9 +89,14 @@ describe('API reference docs', () => {
 
   it('keeps self-hosted worker endpoint docs aligned with request bodies', () => {
     const claim = API_REFERENCE_DOCS.find((endpoint) => endpoint.id === 'worker-claim');
+    const accept = API_REFERENCE_DOCS.find((endpoint) => endpoint.id === 'worker-accept');
     const complete = API_REFERENCE_DOCS.find((endpoint) => endpoint.id === 'worker-complete');
 
     expect(claim?.parameters?.map((field) => field.name)).toEqual(expect.arrayContaining(['worker_id', 'session_id']));
+    // The confirmation that authorizes running a claimed item, documented with the same
+    // body as the route reads: an id and the worker that owns the claim.
+    expect(accept?.path).toBe('/v1/x/worker/accept');
+    expect(accept?.parameters?.map((field) => field.name)).toEqual(['id', 'worker_id']);
     expect(complete?.parameters?.map((field) => field.name)).toEqual(expect.arrayContaining(['id', 'worker_id', 'result', 'failed']));
     expect(complete?.parameters?.map((field) => field.name)).not.toContain('status');
     expect(complete?.parameters?.map((field) => field.name)).not.toContain('error');

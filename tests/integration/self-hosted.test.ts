@@ -417,6 +417,91 @@ describe('WorkQueue', () => {
     // it does not say the effect did not happen.
     expect(queue.complete(held, 'w1', { exitCode: 0, stdout: 'finished anyway' })).toBe('completed');
   });
+
+  it('confirms the claim before an item runs, and refuses when the lease has lapsed', () => {
+    // A claim is a lease on running an item, not ownership of it: the row becomes
+    // claimable again the instant the window passes, and the gap between claiming and
+    // starting is unbounded - the worker returns from the claim, resolves its workdir, and
+    // may be a process that was paused or descheduled. Without a check at the start, an
+    // item whose window passed runs here **and** on the worker that reclaims it, so the
+    // side effect happens twice on the operator's machine.
+    const id = queue.enqueue('sess_accept', 'exec', { command: 'run once' });
+    expect(queue.claim('w1')!.id).toBe(id);
+
+    // Held, and not yet accepted: the two are different facts and the row records both.
+    expect(queue.get(id)!.claimedBy).toBe('w1');
+    expect(queue.get(id)!.acceptedAt).toBeNull();
+
+    expect(queue.accept(id, 'w1')).toBe('accepted');
+    expect(queue.get(id)!.acceptedAt).toBeTruthy();
+
+    // Idempotent for the holder: a worker retrying over a flaky link must not be punished
+    // for the retry, and the second answer is the same permission as the first.
+    expect(queue.accept(id, 'w1')).toBe('accepted');
+
+    // A foreign holder is not a stop. The item is alive for the worker that owns it, so
+    // the answer has to be the one that says "not yours" rather than the one that says
+    // "do not run it" - the two lead a worker to opposite actions.
+    expect(queue.accept(id, 'w2')).toBe('not_claimed_by_worker');
+    expect(queue.accept('work_missing', 'w1')).toBe('not_found');
+  });
+
+  it('refuses to accept a claim whose lease lapsed, even when nobody has reclaimed it', () => {
+    // This is the strictness that makes accept different from heartbeat, and it is the
+    // point rather than an inconsistency. A renewal is about an item already in flight,
+    // whose effect cannot be un-run and which nobody else has taken, so a suspicion is
+    // tolerated. An acceptance authorizes **starting** something, and a lapsed claim is
+    // reclaimable at any instant: authorizing a start on it would let this worker and the
+    // one that reclaims it in the same instant both run the item.
+    const id = queue.enqueue('sess_lapsed', 'exec', { command: 'stale' });
+    expect(queue.claim('w1')!.id).toBe(id);
+    backdateClaim(db, id, 24 * 60);
+
+    // The precondition, asserted rather than assumed: the item is still this worker's and
+    // still unclaimed by anyone else, so the refusal below cannot be a foreign-holder
+    // answer wearing a lease-refusal's clothes.
+    expect(queue.get(id)!.claimedBy).toBe('w1');
+    expect(queue.get(id)!.status).toBe('claimed');
+
+    expect(queue.accept(id, 'w1')).toBe('work_lease_lost');
+    expect(queue.get(id)!.acceptedAt).toBeNull();
+    // And the same lease is still renewable, which is what makes the asymmetry deliberate:
+    // the worker that is already running this item is not told to stop by a lapsed lease.
+    expect(queue.heartbeat(id, 'w1')).toBe('renewed');
+    // Renewing restarts the window, so the item is acceptable again now that it is live.
+    expect(queue.accept(id, 'w1')).toBe('accepted');
+  });
+
+  it('refuses to accept stopped work with the code a worker acts on', () => {
+    // The session ended. Nothing wants the item, so the worker must not start it - and the
+    // refusal is the same engine-neutral code a refused renewal uses, because the
+    // instruction to the worker is identical either way.
+    const id = queue.enqueue('sess_stopped', 'exec', { command: 'not wanted' });
+    expect(queue.claim('w1')!.id).toBe(id);
+    expect(queue.stop('sess_stopped')).toBe(1);
+
+    expect(queue.accept(id, 'w1')).toBe('work_lease_lost');
+    // A refusal is not a completion: nothing ran, so nothing may be recorded as having run.
+    expect(queue.get(id)!.status).toBe('claimed');
+    expect(queue.get(id)!.completedAt).toBeNull();
+    expect(queue.get(id)!.acceptedAt).toBeNull();
+  });
+
+  it('clears acceptance when the item is reclaimed by a new holder', () => {
+    // Acceptance is a statement about one holder's lease, so it must not survive that
+    // holder losing the item. A row that reads `accepted` while belonging to a worker that
+    // never asked would tell the queue an effect was committed to that nobody committed to.
+    const id = queue.enqueue('sess_reclaim', 'exec', { command: 'mine, then yours' });
+    expect(queue.claim('w1')!.id).toBe(id);
+    expect(queue.accept(id, 'w1')).toBe('accepted');
+    expect(queue.get(id)!.acceptedAt).toBeTruthy();
+
+    backdateClaim(db, id, 24 * 60);
+    expect(queue.claim('w2')!.id).toBe(id);
+    expect(queue.get(id)!.claimedBy).toBe('w2');
+    expect(queue.get(id)!.acceptedAt).toBeNull();
+    expect(queue.accept(id, 'w2')).toBe('accepted');
+  });
 });
 
 describe('SelfHostedSandboxProvider', () => {
@@ -517,6 +602,38 @@ describe('Worker HTTP endpoints', () => {
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(400);
+  });
+
+  it('accepts a live claim, and answers 409 with the code a worker acts on', async () => {
+    const post = (path: string, body: unknown) =>
+      app.request(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+    const id = queue.enqueue('s', 'exec', { command: 'run' });
+    queue.claim('w1');
+
+    // The success path is what authorizes the worker to start the item.
+    const ok = await post('/accept', { id, worker_id: 'w1' });
+    expect(ok.status).toBe(200);
+    expect(await ok.json()).toEqual({ ok: true });
+
+    // A foreign holder gets the refusal that says "not yours" and carries no code, because
+    // the work is alive for the worker that owns it.
+    const foreign = await post('/accept', { id, worker_id: 'w2' });
+    expect(foreign.status).toBe(409);
+    expect((await foreign.json()).error.code).toBeUndefined();
+
+    // A stopped item gets the engine-neutral code, on the same status, because the
+    // instruction to the worker is the one it must act on.
+    const stopped = queue.enqueue('s_stop', 'exec', { command: 'stop me' });
+    queue.claim('w3', 's_stop');
+    queue.stop('s_stop');
+    const refused = await post('/accept', { id: stopped, worker_id: 'w3' });
+    expect(refused.status).toBe(409);
+    expect((await refused.json()).error.code).toBe('work_lease_lost');
+    expect(queue.get(stopped)!.status).toBe('claimed');
+
+    expect((await post('/accept', { id: 'work_missing', worker_id: 'w1' })).status).toBe(404);
+    expect((await post('/accept', { id, worker_id: '' })).status).toBe(400);
   });
 
   it('complete marks the item done', async () => {

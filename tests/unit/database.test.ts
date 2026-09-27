@@ -188,6 +188,37 @@ describe('Database migrations', () => {
     upgraded.close();
   });
 
+  it('adds the work-item acceptance marker to a fresh workspace and to an existing one', () => {
+    const fresh = new Database(join(tmpDir, 'fresh-accept.db'));
+    fresh.runMigrations();
+    expect(columnsOf(fresh, 'work_items')).toContain('accepted_at');
+    expect(fresh.prepare('SELECT name FROM _migrations WHERE version = 46').get()).toEqual({
+      name: '046_work_item_accept',
+    });
+    fresh.close();
+
+    // A row claimed by an earlier build stays NULL, which reads as "held but never
+    // started". That is the honest back-fill rather than a convenient one: there was no
+    // accept step for it to have been accepted by, so inventing a timestamp would claim a
+    // commitment nobody made - and the queue would then treat a worker that died before
+    // starting the item as one that may already have run it.
+    const upgradedPath = join(tmpDir, 'upgraded-accept.db');
+    const upgraded = new Database(upgradedPath);
+    upgraded.runMigrations(MIGRATIONS.filter((migration) => migration.version <= 45));
+    expect(columnsOf(upgraded, 'work_items')).not.toContain('accepted_at');
+    upgraded.exec(`
+      INSERT INTO work_items (id, session_id, kind, payload, status, claimed_by, claimed_at)
+      VALUES ('work_a', 'sess_a', 'exec', '{"command":"echo hi"}', 'claimed', 'w1', datetime('now'))
+    `);
+
+    upgraded.runMigrations();
+    expect(columnsOf(upgraded, 'work_items')).toContain('accepted_at');
+    expect(
+      upgraded.prepare('SELECT status, claimed_by, accepted_at FROM work_items WHERE id = ?').get('work_a'),
+    ).toEqual({ status: 'claimed', claimed_by: 'w1', accepted_at: null });
+    upgraded.close();
+  });
+
   it('transaction rolls back on error', () => {
     const db = new Database(dbPath);
     db.runMigrations();

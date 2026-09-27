@@ -60,7 +60,7 @@
     "too_many_initial_events": ["tests/integration/api.test.ts", "tests/integration/initial-events-transaction.test.ts", "tests/unit/cma-event-contract.test.ts"],
     "too_many_stores": ["tests/unit/memory-semantics.test.ts"],
     "unresolved_env_reference": ["tests/unit/settings.test.ts"],
-    "work_lease_lost": ["tests/integration/self-hosted.test.ts", "tests/integration/session-error-paths.test.ts"],
+    "work_lease_lost": ["tests/integration/self-hosted.test.ts", "tests/integration/session-error-paths.test.ts", "tests/integration/worker-poll-cli.test.ts"],
     "work_outcome_unknown": ["tests/integration/self-hosted.test.ts", "tests/integration/session-error-paths.test.ts"],
     "work_queue_timeout": ["tests/integration/self-hosted.test.ts", "tests/integration/session-error-paths.test.ts"]
   }

@@ -6,6 +6,7 @@
  * user's own infrastructure — the server never runs them.
  *
  *   POST /v1/x/worker/claim     { worker_id, session_id? } → work item | 204
+ *   POST /v1/x/worker/accept    { id, worker_id } → { ok: true } | 409
  *   POST /v1/x/worker/heartbeat { id, worker_id } → { ok: true }
  *   POST /v1/x/worker/complete  { id, worker_id, result, failed? } → { ok: true }
  *
@@ -16,6 +17,13 @@
  * runtime's way of telling a worker that is already executing something to stop: the
  * stop marker is persisted server-side, and this is the only channel through which
  * the process holding the command ever learns about it.
+ *
+ * `accept` closes the other half of the same race, at the opposite end: a claim is a
+ * lease on running an item, and the window can pass between claiming and starting, so
+ * the claim alone does not authorize execution. A worker confirms with `accept`
+ * immediately before it starts, and only `{ ok: true }` authorizes running the item.
+ * A refusal is never a completion - the worker must not run it and must not report a
+ * result, which would assert an effect that never happened.
  */
 
 import { Hono } from 'hono';
@@ -67,6 +75,34 @@ export function workerRoutes(queue: WorkQueue, db?: Database) {
           type: 'conflict',
           code: 'work_lease_lost',
           message: 'this work was stopped because the session that queued it has ended',
+        },
+      }, 409);
+    }
+    if (outcome === 'not_claimed_by_worker') {
+      return c.json({ error: { type: 'conflict', message: 'work item is not claimed by this worker' } }, 409);
+    }
+    return c.json({ ok: true });
+  });
+
+  app.post('/accept', async (c) => {
+    const body = await c.req.json().catch(() => ({}));
+    if (!body.id || typeof body.id !== 'string' || !body.worker_id || typeof body.worker_id !== 'string') {
+      return c.json({ error: { type: 'invalid_request_error', message: 'id and worker_id are required' } }, 400);
+    }
+    const outcome = queue.accept(body.id, body.worker_id);
+    if (outcome === 'not_found') {
+      return c.json({ error: { type: 'not_found', message: 'work item not found' } }, 404);
+    }
+    if (outcome === 'work_lease_lost') {
+      // One code for both the stopped item and the lapsed lease, because the instruction
+      // to the worker is the same either way - do not run it - while the message says
+      // which of the two it was. A worker that cannot tell them apart still does the
+      // right thing, and one that reads the message knows whether to resubmit.
+      return c.json({
+        error: {
+          type: 'conflict',
+          code: 'work_lease_lost',
+          message: 'this work cannot be accepted: it was stopped, or its claim lease has run out',
         },
       }, 409);
     }

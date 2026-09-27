@@ -17,7 +17,7 @@
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { join } from 'node:path';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { serve } from '@hono/node-server';
 import { Database } from '@/core/db/database.js';
@@ -126,6 +126,63 @@ describe('worker poll CLI', () => {
       workerPollCommand({ port: String(port), workdir, once: true }));
 
     expect(lines.join('\n')).toContain('no work');
+  });
+
+  it('does not run or report an item whose claim the server refuses to confirm', async () => {
+    // The lease window can pass between claiming and starting, and an item whose window
+    // passed is claimable again - so the claim alone does not authorize execution. The
+    // refusal is driven at the route boundary here (a real 409 from the real server, made
+    // to happen for an item that is otherwise perfectly claimable), because the gap it
+    // guards is a race and a test that merely waited for a 60s lease would be asserting
+    // timing instead of behaviour.
+    //
+    // What matters is what does **not** happen next: the command must not run the item and
+    // must not report a result for it. A completion would tell the queue an effect
+    // occurred that never occurred, and every retry decision downstream reads that record.
+    const { queue, port, workdir } = await startRuntime();
+    const id = queue.enqueue('sess_worker', 'write', { path: 'must-not-exist.txt', content: 'ran anyway' });
+
+    const realFetch = globalThis.fetch;
+    const completions: string[] = [];
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(((input: unknown, init?: unknown) => {
+      const url = String(input);
+      if (url.endsWith('/v1/x/worker/accept')) {
+        return Promise.resolve(new Response(
+          JSON.stringify({ error: { type: 'conflict', code: 'work_lease_lost', message: 'claim lease has run out' } }),
+          { status: 409, headers: { 'Content-Type': 'application/json' } },
+        ));
+      }
+      if (url.endsWith('/v1/x/worker/complete')) completions.push(url);
+      return realFetch(input as Parameters<typeof realFetch>[0], init as Parameters<typeof realFetch>[1]);
+    }) as typeof realFetch);
+
+    let lines: string[] = [];
+    const warnings: string[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warnings.push(args.join(' ')); });
+    try {
+      lines = await withCapturedLog(() =>
+        workerPollCommand({ port: String(port), workdir, once: true, workerId: 'worker_test' }));
+    } finally {
+      warn.mockRestore();
+      spy.mockRestore();
+    }
+
+    // The item was claimed, so the claim really did happen and the refusal is about the
+    // acceptance rather than about the item never being handed out.
+    const item = queue.get(id)!;
+    expect(item.status).toBe('claimed');
+    expect(item.claimedBy).toBe('worker_test');
+    expect(item.acceptedAt).toBeNull();
+    // Nothing ran: the write the item describes never reached the workdir.
+    expect(existsSync(join(workdir, 'must-not-exist.txt'))).toBe(false);
+    // And nothing was reported, on either channel - no completion request, and no result
+    // recorded on the row for a later reader to mistake for an effect.
+    expect(completions).toEqual([]);
+    expect(item.result).toBeUndefined();
+    // The refusal is reported to the operator on the warning channel, and `completed` is
+    // absent from the normal output - the command must not look as though it ran anything.
+    expect(warnings.join('\n')).toContain(`not running ${id}`);
+    expect(lines.join('\n')).not.toContain(`completed ${id}`);
   });
 
   it('does not take work belonging to another environment', async () => {

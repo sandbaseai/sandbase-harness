@@ -44,6 +44,13 @@ export interface WorkItem {
    * result that did happen.
    */
   stoppedAt?: string | null;
+  /**
+   * When the holder confirmed, at the moment of starting, that the claim was still
+   * live - the point at which "somebody took it" becomes "somebody has committed to
+   * running it". Null means held but never started; a reclaim by a new holder clears
+   * it, because acceptance belongs to the holder that asked for it.
+   */
+  acceptedAt?: string | null;
 }
 
 export type WorkCompletionResult = 'completed' | 'not_found' | 'not_claimed_by_worker';
@@ -61,6 +68,24 @@ export type WorkCompletionResult = 'completed' | 'not_found' | 'not_claimed_by_w
  * ignored the difference would keep running work nobody is waiting for.
  */
 export type WorkLeaseResult = 'renewed' | 'not_found' | 'not_claimed_by_worker' | 'work_lease_lost';
+
+/**
+ * Outcome of confirming a claim at the moment execution starts.
+ *
+ * `accepted` is the only value that authorizes running the item. The others are refusals,
+ * and the important property is what they are **not**: none of them is a completion, so a
+ * worker that receives one must not run the item and must not report a result for it. A
+ * result would assert an effect that never happened, and the queue would record it as
+ * though the tool had run.
+ *
+ * `work_lease_lost` covers both a stopped item and a lapsed lease, because the instruction
+ * to the worker is identical - do not run it - while the message says which of the two it
+ * was. This is deliberately stricter than `heartbeat`, which renews an item already in
+ * flight: a lapsed claim is reclaimable at any instant, so an acceptance that tolerated a
+ * lapsed lease would authorize a worker to start something the queue may hand to a second
+ * worker in the same instant, which is the double execution this exists to prevent.
+ */
+export type WorkAcceptResult = 'accepted' | 'not_found' | 'not_claimed_by_worker' | 'work_lease_lost';
 
 /**
  * Machine-readable reasons a bounded wait ends without a result (item 11b).
@@ -253,8 +278,12 @@ export class WorkQueue {
       // Guarded update: the row must still be pending, or claimed by a worker whose
       // lease has run out. A claim that was renewed, or completed, in between fails
       // the predicate and this worker loses the race.
+      // `accepted_at` is cleared in the same statement: acceptance is a statement about a
+      // particular holder's lease, so a reclaim by a different worker must not inherit it.
+      // A row that arrives here was either never claimed or had its lease run out, and in
+      // both cases nothing has committed to running it under this claim yet.
       const res = this.db
-        .prepare(`UPDATE work_items SET status = 'claimed', claimed_by = ?, claimed_at = datetime('now') WHERE id = ? AND ${claimable('')}`)
+        .prepare(`UPDATE work_items SET status = 'claimed', claimed_by = ?, claimed_at = datetime('now'), accepted_at = NULL WHERE id = ? AND ${claimable('')}`)
         .run(workerId, candidate.id, leaseModifier) as { changes: number };
       if (res.changes !== 1) return null; // lost the race — someone else claimed it
 
@@ -306,6 +335,57 @@ export class WorkQueue {
     const row = this.get(id);
     if (!row) return 'not_found';
     if (row.stoppedAt) return 'work_lease_lost';
+    return 'not_claimed_by_worker';
+  }
+
+  /**
+   * Confirm, at the moment execution starts, that this worker may still run the item.
+   *
+   * A claim alone does not authorize execution, and the gap between the two is not
+   * theoretical. `claim()` hands out an item with a lease window and the row becomes
+   * claimable again the instant that window passes; between claiming and starting, a
+   * worker returns from the claim, resolves its workdir, and - on the path this protocol
+   * exists to tolerate - may be a second process that was paused, descheduled, or still
+   * starting. None of that is bounded. If the window passes in that gap the item is
+   * claimed by a second worker, and **both run it**: the side effect happens twice on the
+   * operator's machine. A heartbeat does not save the first one, because a renewal from a
+   * superseded holder is refused as `not_claimed_by_worker`, which the CLI deliberately
+   * treats as a suspicion and keeps running - right for an item already in flight, whose
+   * effect cannot be un-run, and useless as a guard against starting one.
+   *
+   * This is where "somebody took it" becomes "somebody has committed to running it". The
+   * three conditions are one conditional UPDATE, so each is a fence rather than a check a
+   * write can slip past: the row must still be claimed **by this worker**, unstopped, and
+   * inside its lease window. The lease condition is what makes this stricter than
+   * `heartbeat`, and the asymmetry is the decision rather than an oversight - see
+   * `WorkAcceptResult`.
+   *
+   * Re-accepting is idempotent for the holder: `accepted_at` is restamped, not inspected,
+   * so a worker retrying over a flaky link is not punished for the retry. A refusal is
+   * never a completion - the caller must not run the item and must not report a result.
+   */
+  accept(id: string, workerId: string): WorkAcceptResult {
+    const leaseModifier = `-${this.leaseMs / 1000} seconds`;
+    const update = this.db
+      .prepare(
+        `UPDATE work_items SET accepted_at = datetime('now')
+         WHERE id = ? AND status = 'claimed' AND claimed_by = ? AND stopped_at IS NULL
+           AND claimed_at IS NOT NULL AND claimed_at > datetime('now', ?)`,
+      )
+      .run(id, workerId, leaseModifier) as { changes: number };
+    if (update.changes === 1) return 'accepted';
+    // Classified afterwards, and the work-level fact comes before the caller-level one,
+    // for the same reason `heartbeat` orders them this way: whether the caller ever held
+    // the item, a stopped item's lease is gone and the answer for the worker is the same
+    // instruction either way - do not run it.
+    const row = this.get(id);
+    if (!row) return 'not_found';
+    if (row.stoppedAt) return 'work_lease_lost';
+    if (row.status === 'claimed' && row.claimedBy === workerId) {
+      // The holder, with a lease that has run out. The message distinguishes this from a
+      // stop; the code does not, because the instruction to the worker is identical.
+      return 'work_lease_lost';
+    }
     return 'not_claimed_by_worker';
   }
 
@@ -517,6 +597,7 @@ interface RawWorkItem {
   claimed_at: string | null;
   completed_at: string | null;
   stopped_at: string | null;
+  accepted_at: string | null;
 }
 
 function toWorkItem(r: RawWorkItem): WorkItem {
@@ -532,6 +613,7 @@ function toWorkItem(r: RawWorkItem): WorkItem {
     claimedAt: r.claimed_at ?? null,
     completedAt: r.completed_at ?? null,
     stoppedAt: r.stopped_at ?? null,
+    acceptedAt: r.accepted_at ?? null,
   };
 }
 

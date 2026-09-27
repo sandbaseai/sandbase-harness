@@ -24,6 +24,13 @@
  *    is the only way it reaches the command being run - and a worker that kept going
  *    would be executing work nobody is waiting for. Every other renewal failure is a
  *    suspicion and leaves the item running.
+ * 5. A claimed item is accepted before it is run. The lease window can pass between
+ *    claiming and starting - the worker returns from the claim, resolves its workdir, and
+ *    on the path this protocol exists to tolerate may be a second process that was paused
+ *    or descheduled - and an item whose window passed is claimable again, so without this
+ *    the item runs twice on the operator's machine. A refused acceptance means the item is
+ *    **not** run and **not** reported: a completion would assert an effect that never
+ *    happened.
  */
 
 import { execFile } from 'node:child_process';
@@ -127,6 +134,19 @@ export async function workerPollCommand(opts: WorkerPollOptions) {
   for (;;) {
     const item = await claimWorkItem(config);
     if (item) {
+      // The claim is confirmed immediately before the item runs, because the lease window
+      // can pass between the two and an item whose window passed is claimable again. A
+      // refusal here is not a failure of the item: nothing has run, so nothing is reported
+      // - completing it would assert an effect that never happened, and the queue would
+      // record it as though the tool had executed.
+      try {
+        await acceptWorkItem(config, item.id);
+      } catch (error) {
+        console.warn(`not running ${item.id}: ${error instanceof Error ? error.message : String(error)}`);
+        if (config.once) return;
+        await sleep(config.intervalMs);
+        continue;
+      }
       try {
         await completeWorkItem(config, item, {
           status: 'fulfilled',
@@ -205,6 +225,34 @@ export class WorkLeaseLostError extends Error {
     super(`renewal refused for ${itemId}: the session that queued this work has ended (work_lease_lost)`);
     this.name = 'WorkLeaseLostError';
   }
+}
+
+/**
+ * The server refused to confirm a claim at the moment of starting.
+ *
+ * Distinct from `WorkLeaseLostError`, which stops an item already running, because the
+ * caller's response is different: nothing has started, so there is nothing to abort and
+ * nothing to report. This class exists so that refusal cannot be mistaken for an item
+ * failure and completed - a completion would tell the queue an effect happened.
+ */
+export class WorkAcceptRefusedError extends Error {
+  readonly status: number;
+
+  constructor(itemId: string, status: number, detail: string) {
+    super(`claim not confirmed for ${itemId}: ${status} ${detail}`);
+    this.name = 'WorkAcceptRefusedError';
+    this.status = status;
+  }
+}
+
+async function acceptWorkItem(opts: ResolvedWorkerPollOptions, itemId: string): Promise<void> {
+  const res = await fetch(`http://localhost:${opts.port}/v1/x/worker/accept`, {
+    method: 'POST',
+    headers: jsonHeaders(opts),
+    body: JSON.stringify({ id: itemId, worker_id: opts.workerId }),
+  });
+  if (res.ok) return;
+  throw new WorkAcceptRefusedError(itemId, res.status, await res.text());
 }
 
 async function renewClaim(opts: ResolvedWorkerPollOptions, itemId: string): Promise<void> {

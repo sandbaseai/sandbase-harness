@@ -1,5 +1,34 @@
 [
   {
+    "id": "worker-accept",
+    "group": "Worker",
+    "title": "Confirm a work item claim before running it",
+    "method": "POST",
+    "path": "/v1/x/worker/accept",
+    "summary": "Confirms, immediately before an item is run, that the claim is still held and its lease is still live. A claim is a lease on running an item and the window can pass between claiming and starting, so an item whose window passed is claimable again; accepting it is what stops the same work from running on two machines. Only a success authorizes running the item. A refusal is not a completion: the worker must not run it and must not report a result.",
+    "parameters": [
+      {
+        "name": "id",
+        "type": "string",
+        "required": true,
+        "description": "Claimed work item id."
+      },
+      {
+        "name": "worker_id",
+        "type": "string",
+        "required": true,
+        "description": "Worker identity that owns the claim."
+      }
+    ],
+    "response": [
+      {
+        "name": "ok",
+        "type": "boolean",
+        "description": "True when the claim was confirmed and the item may be run."
+      }
+    ]
+  },
+  {
     "id": "worker-claim",
     "group": "Worker",
     "title": "Claim work item",

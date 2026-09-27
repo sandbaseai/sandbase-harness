@@ -996,6 +996,23 @@ const M045_WORK_ITEM_STOP = `
 ALTER TABLE work_items ADD COLUMN stopped_at TEXT;
 `;
 
+/**
+ * When a worker confirmed, at the moment of starting, that its claim was still live.
+ *
+ * `claimed_at` records that an item was handed out; it cannot record that anybody
+ * committed to running it, and those are different facts with different consequences.
+ * Without the second, a worker that claimed an item and died before starting it is
+ * indistinguishable from one that claimed it and died mid-command - so the queue cannot
+ * tell "provably no effect, safe to retry" from "effect unknown, never replay".
+ *
+ * Existing rows stay NULL, which reads as "held but never started". That is the honest
+ * back-fill: a row claimed by an earlier build was never accepted, because there was no
+ * accept step for it to have been accepted by.
+ */
+const M046_WORK_ITEM_ACCEPT = `
+ALTER TABLE work_items ADD COLUMN accepted_at TEXT;
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: '001_initial', sql: M001_INITIAL },
   { version: 2, name: '002_memory', sql: M002_MEMORY },
@@ -1042,4 +1059,5 @@ export const MIGRATIONS: Migration[] = [
   { version: 43, name: '043_webhook_disabled_reason', sql: M043_WEBHOOK_DISABLED_REASON },
   { version: 44, name: '044_webhook_failing_since', sql: M044_WEBHOOK_FAILING_SINCE },
   { version: 45, name: '045_work_item_stop', sql: M045_WORK_ITEM_STOP },
+  { version: 46, name: '046_work_item_accept', sql: M046_WORK_ITEM_ACCEPT },
 ];
