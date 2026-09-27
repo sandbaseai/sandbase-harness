@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { acquirePiSessionFileLease, PiSessionBusyError } from '@/strategy/pi/session-lease.js';
@@ -121,5 +121,36 @@ describe('Pi session-file lease', () => {
     // before its expiry, and still refusing another owner.
     await expect(acquirePiSessionFileLease(sessionFile, { ownerId: 'owner-b', now: () => 1_500, staleAfterMs: 60_000 }))
       .rejects.toMatchObject({ code: 'pi_session_busy' } satisfies Partial<PiSessionBusyError>);
+  });
+
+  it('recovers a lease left unreadable by a crash once its file is old enough', async () => {
+    // Staleness has two sources and the suite only ever drove the first: a readable
+    // record whose expiresAt has passed. The other is the one a crash leaves behind -
+    // "Treat a partially written/crashed lease as stale only by mtime" - where the
+    // file cannot be parsed at all and only the file's own timestamp is left to judge
+    // it by. The refusing side of that window is already covered, by the case that
+    // writes a fresh unreadable lease and still expects pi_session_busy; what no case
+    // exercised is the side where the window has passed and the lease is recoverable.
+    const directory = mkdtempSync(join(tmpdir(), 'ma-pi-lease-mtime-'));
+    directories.push(directory);
+    const sessionFile = join(directory, 'session.jsonl');
+    const leasePath = `${sessionFile}.lease`;
+    const staleAfterMs = 10_000;
+    const crashedAt = 1_000_000;
+    writeFileSync(leasePath, '{"version":1,"ownerId":"owner-a","expires');   // half-written
+    utimesSync(leasePath, new Date(crashedAt), new Date(crashedAt));
+
+    // One millisecond past the window, judged from the file's timestamp alone.
+    const recovered = await acquirePiSessionFileLease(sessionFile, {
+      ownerId: 'owner-b',
+      now: () => crashedAt + staleAfterMs + 1,
+      staleAfterMs,
+    });
+
+    expect(recovered.recoveredStale).toBe(true);
+    // And the crash remnant was replaced by a record the next caller can reason about.
+    const replacement = JSON.parse(readFileSync(leasePath, 'utf8')) as { ownerId: string; expiresAt: string };
+    expect(replacement.ownerId).toBe('owner-b');
+    expect(Date.parse(replacement.expiresAt)).toBe(crashedAt + staleAfterMs + 1 + staleAfterMs);
   });
 });
