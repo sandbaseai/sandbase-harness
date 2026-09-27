@@ -139,7 +139,7 @@ describe('WorkQueue', () => {
     expect(queue.claim('w2')?.claimedBy).toBe('w2');
   });
 
-  it('stops a session\'s unclaimed work and leaves everything else claimable', () => {
+  it('stops a session\'s unfinished work, including what a worker claimed and abandoned', () => {
     // An item queued for a session nobody is waiting on any more is a tool call that
     // must not happen: it would run on the operator's own machine after the session
     // ended. The marker is the exclusion the claim predicate reads, so the refusal has
@@ -148,22 +148,32 @@ describe('WorkQueue', () => {
     expect(queue.claim('w1')?.id).toBe(held);
     const unclaimed = queue.enqueue('sess_stop', 'exec', { command: 'never' });
     const elsewhere = queue.enqueue('sess_live', 'exec', { command: 'still wanted' });
+    // The worker holding `held` dies here. Its lease lapses, which is the moment the
+    // item becomes a candidate for a second worker - the door a stop has to close.
+    backdateClaim(db, held, 24 * 60);
 
-    expect(queue.stop('sess_stop')).toBe(1);
-    // Marked, and still `pending`: it was never handed out, so recording it as done or
-    // failed would invent an outcome for work that simply stopped being wanted.
+    expect(queue.stop('sess_stop')).toBe(2);
+    // Marked, and still `pending` / `claimed`: recording either as done or failed would
+    // invent an outcome for work that simply stopped being wanted.
     expect(queue.get(unclaimed)!.status).toBe('pending');
     expect(queue.get(unclaimed)!.stoppedAt).toBeTruthy();
-    // Stopping is about the session's *unclaimed* work. An item a worker already holds
-    // may be running right now and no marker can un-run it, so the holder keeps it and
-    // its late result is still recorded; another session's queue is untouched.
-    expect(queue.get(held)!.stoppedAt).toBeNull();
+    expect(queue.get(held)!.status).toBe('claimed');
+    expect(queue.get(held)!.stoppedAt).toBeTruthy();
+    // Another session's queue is untouched.
     expect(queue.get(elsewhere)!.stoppedAt).toBeNull();
     expect(queue.stop('sess_stop')).toBe(0);
 
+    // **The reclaim is the assertion that matters, and `held` is the item it is about.**
+    // It is the oldest row and its claim has lapsed, so a predicate that only excluded
+    // unclaimed work hands it to `w2` right here: the work of a session that had already
+    // ended would run anyway, later, on a machine whose operator was told it stopped.
     expect(queue.claim('w2', 'sess_stop')).toBeNull();
     expect(queue.claim('w2')?.id).toBe(elsewhere);
+    // The holder, though, still owns its report: it may be executing at this moment, and
+    // what it reports actually happened. The marker says the work is not wanted, not that
+    // the effect did not occur.
     expect(queue.complete(held, 'w1', { exitCode: 0, stdout: 'ran before the stop' })).toBe('completed');
+    expect(queue.get(held)!.stoppedAt).toBeTruthy();
   });
 });
 

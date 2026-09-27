@@ -37,8 +37,10 @@ export interface WorkItem {
   claimedAt?: string | null;
   completedAt?: string | null;
   /**
-   * When the owning session ended and its still-unclaimed work was stopped. A marked
-   * item stays `pending` - it was never handed out - but no worker will be given it.
+   * When the owning session ended and its unfinished work was stopped. A marked item
+   * is never handed to a worker - not on a first claim, and not on a reclaim after a
+   * claim lease expired - while the worker already holding it may still report a
+   * result that did happen.
    */
   stoppedAt?: string | null;
 }
@@ -183,24 +185,31 @@ export class WorkQueue {
   }
 
   /**
-   * Stop the work a session queued but nobody has taken, returning how many items
-   * were marked. Called when the session's sandbox is released, which happens on any
-   * terminal state - a user stop included.
+   * Stop the work a session queued, returning how many items were marked. Called when
+   * the session's sandbox is released, which happens on any terminal state - a user
+   * stop included.
    *
-   * A pending item carries a tool call the session asked for and no longer wants.
+   * An unfinished item carries a tool call the session asked for and no longer wants.
    * Without a persisted marker it stays claimable forever, so a worker would execute
    * it on the operator's own machine after the conversation had ended, and nothing
    * would be waiting for the result.
    *
-   * **Only `pending` items are marked, and that limit is the honest one.** An item a
-   * worker already claimed may be executing right now; no marker can un-run it. It
-   * stays with the worker holding it and is recorded when that worker reports, which
-   * is why this returns a count rather than claiming to have stopped everything.
-   * Releasing the same session twice marks nothing the second time.
+   * **Claimed items are marked too, and that is the difference between the marker
+   * working and only appearing to.** A claim is not ownership of the work, it is a
+   * lease on running it: the moment that lease expires the item is a candidate again,
+   * and a worker that was never told the session ended would pick it up and execute
+   * it. Marking only `pending` items leaves exactly that door open - the item a
+   * worker claimed and then died on is the one most likely to be reclaimed later.
+   *
+   * Marking does **not** deny the holder its result. An item already claimed may be
+   * executing right now and no marker can un-run it, so the worker holding it can
+   * still report, and what it reports is recorded: the marker says the runtime no
+   * longer wants the work, not that the effect did not happen. Releasing the same
+   * session twice marks nothing the second time.
    */
   stop(sessionId: string): number {
     const res = this.db
-      .prepare("UPDATE work_items SET stopped_at = datetime('now') WHERE session_id = ? AND status = 'pending' AND stopped_at IS NULL")
+      .prepare("UPDATE work_items SET stopped_at = datetime('now') WHERE session_id = ? AND status IN ('pending', 'claimed') AND stopped_at IS NULL")
       .run(sessionId) as { changes: number };
     return res.changes;
   }
@@ -309,10 +318,11 @@ class SelfHostedSandboxInstance implements SandboxInstance {
     // Nothing to tear down server-side; the Worker owns the actual resources.
     //
     // What this session does own is the work it queued. Releasing the sandbox means
-    // the session is over, so anything still waiting for a worker must not be handed
-    // out afterwards: the tool call it carries belongs to a conversation that has
-    // ended, and executing it on the operator's machine would be work nobody asked
-    // for any more.
+    // the session is over, so anything unfinished must not be handed out afterwards:
+    // the tool call it carries belongs to a conversation that has ended, and executing
+    // it on the operator's machine would be work nobody asked for any more. That
+    // includes work a worker claimed and abandoned - the claim is a lease on running
+    // it, and once the lease expires the item is a candidate again.
     this.queue.stop(this.sessionId);
   }
 }
