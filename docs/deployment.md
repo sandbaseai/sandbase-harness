@@ -250,6 +250,7 @@ being left claimed. Useful flags:
 | `--once` | Claim and run at most one item, then exit. |
 | `--interval-ms <ms>` | Delay between polls when the queue is empty (default `1000`, minimum `250`). |
 | `--heartbeat-ms <ms>` | Renew the claim on this interval while an item runs (default `20000`, minimum `25`). |
+| `--ack-timeout-ms <ms>` | How long to wait for the runtime to confirm a claim before giving up on the item (default `10000`, minimum `1`). |
 | `--worker-id <id>` | Identity reported on the claim and the completion (default `worker_<pid>`). |
 
 A claim carries a lease window (60s by default), so a worker that executed a long
@@ -260,10 +261,22 @@ is logged and the command keeps running: the server refuses a completion from a 
 that no longer holds the claim, and stopping a command halfway on a suspicion that the
 claim lapsed would leave a half-applied side effect.
 
-An unusable `--port`, `--interval-ms` or `--heartbeat-ms` stops the worker at startup
-with a message naming the option, which matters for a long-running process on someone
-else's machine: a `--interval-ms` that does not parse would otherwise poll with no delay
-at all instead of failing.
+Before it runs an item the worker confirms its claim against the runtime and waits at
+most `--ack-timeout-ms` for the answer. The bound is deliberately below the lease
+window, so a bound that expires leaves the claim still the worker's own and it can walk
+away rather than racing the queue for work about to be handed to someone else. A refusal
+and an expired bound both mean the item is neither run nor reported - an unconfirmed
+claim is one the worker cannot prove it holds - but they are reported differently: a
+refusal names the status the runtime returned, while an expired bound fails with the
+machine-readable `work_accept_unconfirmed` and the bound it waited, so "the runtime
+refused" can be told apart from "the runtime went quiet". The default is comfortably
+above a localhost round trip and well under the lease, and lowering it only makes the
+worker give up sooner.
+
+An unusable `--port`, `--interval-ms`, `--heartbeat-ms` or `--ack-timeout-ms` stops the
+worker at startup with a message naming the option, which matters for a long-running
+process on someone else's machine: a `--interval-ms` that does not parse would otherwise
+poll with no delay at all instead of failing.
 
 ## Operational Checks
 

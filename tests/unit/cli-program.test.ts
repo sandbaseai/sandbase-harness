@@ -388,6 +388,7 @@ describe('CLI program', () => {
 
     expect(poll).toBeDefined();
     expect(poll!.options.map((option) => option.long).sort()).toEqual([
+      '--ack-timeout-ms',
       '--api-key',
       '--environment-id',
       '--environment-key',
@@ -401,7 +402,14 @@ describe('CLI program', () => {
     // The options the documented invocation relies on, with their documented defaults,
     // asserted by value rather than by the list above, which would pass on any
     // option that happened to have the right name.
-    expect(poll!.opts()).toMatchObject({ port: '3000', workdir: '.', intervalMs: '1000', once: false, heartbeatMs: '20000' });
+    expect(poll!.opts()).toMatchObject({
+      port: '3000',
+      workdir: '.',
+      intervalMs: '1000',
+      once: false,
+      heartbeatMs: '20000',
+      ackTimeoutMs: '10000',
+    });
   });
 
   it('passes default start options to the runtime starter', async () => {

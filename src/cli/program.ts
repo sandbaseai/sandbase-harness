@@ -362,6 +362,11 @@ export function createCliProgram({ version, startServer }: CliProgramOptions): C
     .option('--once', 'Claim and run at most one item, then exit', false)
     .option('--interval-ms <ms>', 'Delay between polls when the queue is empty', '1000')
     .option('--heartbeat-ms <ms>', 'Renew the claim on this interval while an item runs', '20000')
+    .option(
+      '--ack-timeout-ms <ms>',
+      'How long to wait for the runtime to confirm a claim before giving up on the item',
+      '10000',
+    )
     .action(async (opts) => {
       await workerPollCommand(opts);
     });

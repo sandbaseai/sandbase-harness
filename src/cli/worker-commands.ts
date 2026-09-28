@@ -31,6 +31,11 @@
  *    the item runs twice on the operator's machine. A refused acceptance means the item is
  *    **not** run and **not** reported: a completion would assert an effect that never
  *    happened.
+ * 6. The acceptance is **bounded**. A server that takes the connection and never answers
+ *    used to park this process on that `await` forever: it ran nothing, reported nothing,
+ *    and never polled again while holding a claim it could no longer renew. A bound turns a
+ *    silent hang into a machine-readable failure, and the worker then behaves exactly as it
+ *    does for a refusal - it runs nothing, reports nothing, and keeps polling.
  */
 
 import { execFile } from 'node:child_process';
@@ -53,6 +58,20 @@ const MIN_HEARTBEAT_MS = 25;
 
 const DEFAULT_HEARTBEAT_MS = 20_000;
 
+/**
+ * How long the worker waits for its claim to be confirmed before giving up on it.
+ *
+ * Well below the 60s default lease window, so a bound that expires leaves the item's claim
+ * still the worker's own: the worker can then walk away from it and let the lease lapse on
+ * its own terms rather than racing the queue for work the queue is about to hand to someone
+ * else. There is no minimum worth enforcing here beyond "a real number" - the bound is a
+ * local diagnosis window over a localhost request, not a protocol parameter, and a value
+ * this small is only ever chosen deliberately in a test.
+ */
+const MIN_ACK_TIMEOUT_MS = 1;
+
+const DEFAULT_ACK_TIMEOUT_MS = 10_000;
+
 export type WorkerPollOptions = {
   port: string;
   apiKey?: string;
@@ -63,6 +82,7 @@ export type WorkerPollOptions = {
   once?: boolean;
   intervalMs?: string;
   heartbeatMs?: string;
+  ackTimeoutMs?: string;
 };
 
 /** `WorkerPollOptions` with every default applied and every value checked. */
@@ -76,6 +96,7 @@ export type ResolvedWorkerPollOptions = {
   once: boolean;
   intervalMs: number;
   heartbeatMs: number;
+  ackTimeoutMs: number;
 };
 
 /**
@@ -107,6 +128,13 @@ export function resolveWorkerPollOptions(opts: WorkerPollOptions): ResolvedWorke
     );
   }
 
+  const ackTimeoutMs = Number(opts.ackTimeoutMs ?? DEFAULT_ACK_TIMEOUT_MS);
+  if (!Number.isFinite(ackTimeoutMs) || ackTimeoutMs < MIN_ACK_TIMEOUT_MS) {
+    throw new Error(
+      `Invalid --ack-timeout-ms value "${opts.ackTimeoutMs}". Expected a number of at least ${MIN_ACK_TIMEOUT_MS}.`,
+    );
+  }
+
   return {
     port: String(port),
     apiKey: opts.apiKey,
@@ -117,6 +145,7 @@ export function resolveWorkerPollOptions(opts: WorkerPollOptions): ResolvedWorke
     once: opts.once === true,
     intervalMs,
     heartbeatMs,
+    ackTimeoutMs,
   };
 }
 
@@ -139,6 +168,11 @@ export async function workerPollCommand(opts: WorkerPollOptions) {
       // refusal here is not a failure of the item: nothing has run, so nothing is reported
       // - completing it would assert an effect that never happened, and the queue would
       // record it as though the tool had executed.
+      //
+      // A confirmation that never arrives is treated identically, and for the same reason:
+      // the worker cannot prove it still holds the claim, so running the item is the one
+      // thing it must not do. The difference is the message, which is what tells an operator
+      // whether the server refused or went quiet.
       try {
         await acceptWorkItem(config, item.id);
       } catch (error) {
@@ -245,12 +279,69 @@ export class WorkAcceptRefusedError extends Error {
   }
 }
 
+/**
+ * The claim was never confirmed because no answer arrived inside the bound.
+ *
+ * Deliberately a **different type** from `WorkAcceptRefusedError`, and the reason is
+ * diagnosis rather than control flow: both mean "do not run this item and do not report
+ * one", but the server refusing and the server saying nothing are different faults with
+ * different fixes - one is a lease that lapsed or a session that ended, the other is a
+ * runtime that is unreachable, overloaded, or dead. A single error type would collapse the
+ * two into one message at exactly the moment an operator needs to tell them apart.
+ *
+ * `code` is the machine-readable half, in the shape the rest of this runtime uses, so a
+ * supervisor can match on it instead of parsing prose. It is a worker-side diagnosis and
+ * not a public API error code: no route emits it, and nothing outside this process has to
+ * agree on it.
+ *
+ * **The declaration shape is deliberate.** It is a class property, not a `code: '<lit>'`
+ * helper argument and not a `_CODE = '<lit>'` constant, which are the two shapes
+ * `tests/unit/error-code-inventory.test.ts` scans for - so this value stays out of the
+ * public error inventory on purpose. It must not be added there: that fixture feeds the
+ * coverage check and the published taxonomy, and a worker-local string in it would claim a
+ * wire contract that does not exist. Declaring it as an exported `_CODE` constant would
+ * silently enrol it, so this is not a style preference.
+ *
+ * The code is repeated inside the **message** as well as exposed as a field, and that is
+ * not redundancy. The only channel a supervisor sees is the warning line the polling loop
+ * prints, which renders `error.message` and nothing else - so a field that never reached
+ * that line would be a machine-readable reason that no machine can read. Writing it into
+ * the message is what makes the claim true.
+ */
+export class WorkAcceptUnconfirmedError extends Error {
+  readonly code = 'work_accept_unconfirmed';
+  readonly timeoutMs: number;
+
+  constructor(itemId: string, timeoutMs: number) {
+    super(
+      `claim not confirmed for ${itemId}: work_accept_unconfirmed - no answer within ${timeoutMs}ms, so the item was not run and no result was reported`,
+    );
+    this.name = 'WorkAcceptUnconfirmedError';
+    this.timeoutMs = timeoutMs;
+  }
+}
+
 async function acceptWorkItem(opts: ResolvedWorkerPollOptions, itemId: string): Promise<void> {
-  const res = await fetch(`http://localhost:${opts.port}/v1/x/worker/accept`, {
-    method: 'POST',
-    headers: jsonHeaders(opts),
-    body: JSON.stringify({ id: itemId, worker_id: opts.workerId }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`http://localhost:${opts.port}/v1/x/worker/accept`, {
+      method: 'POST',
+      headers: jsonHeaders(opts),
+      body: JSON.stringify({ id: itemId, worker_id: opts.workerId }),
+      // Unbounded was the defect: a server that accepted the connection and never answered
+      // parked this process forever, running nothing, reporting nothing, and never polling
+      // again while holding a claim it could no longer renew.
+      signal: AbortSignal.timeout(opts.ackTimeoutMs),
+    });
+  } catch (error) {
+    // Aborting is the bound expiring, and it has to be told apart from every other transport
+    // failure, because only this one is *expected*: a refused connection means the runtime
+    // is not there, while a timeout means it is there and not answering.
+    if (error instanceof Error && error.name === 'TimeoutError') {
+      throw new WorkAcceptUnconfirmedError(itemId, opts.ackTimeoutMs);
+    }
+    throw error;
+  }
   if (res.ok) return;
   throw new WorkAcceptRefusedError(itemId, res.status, await res.text());
 }

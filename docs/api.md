@@ -1526,8 +1526,17 @@ running work nobody is waiting for, and the renewal is the only way the stop rea
 the process holding the command. Every other renewal failure, including a transport
 error and the refusal that means the item belongs to another worker, is only a
 suspicion and leaves the item running: a command stopped halfway leaves a half-applied
-side effect, and the work is still wanted. An unusable `--port`, `--interval-ms` or
-`--heartbeat-ms` stops the worker at startup with a message naming the option: an
+side effect, and the work is still wanted. Before running an item the worker asks the
+runtime to confirm its claim with `POST /v1/x/worker/accept`, and waits at most
+`--ack-timeout-ms` (default `10000`) for the answer. A refusal means the item is not
+run and not reported; so does an answer that never arrives, because an unconfirmed
+claim is one the worker cannot prove it still holds. The two are reported
+differently on purpose - a refusal names the status the runtime returned, while an
+expired bound fails with the machine-readable `work_accept_unconfirmed` and the
+bound it waited - since a runtime that refused and a runtime that went quiet need
+different diagnoses. In both cases the worker warns, runs nothing, reports nothing,
+and keeps polling. An unusable `--port`, `--interval-ms`, `--heartbeat-ms` or
+`--ack-timeout-ms` stops the worker at startup with a message naming the option: an
 unparseable interval would otherwise become a poll loop with no delay at all.
 
 The server waits on a work item with a bound of its own, and when that bound passes

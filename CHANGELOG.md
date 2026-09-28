@@ -3,6 +3,21 @@
 ## Unreleased
 
 ### Changed
+- The self-hosted worker no longer hangs forever when the runtime never confirms its claim.
+  `managed-agents worker poll` confirms each claimed item with `POST /v1/x/worker/accept`
+  before running it, and that request had no bound: a runtime that accepted the connection
+  and never answered parked the process with no message, no exit, and no reason a supervisor
+  could act on, while holding a claim it could no longer renew. The wait is now bounded by
+  `--ack-timeout-ms` (default `10000`, minimum `1`, validated at startup like every other
+  worker option). An expired bound and a refusal are treated the same way where it matters -
+  the item is not run and no result is reported, because an unconfirmed claim is one the
+  worker cannot prove it still holds - and reported differently where it helps: a refusal
+  names the status the runtime returned, while an expired bound fails with the
+  machine-readable `work_accept_unconfirmed` and the bound it waited, so "the runtime
+  refused" can be told apart from "the runtime went quiet". Either way the worker warns and
+  keeps polling rather than exiting. The bound is deliberately below the 60s default lease
+  window, so an expiry leaves the claim still the worker's own and it walks away instead of
+  racing the queue for work that is about to be handed to someone else.
 - A bounded wait on a self-hosted work item stays conservative about a claimed item whose
   executor never accepted it, and the queue keeps re-offering that work instead of
   discarding it. `WorkQueue.await` reports `work_outcome_unknown` for any claimed row it

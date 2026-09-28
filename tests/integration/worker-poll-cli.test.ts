@@ -119,6 +119,105 @@ describe('worker poll CLI', () => {
     expect(JSON.stringify(item.result)).toContain('does-not-exist.txt');
   });
 
+  it('does not hang, run, or report an item the server never answers about', async () => {
+    // A server that takes the connection and never replies used to park the worker on that
+    // `await` with no bound: it ran nothing, reported nothing, and never polled again, while
+    // holding a claim it could no longer renew. The frozen protocol lists this as an
+    // acceptance criterion - "等不到 ack → 在有界时间内以机器可读原因失败，不是挂住".
+    //
+    // **The mock models a hanging server literally: it never settles on its own and rejects
+    // only when the signal it was given aborts.** An earlier version of this case rejected
+    // unconditionally, and a probe that removed the bound still passed - which showed the
+    // case was asserting the error *mapping* and not the bound at all. Modelling the hang
+    // faithfully is what makes the bound load-bearing.
+    //
+    // "Not a hang" is asserted by requiring the call to return inside a declared budget that
+    // is far below this suite's 30s test timeout, so a missing bound fails as a named
+    // assertion in seconds instead of as a timeout that could be blamed on a slow runner.
+    const hangBudgetMs = 5_000;
+    const { queue, port, workdir } = await startRuntime();
+    const id = queue.enqueue('sess_worker', 'write', { path: 'must-not-exist.txt', content: 'ran anyway' });
+
+    const realFetch = globalThis.fetch;
+    const completions: string[] = [];
+    let sawSignal: AbortSignal | undefined;
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(((input: unknown, init?: unknown) => {
+      const url = String(input);
+      if (url.endsWith('/v1/x/worker/accept')) {
+        const signal = (init as { signal?: AbortSignal } | undefined)?.signal;
+        sawSignal = signal;
+        return new Promise((_resolve, reject) => {
+          // No bound: nothing ever settles, which is exactly the defect.
+          if (!signal) return;
+          signal.addEventListener('abort', () => {
+            const abort = new Error('The operation was aborted due to timeout');
+            abort.name = 'TimeoutError';
+            reject(abort);
+          });
+        });
+      }
+      if (url.endsWith('/v1/x/worker/complete')) completions.push(url);
+      return realFetch(input as Parameters<typeof realFetch>[0], init as Parameters<typeof realFetch>[1]);
+    }) as typeof realFetch);
+
+    let lines: string[] = [];
+    const warnings: string[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warnings.push(args.join(' ')); });
+    let budget: ReturnType<typeof setTimeout> | undefined;
+    try {
+      lines = await withCapturedLog(() => Promise.race([
+        workerPollCommand({ port: String(port), workdir, once: true, workerId: 'worker_test', ackTimeoutMs: '1' }),
+        new Promise<never>((_resolve, reject) => {
+          budget = setTimeout(
+            () => reject(new Error(
+              `worker hung: the claim confirmation was not bounded, so it never returned within ${hangBudgetMs}ms`,
+            )),
+            hangBudgetMs,
+          );
+        }),
+      ]));
+    } finally {
+      clearTimeout(budget);
+      warn.mockRestore();
+      spy.mockRestore();
+    }
+
+    // The request really was bounded: a signal reached `fetch`, and it is the configured
+    // option that produced it rather than some incidental default.
+    expect(sawSignal).toBeInstanceOf(AbortSignal);
+
+    // The item was claimed, so the claim really happened and what failed is the confirmation.
+    const item = queue.get(id)!;
+    expect(item.status).toBe('claimed');
+    expect(item.claimedBy).toBe('worker_test');
+    expect(item.acceptedAt).toBeNull();
+    // Nothing ran and nothing was reported - the same refusal to act as a rejected
+    // confirmation, because an unconfirmed claim is one the worker cannot prove it holds.
+    expect(existsSync(join(workdir, 'must-not-exist.txt'))).toBe(false);
+    expect(completions).toEqual([]);
+    expect(item.result).toBeUndefined();
+    // The reason is machine-readable and says which bound expired, so a supervisor can
+    // distinguish "the server went quiet" from "the server refused" without parsing prose.
+    expect(warnings.join('\n')).toContain(`not running ${id}`);
+    expect(warnings.join('\n')).toContain('work_accept_unconfirmed');
+    expect(warnings.join('\n')).toContain('1ms');
+    expect(lines.join('\n')).not.toContain(`completed ${id}`);
+  });
+
+  it('refuses an unusable acknowledgement bound at startup', () => {
+    // Same reasoning as the interval and heartbeat options: a worker is a long-running
+    // process that executes commands on someone's machine, so a value it cannot honour has
+    // to stop it where the operator is still reading. `AbortSignal.timeout(NaN)` would
+    // otherwise throw later, from inside the loop, and surface as a request failure rather
+    // than as a bad option.
+    for (const bad of ['abc', '', 'NaN', '-1', '0']) {
+      expect(() => resolveWorkerPollOptions({ port: '3000', workdir: '.', ackTimeoutMs: bad }))
+        .toThrow(/ack-timeout-ms/);
+    }
+    expect(resolveWorkerPollOptions({ port: '3000', workdir: '.' }).ackTimeoutMs).toBe(10_000);
+    expect(resolveWorkerPollOptions({ port: '3000', workdir: '.', ackTimeoutMs: '1' }).ackTimeoutMs).toBe(1);
+  });
+
   it('reports no work and exits when the queue is empty', async () => {
     const { port, workdir } = await startRuntime();
 
