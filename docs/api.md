@@ -1539,6 +1539,20 @@ and keeps polling. An unusable `--port`, `--interval-ms`, `--heartbeat-ms` or
 `--ack-timeout-ms` stops the worker at startup with a message naming the option: an
 unparseable interval would otherwise become a poll loop with no delay at all.
 
+Reporting an outcome is a separate step from producing one, and the worker treats
+them as separate facts. A completion the runtime refuses - `409` once the lease has
+lapsed and the item has moved to `unknown`, or a `5xx` - is a failure to **deliver**
+the outcome, not a failure of the work, so the item is never re-run and never
+re-reported as failed. The worker warns with the machine-readable
+`work_completion_undelivered` and the status it was refused with, or, when no answer
+arrived at all, that the request did not reach the runtime, and then keeps polling.
+The queue already holds the truth: an item whose outcome was not delivered keeps its
+lease and becomes `unknown` when the lease lapses, which is the record that says the
+outcome may have happened and must not be replayed. A command that genuinely failed is
+still reported failed with its own error, and that report is delivered through the
+same step - so a refusal to deliver it leaves the item unrecorded rather than turning
+the worker's inability to report into a claim about the work.
+
 The server waits on a work item with a bound of its own, and when that bound passes
 the failure carries a code rather than only a message, because the ways it can end
 call for opposite responses. `work_queue_timeout` means no worker ever claimed the

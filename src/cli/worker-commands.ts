@@ -5,7 +5,7 @@
  * `--workdir`, and reports each result to `POST /v1/x/worker/complete`. The server
  * never runs them — this process does.
  *
- * Three invariants this file has to hold, none of which it held before:
+ * Seven invariants this file has to hold, none of which it held before:
  *
  * 1. `complete` carries the same `worker_id` that `claim` sent. The route requires
  *    it (`src/api/routes/worker.ts:44`) and matches the row on it
@@ -36,6 +36,15 @@
  *    and never polled again while holding a claim it could no longer renew. A bound turns a
  *    silent hang into a machine-readable failure, and the worker then behaves exactly as it
  *    does for a refusal - it runs nothing, reports nothing, and keeps polling.
+ * 7. A refused **completion** is not a failed item, and does not end the worker. The
+ *    outcome of the work and the delivery of that outcome are two different facts, and the
+ *    single `catch` that used to wrap both reported the second as the first: a completion
+ *    the server refused was answered by reporting the item again with `failed: true`, so
+ *    work that had succeeded was recorded as failed. When the refusal was `409` - the
+ *    expected answer once the lease lapsed and the queue moved the item to `unknown` - the
+ *    second request was refused too, nothing caught it, and the refusal escaped the poll
+ *    loop and terminated the process. The delivery now has its own `catch` and its own
+ *    type, and neither re-runs the item nor re-reports it.
  */
 
 import { execFile } from 'node:child_process';
@@ -181,15 +190,44 @@ export async function workerPollCommand(opts: WorkerPollOptions) {
         await sleep(config.intervalMs);
         continue;
       }
+      // The run and the report are separated deliberately, because they fail for unrelated
+      // reasons and the single `try` that used to wrap both could not tell them apart. Its
+      // `catch` existed to report a failed command, but it also caught a completion the
+      // server had **refused**, and answered that by reporting the same item a second time
+      // with `failed: true`. Two things followed. Work that had succeeded was recorded as
+      // failed whenever the first delivery was refused, carrying the transport error as the
+      // result. And when the refusal was `409` - the expected answer for an item whose
+      // outcome can no longer be recorded, because its lease lapsed and the queue moved it
+      // to `unknown` - the second request was refused as well and nothing caught it, so the
+      // refusal escaped this loop and rejected `workerPollCommand`. One late completion took
+      // the entire worker process down, and the operator saw a crash instead of a refusal.
+      let outcome: PromiseSettledResult<unknown>;
       try {
-        await completeWorkItem(config, item, {
+        outcome = {
           status: 'fulfilled',
           value: await renewWhileRunning(config, item.id, (signal) => executeWorkItem(item, config.root, signal)),
-        });
+        };
       } catch (error) {
-        await completeWorkItem(config, item, { status: 'rejected', reason: error });
+        outcome = { status: 'rejected', reason: error };
       }
-      console.log(`completed ${item.id}`);
+      // Delivering that outcome is a fact about **this process**, not about the work, and a
+      // delivery that does not happen is reported as exactly that. The item is never re-run
+      // and never re-reported, and the loop continues rather than ending: the queue already
+      // holds the truth, because an item whose outcome was not delivered keeps its lease and
+      // becomes `unknown` when the lease lapses - which is the record that says "accepted,
+      // outcome unknown, never replay" rather than a claim that the work failed.
+      //
+      // The failure path is unaffected and still reports `failed: true` with the item's own
+      // error: that outcome is a rejected `PromiseSettledResult`, and the refusal to deliver
+      // it is a separate `catch` that no longer shares a body with it.
+      try {
+        await completeWorkItem(config, item, outcome);
+        // Logged only once the queue has accepted the report, because the line asserts the
+        // outcome is recorded rather than that the command returned.
+        if (outcome.status === 'fulfilled') console.log(`completed ${item.id}`);
+      } catch (error) {
+        console.warn(`could not report ${item.id}: ${error instanceof Error ? error.message : String(error)}`);
+      }
     } else if (config.once) {
       console.log('no work');
       return;
@@ -275,6 +313,44 @@ export class WorkAcceptRefusedError extends Error {
   constructor(itemId: string, status: number, detail: string) {
     super(`claim not confirmed for ${itemId}: ${status} ${detail}`);
     this.name = 'WorkAcceptRefusedError';
+    this.status = status;
+  }
+}
+
+/**
+ * The outcome of an item could not be delivered to the queue.
+ *
+ * This says nothing about the work. The item ran and produced a result, or it ran and
+ * failed - either way the *outcome is a fact*, and this class records only that the process
+ * holding that fact could not hand it over. Conflating the two is the defect it exists to
+ * remove: the caller used to report a refused delivery as a failed item, which is a claim
+ * about the work that the refusal does not support.
+ *
+ * **It covers both ways of not being delivered, on purpose, and reports which happened.**
+ * A refusal means the server answered and said no - `409` for an item whose outcome can no
+ * longer be recorded, which is expected rather than exotic. A transport failure means no
+ * answer arrived at all. They need different diagnoses, so the status is carried as a field
+ * and rendered into the message, and `status === null` is what distinguishes "not reached"
+ * from "reached and refused".
+ *
+ * Like `WorkAcceptUnconfirmedError`, the code is a **class property rather than an exported
+ * `_CODE` constant**, so it stays out of `tests/fixtures/error-codes.json` and the public
+ * taxonomy: this is a worker-local string and registering it would claim a wire contract
+ * that does not exist. The code is repeated inside the message because the warning line is
+ * the only channel a supervisor sees.
+ */
+export class WorkCompletionUndeliveredError extends Error {
+  readonly code = 'work_completion_undelivered';
+  readonly status: number | null;
+
+  constructor(itemId: string, status: number | null, detail: string) {
+    super(
+      `outcome not delivered for ${itemId}: work_completion_undelivered - ` +
+        (status === null
+          ? `the request did not reach the runtime (${detail}), so the item's outcome is unrecorded`
+          : `the runtime refused it with ${status} ${detail}, so the item's outcome is unrecorded`),
+    );
+    this.name = 'WorkCompletionUndeliveredError';
     this.status = status;
   }
 }
@@ -423,12 +499,26 @@ async function completeWorkItem(
   const body = resultOrError.status === 'fulfilled'
     ? { id: item.id, worker_id: opts.workerId, result: resultOrError.value }
     : { id: item.id, worker_id: opts.workerId, result: { message: resultOrError.reason instanceof Error ? resultOrError.reason.message : String(resultOrError.reason) }, failed: true };
-  const res = await fetch(`http://localhost:${opts.port}/v1/x/worker/complete`, {
-    method: 'POST',
-    headers: jsonHeaders(opts),
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) throw new Error(`worker complete failed: ${res.status} ${await res.text()}`);
+  // Both ways of not delivering raise the same type so the caller has one thing to catch,
+  // and the status tells the two apart - `null` means the request never reached the
+  // runtime. Throwing a bare `Error` here is what let the caller read "the report failed"
+  // as "the work failed", because there was no type to decide on and the message was the
+  // only clue.
+  let res: Response;
+  try {
+    res = await fetch(`http://localhost:${opts.port}/v1/x/worker/complete`, {
+      method: 'POST',
+      headers: jsonHeaders(opts),
+      body: JSON.stringify(body),
+    });
+  } catch (error) {
+    throw new WorkCompletionUndeliveredError(
+      item.id,
+      null,
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+  if (!res.ok) throw new WorkCompletionUndeliveredError(item.id, res.status, await res.text());
 }
 
 async function execShell(command: string, opts: { cwd: string; timeoutMs: number; env: Record<string, string>; signal?: AbortSignal }) {

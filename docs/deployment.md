@@ -273,6 +273,19 @@ refused" can be told apart from "the runtime went quiet". The default is comfort
 above a localhost round trip and well under the lease, and lowering it only makes the
 worker give up sooner.
 
+Producing an outcome and delivering it are separate steps, and the worker keeps them
+separate. If a completion is refused - `409` once the lease has lapsed and the queue has
+moved the item to `unknown`, or a `5xx`, or a connection that never answers - the worker
+reports that the **delivery** failed rather than that the work failed. It warns with the
+machine-readable `work_completion_undelivered`, names the status it was refused with (or
+that the request did not reach the runtime), sends no second completion, re-runs nothing,
+and keeps polling. The item is left exactly as it was: the queue already records the
+truth, because an item whose outcome was not delivered becomes `unknown` when its lease
+lapses, which is the record that says the effect may have happened and must not be
+replayed. A command that genuinely failed is still reported as failed with its own error,
+and if that report is refused the row is left unrecorded rather than being given a
+failure the worker could not substantiate.
+
 An unusable `--port`, `--interval-ms`, `--heartbeat-ms` or `--ack-timeout-ms` stops the
 worker at startup with a message naming the option, which matters for a long-running
 process on someone else's machine: a `--interval-ms` that does not parse would otherwise

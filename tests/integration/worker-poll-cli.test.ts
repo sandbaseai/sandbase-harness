@@ -284,6 +284,199 @@ describe('worker poll CLI', () => {
     expect(lines.join('\n')).not.toContain(`completed ${id}`);
   });
 
+  it('does not report a succeeded item as failed when its completion is refused', async () => {
+    // The defect: the success path wrapped `completeWorkItem` in the same `try` whose `catch`
+    // exists to report a **failed command**, so a completion the server refused was answered
+    // by reporting the same item again with `failed: true`. Work that had succeeded was
+    // recorded as failed, carrying the transport error as its result.
+    //
+    // `409` is not an exotic answer here. It is what the route returns once the lease lapsed
+    // and the queue moved an accepted item to `unknown`, which is the record that says the
+    // outcome can no longer be written - so this is the *expected* answer for a late
+    // completion, not an edge case.
+    const { queue, port, workdir } = await startRuntime();
+    const id = queue.enqueue('sess_worker', 'read', { path: 'greeting.txt' });
+    writeFileSync(join(workdir, 'greeting.txt'), 'the item really ran', 'utf8');
+
+    const realFetch = globalThis.fetch;
+    const completionBodies: Array<Record<string, unknown>> = [];
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(((input: unknown, init?: unknown) => {
+      const url = String(input);
+      if (!url.endsWith('/v1/x/worker/complete')) {
+        return realFetch(input as Parameters<typeof realFetch>[0], init as Parameters<typeof realFetch>[1]);
+      }
+      completionBodies.push(JSON.parse(String((init as { body?: unknown } | undefined)?.body)) as Record<string, unknown>);
+      return Promise.resolve(new Response(
+        JSON.stringify({ error: { type: 'conflict', message: 'work item is not claimed by this worker' } }),
+        { status: 409, headers: { 'Content-Type': 'application/json' } },
+      ));
+    }) as typeof realFetch);
+
+    let lines: string[] = [];
+    const warnings: string[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warnings.push(args.join(' ')); });
+    try {
+      // `workerPollCommand` **resolving** is the assertion that the refusal did not escape
+      // the loop. Before the fix this line rejected, so one late completion ended the process.
+      lines = await withCapturedLog(() =>
+        workerPollCommand({ port: String(port), workdir, once: true, workerId: 'worker_test' }));
+    } finally {
+      warn.mockRestore();
+      spy.mockRestore();
+    }
+
+    // Exactly one completion was sent. A second one is the defect itself, and asserting the
+    // count catches it even if the second request happened to be accepted.
+    expect(completionBodies).toHaveLength(1);
+    // The one request describes the work that happened, not a failure of it.
+    expect(completionBodies[0].failed).toBeUndefined();
+    expect(completionBodies[0].result).toBe('the item really ran');
+
+    // The queue was told nothing, so it holds no failure for this item - the truthful record
+    // is the one it already had, and the lease it keeps is what will make the item `unknown`
+    // rather than replayed.
+    const item = queue.get(id)!;
+    expect(item.status).toBe('accepted');
+    expect(item.result).toBeUndefined();
+
+    // The delivery failure is machine-readable and names the status it was refused with, so a
+    // supervisor can tell "the outcome was not recorded" from "the work failed".
+    expect(warnings.join('\n')).toContain(`could not report ${id}`);
+    expect(warnings.join('\n')).toContain('work_completion_undelivered');
+    expect(warnings.join('\n')).toContain('409');
+    // And it is not announced as completed, because the queue never accepted the report.
+    expect(lines.join('\n')).not.toContain(`completed ${id}`);
+  });
+
+  it('still reports a failed item as failed when the delivery itself is refused', async () => {
+    // The other side of the same separation, and the reason it has to be a separation rather
+    // than a swallowed error: a command that failed **is** an item failure, and a refused
+    // delivery of that fact must not turn it into silence either. Both outcomes go through
+    // the same delivery step, so this asserts the step still carries `failed: true` - and
+    // that its own refusal is survived rather than thrown.
+    const { queue, port, workdir } = await startRuntime();
+    const id = queue.enqueue('sess_worker', 'read', { path: 'does-not-exist.txt' });
+
+    const realFetch = globalThis.fetch;
+    const completionBodies: Array<Record<string, unknown>> = [];
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(((input: unknown, init?: unknown) => {
+      const url = String(input);
+      if (!url.endsWith('/v1/x/worker/complete')) {
+        return realFetch(input as Parameters<typeof realFetch>[0], init as Parameters<typeof realFetch>[1]);
+      }
+      completionBodies.push(JSON.parse(String((init as { body?: unknown } | undefined)?.body)) as Record<string, unknown>);
+      return Promise.resolve(new Response(
+        JSON.stringify({ error: { type: 'conflict', message: 'work item is not claimed by this worker' } }),
+        { status: 409, headers: { 'Content-Type': 'application/json' } },
+      ));
+    }) as typeof realFetch);
+
+    const warnings: string[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warnings.push(args.join(' ')); });
+    try {
+      await withCapturedLog(() =>
+        workerPollCommand({ port: String(port), workdir, once: true, workerId: 'worker_test' }));
+    } finally {
+      warn.mockRestore();
+      spy.mockRestore();
+    }
+
+    expect(completionBodies).toHaveLength(1);
+    // The failure path is intact: the report still says the item failed, and still carries the
+    // command's own error rather than the delivery error.
+    expect(completionBodies[0].failed).toBe(true);
+    expect(JSON.stringify(completionBodies[0].result)).toContain('does-not-exist.txt');
+    expect(warnings.join('\n')).toContain('work_completion_undelivered');
+    // The row is untouched by the refusal, which is the point: the queue decides the item's
+    // fate, and this worker's inability to report does not get to write `failed` into it.
+    expect(queue.get(id)!.status).toBe('accepted');
+  });
+
+  it('reports a completion that never reached the runtime as undelivered, not as a failure', async () => {
+    // A refusal and a transport failure are both "not delivered" and both need to be told
+    // apart from an item failure - but they need to be told apart from **each other** too,
+    // because "the server said no" and "the server was not reached" are different diagnoses.
+    // The status is what carries the difference, and `null` is the transport case.
+    const { queue, port, workdir } = await startRuntime();
+    const id = queue.enqueue('sess_worker', 'read', { path: 'greeting.txt' });
+    writeFileSync(join(workdir, 'greeting.txt'), 'ran fine', 'utf8');
+
+    const realFetch = globalThis.fetch;
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(((input: unknown, init?: unknown) => {
+      const url = String(input);
+      if (url.endsWith('/v1/x/worker/complete')) return Promise.reject(new Error('ECONNRESET'));
+      return realFetch(input as Parameters<typeof realFetch>[0], init as Parameters<typeof realFetch>[1]);
+    }) as typeof realFetch);
+
+    const warnings: string[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warnings.push(args.join(' ')); });
+    try {
+      await withCapturedLog(() =>
+        workerPollCommand({ port: String(port), workdir, once: true, workerId: 'worker_test' }));
+    } finally {
+      warn.mockRestore();
+      spy.mockRestore();
+    }
+
+    expect(warnings.join('\n')).toContain('work_completion_undelivered');
+    // The distinction the status carries: no answer arrived, so nothing was refused.
+    expect(warnings.join('\n')).toContain('did not reach the runtime');
+    expect(warnings.join('\n')).toContain('ECONNRESET');
+    expect(queue.get(id)!.status).toBe('accepted');
+  });
+
+  it('keeps polling after a completion it could not deliver', async () => {
+    // "Does not terminate the worker" has to mean the loop kept going, not merely that the
+    // call returned - with `--once` a return is also what an early exit looks like. The loop
+    // is therefore allowed to run, and the second claim is made to fail with a sentinel: the
+    // sentinel reaching the test is the proof that the refused completion did not stop it.
+    const { queue, port, workdir } = await startRuntime();
+    const id = queue.enqueue('sess_worker', 'read', { path: 'greeting.txt' });
+    writeFileSync(join(workdir, 'greeting.txt'), 'ran fine', 'utf8');
+
+    const realFetch = globalThis.fetch;
+    let claims = 0;
+    const completionBodies: Array<Record<string, unknown>> = [];
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(((input: unknown, init?: unknown) => {
+      const url = String(input);
+      if (url.endsWith('/v1/x/worker/claim')) {
+        claims += 1;
+        if (claims >= 2) return Promise.reject(new Error('SENTINEL_LOOP_CONTINUED'));
+        return realFetch(input as Parameters<typeof realFetch>[0], init as Parameters<typeof realFetch>[1]);
+      }
+      if (url.endsWith('/v1/x/worker/complete')) {
+        completionBodies.push(JSON.parse(String((init as { body?: unknown } | undefined)?.body)) as Record<string, unknown>);
+        return Promise.resolve(new Response(
+          JSON.stringify({ error: { type: 'conflict', message: 'work item is not claimed by this worker' } }),
+          { status: 409, headers: { 'Content-Type': 'application/json' } },
+        ));
+      }
+      return realFetch(input as Parameters<typeof realFetch>[0], init as Parameters<typeof realFetch>[1]);
+    }) as typeof realFetch);
+
+    const warnings: string[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warnings.push(args.join(' ')); });
+    let rejection: unknown;
+    try {
+      await withCapturedLog(() =>
+        workerPollCommand({ port: String(port), workdir, intervalMs: '250', workerId: 'worker_test' }));
+    } catch (error) {
+      rejection = error;
+    } finally {
+      warn.mockRestore();
+      spy.mockRestore();
+    }
+
+    // The loop reached a second claim, which it could only do by surviving the refusal.
+    expect(claims).toBe(2);
+    expect(String((rejection as Error | undefined)?.message)).toContain('SENTINEL_LOOP_CONTINUED');
+    // And it did not answer the refusal by trying again: one attempt, still not a failure.
+    expect(completionBodies).toHaveLength(1);
+    expect(completionBodies[0].failed).toBeUndefined();
+    expect(warnings.join('\n')).toContain('work_completion_undelivered');
+    expect(queue.get(id)!.status).toBe('accepted');
+  });
+
   it('does not take work belonging to another environment', async () => {
     // `--environment-id` is passed through to the claim, so a worker pointed at an
     // environment with no pending work must leave the other environment's item alone.
