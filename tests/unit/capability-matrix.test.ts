@@ -143,9 +143,9 @@ describe('capability matrix', () => {
     // `partial` without a readable deviation is indistinguishable from
     // `supported`. Only the two operations entries are pinned here rather than
     // imposing a wording rule on every partial entry in the matrix. Each pin is
-    // an *absence* — the published deployment control surface is missing rather
-    // than merely spelled differently, and the backoff is a fixed 60s/120s rather
-    // than the published jittered exponential one.
+    // an *absence* — the deployment failure split is missing rather than merely
+    // spelled differently, and private-address screening is opt-in rather than
+    // unconditional.
     // An absence is pinned rather than a topic word because the earlier wording
     // named both topics while claiming the behaviour worked, so a topic word would
     // pass on either text. This pin has now moved four times, and the fourth move is
@@ -155,13 +155,27 @@ describe('capability matrix', () => {
     // the same file said in §4 that the reset existed and here that it did not. A pin
     // on a stale absence is worse than no pin: it reports a gap the code has closed,
     // and it is only visible by comparing the claim against the behaviour rather than
-    // against the code's own prose.
-    expect(capabilityEntry('webhook-subscriptions').reason.toLowerCase())
-      .toContain('the backoff is a fixed 60s/120s rather than the published jittered');
+    // against the code's own prose. The fifth move is the same lesson again: the
+    // retry-jitter change and the deployment pause, alias, run-collection and
+    // lifecycle-event changes each landed while these pins still asserted their
+    // absence, so the pins below name only what is still missing.
     expect(capabilityEntry('webhook-subscriptions').reason.toLowerCase())
       .toContain('only when the deployment sets managed_agents_webhook_screen_private_addresses');
     expect(capabilityEntry('scheduled-deployment-timers').reason.toLowerCase())
-      .toContain('no pause/unpause');
+      .toContain('there is no failure split');
+  });
+
+  it('does not describe shipped operations behaviour as absent', () => {
+    // Each phrase below was once true and was left in place after the code
+    // that closed it landed. Pinning their absence keeps a stale gap from
+    // reappearing in the reason the capability endpoint serves.
+    const webhooks = capabilityEntry('webhook-subscriptions').reason.toLowerCase();
+    expect(webhooks).not.toContain('fixed 60s/120s');
+    expect(webhooks).toContain('jittered 5-120s exponential backoff');
+    const deployments = capabilityEntry('scheduled-deployment-timers').reason.toLowerCase();
+    for (const stale of ['no /v1/deployments alias', 'no pause/unpause', 'no deployment.* lifecycle events', 'must be driven by a caller']) {
+      expect(deployments).not.toContain(stale);
+    }
   });
 
   it('does not claim a canonical capability the runtime only wires through an extension', () => {

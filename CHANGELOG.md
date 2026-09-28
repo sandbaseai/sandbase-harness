@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Changed
+- The capability matrix served by `/v1/x/capabilities`, `contracts/anthropic-cma/operations.md`, `docs/api-matrix.md` and the Console API reference no longer describe shipped webhook and deployment behaviour as absent. They still said webhook retries used a fixed 60 s / 120 s backoff after the jittered 5–120 s schedule landed, that a failing delivery never disabled an endpoint after all three auto-disable rules landed, and that deployments had no `/v1/deployments` alias, no pause/unpause, no `trigger_context`, no `deployment.*` events and no background tick after each of those landed. The matrix pins that asserted those absences now assert what is still missing — the deployment failure split and opt-in address screening — and a new check fails if any of the stale phrases returns. No runtime behaviour changes.
 - **A completion the runtime never answers is reported as unconfirmed rather than as a
   request that never arrived.** The completion was the last unbounded request in the worker's
   loop: nothing is lost while it hangs, because the item keeps its lease, but the worker stops
@@ -204,7 +205,8 @@
 - Strengthened the resolved-model-id coverage: two models resolved by one registry at the same time keep their own ids, which the existing readback could not observe because it created and read each model in one statement. No runtime behaviour changes.
 - Added unit coverage for concurrent sandbox provisioning: a caller that arrives while a pass is in flight shares that pass and receives the same sandbox, so the backend is reached once, and a pass that fails is not cached, so the next caller gets a real attempt. No runtime behaviour changes.
 - Added integration coverage for a work-queue claim scoped to both a session and an environment: a worker holding one environment's scope is not handed work belonging to another environment's session even when it names that session id, and the item stays pending so the refusal is not a consumption. No runtime behaviour changes.
-- Added integration coverage for the listing order inside one tie group: vaults and memory stores created in the same second come back in insertion recency, newest first, and paging one row at a time visits each row exactly once. Both listings break the tie on owid because created_at is second-granular, which no test observed before. No runtime behaviour changes.
+- Added integration coverage for the listing order inside one tie group: vaults and memory stores created in the same second come back in insertion recency, newest first, and paging one row at a time visits each row exactly once. Both listings break the tie on 
+owid because created_at is second-granular, which no test observed before. No runtime behaviour changes.
 - Added unit coverage for how the two day fields combine in a cron expression: when both are restricted POSIX selects the union, when only one is restricted only that one matters, and neither restricted selects every day.   0 1 * 1 therefore fires weekly rather than only on a 1st that falls on a Monday. No runtime behaviour changes.
 - Extended the skills-listing pagination coverage: the canonical cursor fields are the only pagination fields on every page, and all three local fields the cursor envelope replaced - including last_id, which the existing cases did not name - are absent after following 
 ext_page as well as on the first page. No runtime behaviour changes.

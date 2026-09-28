@@ -211,7 +211,7 @@
       {
         "name": "data",
         "type": "WebhookDelivery[]",
-        "description": "Each record carries `status` (`delivered`, `pending_retry`, or `failed`), `status_code`, `error`, `signature`, `attempt_count` (ceiling 3, so at most two retries) and `next_retry_at` (a fixed 60s then 120s backoff; `null` once terminal)."
+        "description": "Each record carries `status` (`delivered`, `pending_retry`, or `failed`), `status_code`, `error`, `signature`, `attempt_count` (ceiling 3, so at most two retries) and `next_retry_at` (jittered between 5s and a ceiling that doubles from 60s to 120s; `null` once terminal)."
       }
     ]
   },
