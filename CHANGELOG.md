@@ -3,24 +3,22 @@
 ## Unreleased
 
 ### Changed
-- A bounded wait on a self-hosted work item no longer promises that submitting the intent
-  again is safe while the work it gave up on is still runnable. `WorkQueue.await` reported
-  `work_outcome_unknown` for every claimed row and the retryable `work_queue_timeout` only
-  for a row still `pending`. The accept step added in the previous change makes a third case
-  knowable - a row a worker claimed but never accepted is one where the effect provably did
-  not happen, because accepting is the last thing a worker does before it starts - but
-  knowing it is not enough to say it: the row is claimable again the moment its lease
-  passes, so a caller told to resubmit would have both the stale item and the new one
-  executed. The wait now abandons such an item (`abandoned_at`, migration 047) before
-  reporting the retryable reason, which makes the promise true rather than merely
-  plausible. Abandoned work is never handed out or accepted again - a refused `accept` or
-  `heartbeat` answers the engine-neutral `work_lease_lost`, and a claim is handed nothing
-  older - while its holder may still report a result that did happen. The abandonment is
-  one guarded write fenced on `accepted_at IS NULL`, so a holder that accepts in the gap
-  between the wait reading the row and writing it keeps its claim and the wait reports
-  `work_outcome_unknown` instead. A second wait on already-abandoned work repeats the
-  retryable reason rather than escalating to the unknown one, because the work is still
-  provably unstarted and can no longer accidentally start.
+- A bounded wait on a self-hosted work item stays conservative about a claimed item whose
+  executor never accepted it, and the queue keeps re-offering that work instead of
+  discarding it. `WorkQueue.await` reports `work_outcome_unknown` for any claimed row it
+  gives up on, and `work_queue_timeout` only when no worker ever claimed the item. The
+  accept step makes a third case knowable - a claimed row with no `accepted_at` is one
+  where nothing ran, because accepting is the last thing a worker does before it starts -
+  and an earlier version of this change acted on that by making such a row permanently
+  unclaimable. That contradicts the frozen worker-protocol spec, which requires an
+  unaccepted intent to stay reclaimable after its lease expires and requires an executor
+  killed before ack to leave its work in the queue, and a bounded wait is the common path
+  into that state because `execute()` always awaits with a bound. The give-up is now
+  recorded on the row (`abandoned_at`, migration 047) and nothing else: the record
+  distinguishes an attempt abandoned before starting from one that died mid-command, while
+  the claim predicate and the accept and heartbeat fences are left exactly as they were, so
+  the item is handed to the next worker once its lease expires and the work is executed
+  rather than lost. The record is cleared when a new worker claims the item.
 - Self-hosted workers now confirm a claimed work item with `POST /v1/x/worker/accept`
   immediately before running it, and only a success authorizes execution. A claim is a
   lease on running an item rather than ownership of it: the row becomes claimable again

@@ -125,6 +125,16 @@ describe('WorkQueue', () => {
     expect(queue.get(unknown)!.status).toBe('claimed');
     expect(queue.get(unknown)!.abandonedAt).toBeNull();
 
+    // Claimed and **not** accepted - the same code, deliberately, even though it is now
+    // knowable that nothing ran. The give-up is recorded rather than acted on, because the
+    // item stays reclaimable by the spec and a caller told to resubmit would race the queue
+    // re-offering it. See the reclaimability case below for the other half of that.
+    const unstarted = queue.enqueue('sess_unstarted', 'exec', { command: 'never began' });
+    expect(queue.claim('w3', 'sess_unstarted')!.id).toBe(unstarted);
+    await expect(queue.await(unstarted, { timeoutMs: 60, pollMs: 10 }))
+      .rejects.toMatchObject({ code: 'work_outcome_unknown' });
+    expect(queue.get(unstarted)!.abandonedAt).toBeTruthy();
+
     // Stopped: the session ended and the work is not wanted at all. This is the fact a
     // refused renewal already reports, so it reuses that engine-neutral code rather than
     // adding a third one meaning the same thing.
@@ -135,73 +145,75 @@ describe('WorkQueue', () => {
       .rejects.toMatchObject({ code: 'work_lease_lost' });
   });
 
-  it('abandons work no executor accepted before it calls the retry safe', async () => {
-    // The retryable reason is a promise, and a promise about work that is still claimable
-    // would be a lie with a side effect: the caller resubmits, a new intent is enqueued,
-    // and the stale item is *also* still in the queue - so the effect happens twice on the
-    // operator's machine. The wait therefore has to make its own promise true, and the two
-    // halves are one step rather than two.
+  it('keeps unaccepted work reclaimable when a wait gives up on it, and records the give-up', async () => {
+    // The frozen 11b spec requires this twice: "未 accepted 的意图在 lease 过期后保持可重取"
+    // (line 72) and, as an acceptance criterion, that an executor killed before ack leaves
+    // the work "仍然可取（留在队列里）" (line 61). A bounded wait is the *common* path into
+    // that state, because `execute()` always awaits with a bound - so if giving up made the
+    // row unclaimable, the work the spec says stays in the queue would leave it permanently,
+    // and the tool call would never happen at all.
     const id = queue.enqueue('sess_gaveup', 'exec', { command: 'never started' });
     expect(queue.claim('w1', 'sess_gaveup')!.id).toBe(id);
     expect(queue.get(id)!.acceptedAt).toBeNull();
 
     await expect(queue.await(id, { timeoutMs: 60, pollMs: 10 }))
-      .rejects.toMatchObject({ code: 'work_queue_timeout' });
+      .rejects.toMatchObject({ code: 'work_outcome_unknown' });
 
-    // The promise, and the action behind it. `stoppedAt` is untouched, because the session
-    // is still alive and still owed an answer - it is the wait that gave up, not the work
-    // that became unwanted.
+    // The give-up is recorded - it is a real fact, and it is what distinguishes an attempt
+    // abandoned before starting from one that died mid-command - while the session is still
+    // alive and still owed the work.
     const row = queue.get(id)!;
     expect(row.abandonedAt).toBeTruthy();
     expect(row.stoppedAt).toBeNull();
     expect(row.status).toBe('claimed');
 
-    // Both doors are shut, and they are the two doors that matter. Handing the stale item
-    // to a worker is exactly the duplicate the abandonment exists to prevent; accepting it
-    // would authorize the start the wait just reported as never happening.
-    expect(queue.claim('w2', 'sess_gaveup')).toBeNull();
-    expect(queue.accept(id, 'w1')).toBe('work_lease_lost');
-    expect(queue.heartbeat(id, 'w1')).toBe('work_lease_lost');
+    // Recorded where a reader can actually see it. The value of the marker is that it is
+    // readable, so it has to reach the listing an operator looks at, not only the row this
+    // test happens to hold - otherwise "observability" would be a claim about intent.
+    const listed = queue.list().find((item) => item.id === id)!;
+    expect(listed.abandonedAt).toBeTruthy();
+    expect(listed.stoppedAt).toBeNull();
+    // The other rows are untouched, so the marker is not being written indiscriminately.
+    expect(queue.list().filter((item) => item.abandonedAt).map((item) => item.id)).toEqual([id]);
 
-    // And a second wait on it repeats the safe reason rather than escalating to the unknown
-    // one: the work is still provably not done, and it can no longer accidentally start.
+    // The reason stays conservative. Telling this caller to resubmit would be a promise the
+    // queue cannot keep: the item is going to be re-offered, so the retry would run
+    // alongside it.
     await expect(queue.await(id, { timeoutMs: 60, pollMs: 10 }))
-      .rejects.toMatchObject({ code: 'work_queue_timeout' });
+      .rejects.toMatchObject({ code: 'work_outcome_unknown' });
 
-    // Abandoning does not deny the holder a result that did happen - the same distinction
-    // the session-driven stop makes. It says the runtime no longer wants the work.
-    expect(queue.complete(id, 'w1', { exitCode: 0, stdout: 'finished anyway' })).toBe('completed');
-    expect(queue.get(id)!.result).toMatchObject({ stdout: 'finished anyway' });
+    // And the queue does what the spec requires: once the lease expires the item is handed
+    // to the next worker, which can accept it and run it. The record of the earlier give-up
+    // must not survive into the new attempt.
+    backdateClaim(db, id, 24 * 60);
+    expect(queue.claim('w2', 'sess_gaveup')!.id).toBe(id);
+    expect(queue.get(id)!.claimedBy).toBe('w2');
+    expect(queue.get(id)!.abandonedAt).toBeNull();
+    expect(queue.accept(id, 'w2')).toBe('accepted');
+    expect(queue.complete(id, 'w2', { exitCode: 0, stdout: 'ran on the second worker' })).toBe('completed');
   });
 
-  it('abandons only work nobody accepted, leaving a claimed start to its holder', async () => {
-    // The abandonment is one guarded write, so the holder accepting between the wait
-    // reading the row and writing it is a fence rather than a check the write can slip
-    // past. This drives the guard directly on the arm that wins, because the race itself is
-    // a race: an item the executor already accepted may be running right now, and marking
-    // it would tell a caller that work which is about to happen did not.
+  it('records a give-up only for claimed work nobody accepted', async () => {
+    // The record is one guarded write. `accepted_at IS NULL` is the condition that matters:
+    // the holder may accept between the wait reading the row and writing it, and work that
+    // is about to run must not be recorded as abandoned-before-starting. Because the record
+    // is observability rather than a fence, none of this changes any answer a worker gets -
+    // the assertions below are about the marker, not about permissions.
     const accepted = queue.enqueue('sess_started', 'exec', { command: 'running' });
     expect(queue.claim('w1', 'sess_started')!.id).toBe(accepted);
     expect(queue.accept(accepted, 'w1')).toBe('accepted');
-    expect(queue.abandon(accepted)).toBe(false);
     expect(queue.get(accepted)!.abandonedAt).toBeNull();
-    // Untouched, so its holder still holds it and may still report.
+    // Untouched and still fully usable: claimed, accepted, renewable, and claimed by its
+    // holder rather than taken from it.
     expect(queue.get(accepted)!.acceptedAt).toBeTruthy();
     expect(queue.heartbeat(accepted, 'w1')).toBe('renewed');
+    expect(queue.claim('w9', 'sess_started')).toBeNull();
 
-    // Work that was never claimed is not this method's business either: there is no claim
-    // to give up on, and `pending` already answers the caller honestly.
+    // Work that was never claimed is not this method's business: there is no claim to give
+    // up on, and `pending` already answers the caller honestly.
     const pending = queue.enqueue('sess_queued', 'exec', { command: 'waiting' });
-    expect(queue.abandon(pending)).toBe(false);
     expect(queue.get(pending)!.abandonedAt).toBeNull();
     expect(queue.get(pending)!.status).toBe('pending');
-
-    // Nor work the session already stopped, which is a different fact with its own code.
-    const stopped = queue.enqueue('sess_over', 'exec', { command: 'unwanted' });
-    expect(queue.claim('w3', 'sess_over')!.id).toBe(stopped);
-    expect(queue.stop('sess_over')).toBe(1);
-    expect(queue.abandon(stopped)).toBe(false);
-    expect(queue.abandon('work_missing')).toBe(false);
   });
 
   it('classifies a stopped item by the stop, not by the state it was in', async () => {

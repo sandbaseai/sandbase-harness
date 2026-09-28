@@ -1018,19 +1018,25 @@ ALTER TABLE work_items ADD COLUMN accepted_at TEXT;
  *
  * A row nobody ever accepted is one where the effect provably did not happen: accept is
  * the last thing a worker does before it starts, so an unaccepted item was never started.
- * That makes it safe to tell a waiting caller to submit the intent again - but only if
- * the old intent is dead first. The row is still claimable while the wait runs, so a
- * caller that resubmitted while it stayed claimable would have both the stale item and
- * the new one executed.
+ * Recording that distinguishes an attempt abandoned before starting from one that died
+ * mid-command, and it is the honest thing to write on the row either way.
+ *
+ * **The marker is observability and deliberately not a fence.** An earlier version put
+ * `abandoned_at IS NULL` into the claim predicate and the accept and heartbeat fences, so a
+ * row a wait had given up on could never be handed out again. That violates the frozen 11b
+ * spec twice - "未 accepted 的意图在 lease 过期后保持可重取" (line 72) and the acceptance
+ * that an executor killed before ack leaves the work still in the queue (line 61) - and a
+ * bounded wait is the *common* path into this state, because `execute()` always awaits with
+ * a bound. Fencing on it deletes the work the spec requires to be re-offered, so the queue
+ * re-offers it instead and the give-up is only ever read.
  *
  * Deliberately a second column rather than a second meaning for `stopped_at`. A stop is
  * the session's decision that it no longer wants the work; this is the runtime giving up
- * on a wait, with the session still alive and still owed an answer. The two agree on what
- * must not happen next - the item must not be handed out - and disagree on everything a
- * reader asks afterwards, so one column holding both would make the difference unreadable
- * exactly where it matters.
+ * on a wait, with the session still alive and still owed the item. The two disagree on
+ * everything a reader asks afterwards, so one column holding both would make the
+ * difference unreadable exactly where it matters.
  *
- * Existing rows stay NULL: an earlier build could not abandon anything, so an absent
+ * Existing rows stay NULL: an earlier build could not record a give-up, so an absent
  * marker must read as "no wait gave up on this" rather than as an unknown.
  */
 const M047_WORK_ITEM_ABANDON = `

@@ -53,10 +53,10 @@ export interface WorkItem {
   acceptedAt?: string | null;
   /**
    * When a bounded wait gave up on this item before any executor committed to running it.
-   * An abandoned item is never handed out and never accepted, which is what makes the
-   * "nothing ran, submit the intent again" it reports to its caller true rather than only
-   * plausible. Distinct from `stoppedAt`: the session here is still alive and still owed
-   * an answer - it is the wait that gave up, not the work that became unwanted.
+   * **A record, not a fence:** nothing refuses this item on it. It says a previous attempt
+   * ended without starting - which is real, because nothing was accepted and so nothing ran
+   * - while the item itself stays claimable so the queue re-offers it rather than losing it.
+   * Cleared when a worker claims it, since that begins a new attempt.
    */
   abandonedAt?: string | null;
 }
@@ -243,13 +243,14 @@ export class WorkQueue {
     // is NULL and every comparison against it is NULL, which reads as "nothing is ever
     // reclaimable". Seconds, with a fractional part, is the modifier that exists.
     const leaseModifier = `-${this.leaseMs / 1000} seconds`;
-    // The row's own condition: neither stopped nor abandoned, and either pending or a
-    // claim whose lease ran out. Abandonment is excluded here and not only at the accept
-    // step, because the whole point of abandoning is that the row must never be handed out
-    // again - a marker the selection ignored would leave the stale intent claimable and the
-    // caller's resubmission running alongside it.
+    // The row's own condition: unstopped, and either pending or a claim whose lease ran out.
+    // `abandoned_at` is deliberately **not** here. The frozen 11b spec requires an
+    // unaccepted intent to stay reclaimable after its lease expires (line 72), and requires
+    // an executor killed before ack to leave the work in the queue (line 61 acceptance). A
+    // marker in this predicate would delete that work instead of re-offering it, and a
+    // bounded wait that gave up is exactly the common path that reaches this state.
     const rowClaimable = (prefix: string): string =>
-      `(${prefix}stopped_at IS NULL AND ${prefix}abandoned_at IS NULL AND (${prefix}status = 'pending' OR (${prefix}status = 'claimed' AND ${prefix}claimed_at IS NOT NULL AND ${prefix}claimed_at <= datetime('now', ?))))`;
+      `(${prefix}stopped_at IS NULL AND (${prefix}status = 'pending' OR (${prefix}status = 'claimed' AND ${prefix}claimed_at IS NOT NULL AND ${prefix}claimed_at <= datetime('now', ?))))`;
     // The session's condition, as a correlated subquery so one fragment serves the
     // scoped and unscoped selections and the guarded update alike. `IS NULL` keeps work
     // for an unknown session id claimable: an id with no row is a caller's mistake
@@ -294,8 +295,12 @@ export class WorkQueue {
       // particular holder's lease, so a reclaim by a different worker must not inherit it.
       // A row that arrives here was either never claimed or had its lease run out, and in
       // both cases nothing has committed to running it under this claim yet.
+      // `abandoned_at` is cleared too, and for the same reason as `accepted_at`: both are
+      // statements about a previous holder's attempt, and a reclaim is a new attempt. It is
+      // pure observability - nothing reads it as a fence - so the only requirement is that
+      // it must not read as though *this* attempt had already been given up on.
       const res = this.db
-        .prepare(`UPDATE work_items SET status = 'claimed', claimed_by = ?, claimed_at = datetime('now'), accepted_at = NULL WHERE id = ? AND ${claimable('')}`)
+        .prepare(`UPDATE work_items SET status = 'claimed', claimed_by = ?, claimed_at = datetime('now'), accepted_at = NULL, abandoned_at = NULL WHERE id = ? AND ${claimable('')}`)
         .run(workerId, candidate.id, leaseModifier) as { changes: number };
       if (res.changes !== 1) return null; // lost the race — someone else claimed it
 
@@ -339,7 +344,7 @@ export class WorkQueue {
     // than a check the write can slip past: a stop that lands while this statement is
     // in flight simply leaves the row un-renewed instead of being overwritten by it.
     const update = this.db
-      .prepare("UPDATE work_items SET claimed_at = datetime('now') WHERE id = ? AND status = 'claimed' AND claimed_by = ? AND stopped_at IS NULL AND abandoned_at IS NULL")
+      .prepare("UPDATE work_items SET claimed_at = datetime('now') WHERE id = ? AND status = 'claimed' AND claimed_by = ? AND stopped_at IS NULL")
       .run(id, workerId) as { changes: number };
     if (update.changes === 1) return 'renewed';
     // The failed write is classified afterwards, and the work-level fact comes first:
@@ -347,32 +352,29 @@ export class WorkQueue {
     const row = this.get(id);
     if (!row) return 'not_found';
     if (row.stoppedAt) return 'work_lease_lost';
-    // Abandoned work is refused the same way, and it is the same instruction: a wait gave
-    // up on this item and told its caller to submit the intent again, so keeping the old
-    // claim alive would be keeping alive the copy that was just promised dead.
-    if (row.abandonedAt) return 'work_lease_lost';
     return 'not_claimed_by_worker';
   }
 
   /**
-   * Give up on work that no executor ever committed to running, so it can never be handed
-   * out or accepted.
+   * Record that a bounded wait gave up on an item no executor had accepted.
    *
-   * This is the action behind the promise a bounded wait makes. A claimed row with no
-   * `accepted_at` proves the effect did not happen - accept is the last thing a worker does
-   * before it starts - so the honest reason for a timeout on it is the retryable one. But
-   * the row is still claimable while its lease lives, so reporting "submit the intent
-   * again" without marking it would have the caller's resubmission and the stale item both
-   * executed: the same double execution the accept step exists to prevent, arriving by a
-   * different route and caused by the promise itself.
+   * **Observability, not a fence.** It marks the row so a later reader can tell an attempt
+   * that was abandoned before starting from one that died while running, which is real
+   * information: nothing was accepted, so nothing ran. It deliberately does not feed the
+   * claim predicate, the accept fence, or the heartbeat fence. An earlier version of this
+   * method did, and that was wrong against the frozen 11b spec on two lines - an unaccepted
+   * intent must stay reclaimable after its lease expires, and an executor killed before ack
+   * must leave the work in the queue. Making the row unclaimable deletes the work the spec
+   * requires to be re-offered, and a bounded wait is the *common* path into that state
+   * rather than a rare one.
    *
-   * The three conditions are one conditional UPDATE, so each is a fence rather than a check
-   * the write can slip past. `accepted_at IS NULL` is the one that matters: the holder may
-   * accept in the gap between the wait reading the row and writing it, and if it does, the
-   * effect may now happen and this must not claim otherwise. Returns false in that case, so
-   * the caller can report the unknown outcome instead of the safe one.
+   * Guarded on `accepted_at IS NULL` for the same reason it always was: the holder may
+   * accept between the wait reading the row and writing it, and work that is about to run
+   * must not be recorded as abandoned-before-starting. The return value says which happened,
+   * though the caller no longer varies the code on it - the reason is conservative either
+   * way.
    */
-  abandon(id: string): boolean {
+  private recordGiveUp(id: string): boolean {
     const res = this.db
       .prepare(
         `UPDATE work_items SET abandoned_at = datetime('now')
@@ -415,7 +417,6 @@ export class WorkQueue {
       .prepare(
         `UPDATE work_items SET accepted_at = datetime('now')
          WHERE id = ? AND status = 'claimed' AND claimed_by = ? AND stopped_at IS NULL
-           AND abandoned_at IS NULL
            AND claimed_at IS NOT NULL AND claimed_at > datetime('now', ?)`,
       )
       .run(id, workerId, leaseModifier) as { changes: number };
@@ -427,11 +428,6 @@ export class WorkQueue {
     const row = this.get(id);
     if (!row) return 'not_found';
     if (row.stoppedAt) return 'work_lease_lost';
-    // An abandoned item is refused with the same instruction as a stopped one, and for a
-    // related reason: the runtime has given up on it, so nothing is waiting for it to run.
-    // The difference a reader cares about is elsewhere - the session is still alive - but
-    // the worker's answer is the same, do not run it.
-    if (row.abandonedAt) return 'work_lease_lost';
     if (row.status === 'claimed' && row.claimedBy === workerId) {
       // The holder, with a lease that has run out. The message distinguishes this from a
       // stop; the code does not, because the instruction to the worker is identical.
@@ -541,24 +537,23 @@ export class WorkQueue {
    *    `pending`, and reporting it as "no worker ever took it, submit again" would
    *    invite a caller to resubmit work for a session that has already ended. The stop
    *    is the cause; `pending` is only the state it was in when the cause landed.
-   * 2. **abandoned next**, and this is not a special case of the one below it. A row an
-   *    earlier wait gave up on is still `claimed` and still unaccepted, so it would enter
-   *    the branch that tries to abandon it, fail - there is nothing left to mark - and
-   *    fall through to the unknown outcome for a second waiter. That would hand two
-   *    callers opposite answers about the same provably-unstarted work, and the second one
-   *    is worse than inconsistent: it is false, because the item can no longer start.
-   * 3. **`pending` next**, and this is one of the two cases that are provably safe to
-   *    replay: a row becomes `claimed` when it is handed out and nothing ever moves it
-   *    back, so `pending` at the deadline means no executor has seen it.
-   * 4. **claimed but never accepted**, which the accept step makes knowable: the effect
-   *    provably did not happen, because accepting is the last thing a worker does before
-   *    it starts. Knowing it is not enough to say it - the row is still claimable, so the
-   *    wait **abandons** it, and only a successful abandonment makes the retryable reason
-   *    true. Losing that race means the holder accepted and may now run the item, so the
-   *    answer has to be the unknown one and the row must have been left alone.
-   * 5. **everything else is unknown**, including a row that cannot be read at all.
-   *    Absence proves nothing about whether the work ran, and of the two ways to be
-   *    wrong, replaying an effect that already happened is the expensive one.
+   * 2. **`pending` next**, and this is the one case that is provably safe to replay:
+   *    a row becomes `claimed` when it is handed out and nothing ever moves it back, so
+   *    `pending` at the deadline means no executor has seen it.
+   * 3. **everything else is the unknown outcome**, including a row that cannot be read at
+   *    all, and including claimed work that no executor ever accepted. Absence proves
+   *    nothing about whether the work ran, and of the two ways to be wrong, replaying an
+   *    effect that already happened is the expensive one.
+   *
+   * **A claimed row that was never accepted is now recorded, but not reclassified.** The
+   * accept step makes it knowable that nothing ran - accepting is the last thing a worker
+   * does before it starts - and it would be tempting to report the retryable reason on that
+   * basis. It must not be: the row is reclaimable by design after its lease expires, which
+   * the frozen 11b spec requires twice ("未 accepted 的意图在 lease 过期后保持可重取", and the
+   * acceptance that an executor killed before ack leaves the work still in the queue), so a
+   * caller told to resubmit would race the queue re-offering the very item it was told was
+   * dead. The give-up is persisted as observability and the claim is left alone, so the
+   * queue does what the spec says and executes the work instead of losing it.
    */
   private waitFailure(id: string, item: WorkItem | null): WorkWaitTimeoutError {
     if (item?.stoppedAt) {
@@ -567,28 +562,21 @@ export class WorkQueue {
         `work item ${id} timed out and was stopped: the session that queued it has ended`,
       );
     }
-    if (item?.abandonedAt) {
-      return new WorkWaitTimeoutError(
-        WORK_QUEUE_TIMEOUT_CODE,
-        `work item ${id} timed out and has been abandoned: nothing ran, and submitting the intent again is safe`,
-      );
-    }
     if (item?.status === 'pending') {
       return new WorkWaitTimeoutError(
         WORK_QUEUE_TIMEOUT_CODE,
         `work item ${id} timed out without an executor: no worker ever claimed it`,
       );
     }
+    // A claimed item that no executor accepted: record that the wait gave up on it, so a
+    // later reader can tell this attempt from one that was actively running, and then report
+    // the conservative reason. The record is not a fence - nothing refuses the item on it -
+    // because an unaccepted intent has to stay reclaimable.
     if (item?.status === 'claimed' && !item.acceptedAt) {
-      if (this.abandon(id)) {
-        return new WorkWaitTimeoutError(
-          WORK_QUEUE_TIMEOUT_CODE,
-          `work item ${id} timed out after it was claimed but before any executor accepted it, and has been abandoned: nothing ran, and submitting the intent again is safe`,
-        );
-      }
+      this.recordGiveUp(id);
       return new WorkWaitTimeoutError(
         WORK_OUTCOME_UNKNOWN_CODE,
-        `work item ${id} timed out as its executor accepted it: the outcome is unknown and must not be replayed`,
+        `work item ${id} timed out after it was claimed but before any executor accepted it: no result is known, and the queue will re-offer it to a worker rather than treat it as dead - do not resubmit the intent`,
       );
     }
     return new WorkWaitTimeoutError(
