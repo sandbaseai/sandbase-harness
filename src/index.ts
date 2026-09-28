@@ -163,6 +163,7 @@ async function startServer(opts: StartServerOptions) {
     sessionManager,
     webhookSecret: webhookSigningSecret(dataDir),
     dataDir,
+    logger,
   });
 
   const runtimeApiAuth = resolveRuntimeApiAuth({ db });

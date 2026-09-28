@@ -14,8 +14,10 @@
 import type { Database } from '@/core/db/database.js';
 import type { SessionEvent } from '@/types/session.js';
 import type { SessionManager } from '@/core/session/session-manager.js';
+import type { Logger } from '@/core/observability/logger.js';
 import {
   dispatchWebhookEvent,
+  resolveWebhookSustainedFailureWindow,
   retryDueWebhookDeliveries,
 } from '@/core/operations/webhook-dispatcher.js';
 import { rearmScheduledDeployments, runDueScheduledDeployments } from '@/core/operations/scheduler.js';
@@ -36,6 +38,17 @@ export type OperationsBridgeOptions = {
   fetchImpl?: typeof fetch;
   /** Cadence for due webhook retries and scheduled deployments. */
   intervalMs?: number;
+  /**
+   * Where the start-up record of the webhook auto-disable window goes. Optional so a
+   * test can compose the bridge without one; the runtime passes its logger.
+   */
+  logger?: Logger;
+  /**
+   * The sustained-failure window `composeOperations` resolved and recorded, carried
+   * down so the deliveries use the value the record names. Unset reads the
+   * deployment switch, which is what a caller that starts the timers on its own gets.
+   */
+  sustainedFailureWindowSeconds?: number;
 };
 
 /** The runtime's legacy webhook signing secret. Derived per workspace, not hardcoded. */
@@ -55,6 +68,7 @@ export function createWebhookEventListener(opts: {
   webhookSecret: string;
   dataDir?: string;
   fetchImpl?: typeof fetch;
+  sustainedFailureWindowSeconds?: number;
 }): (event: SessionEvent) => void {
   return (event: SessionEvent) => {
     const createdAt = event.createdAt instanceof Date
@@ -72,7 +86,12 @@ export function createWebhookEventListener(opts: {
         // past.
         data: { session_id: event.sessionId, event_id: event.id },
       },
-      { secret: opts.webhookSecret, dataDir: opts.dataDir, fetchImpl: opts.fetchImpl },
+      {
+        secret: opts.webhookSecret,
+        dataDir: opts.dataDir,
+        fetchImpl: opts.fetchImpl,
+        sustainedFailureWindowSeconds: opts.sustainedFailureWindowSeconds,
+      },
     ).catch(() => {
       // dispatchWebhookEvent records failed attempts as delivery rows; a
       // rejection here means the delivery could not even be recorded, which no
@@ -103,11 +122,24 @@ export interface ComposeOperationsResult {
  * silently miss every event until the next restart.
  */
 export function composeOperations(opts: OperationsBridgeOptions): ComposeOperationsResult {
+  // The auto-disable window is a deployment-level variable, so it has no write path of its
+  // own to record a change. The change trail is this line instead: the runtime states the
+  // window it will use and where that came from, so editing
+  // `MANAGED_AGENTS_WEBHOOK_SUSTAINED_FAILURE_WINDOW_SECONDS` shows up as a new recorded
+  // value after the restart that applies it, and a value the parser refused is recorded as
+  // refused rather than presented as the default. `config_model_not_effective` is the same
+  // seam for a config.yaml fact at start-up.
+  const window = resolveWebhookSustainedFailureWindow();
+  opts.logger?.info('webhook_disable_window', {
+    window_seconds: window.seconds,
+    source: window.source,
+  });
   const listener = createWebhookEventListener({
     db: opts.db,
     webhookSecret: opts.webhookSecret,
     dataDir: opts.dataDir,
     fetchImpl: opts.fetchImpl,
+    sustainedFailureWindowSeconds: window.seconds,
   });
   opts.sessionManager.setBroadcastListener(listener);
   // Re-arm before the timers start. A deployment whose `next_run_at` passed
@@ -115,7 +147,10 @@ export function composeOperations(opts: OperationsBridgeOptions): ComposeOperati
   // that query only matches rows that already carry a time — so restarting is
   // the one moment the forward schedule has to be restored.
   rearmScheduledDeployments({ db: opts.db });
-  const stopOperationsTimers = startOperationsTimers(opts);
+  const stopOperationsTimers = startOperationsTimers({
+    ...opts,
+    sustainedFailureWindowSeconds: window.seconds,
+  });
   return { stopOperationsTimers, listener };
 }
 
@@ -126,11 +161,14 @@ export function composeOperations(opts: OperationsBridgeOptions): ComposeOperati
  */
 export function startOperationsTimers(opts: OperationsBridgeOptions): () => void {
   const intervalMs = opts.intervalMs ?? 60_000;
+  // Resolved once, when the timers start, so a tick cannot half-apply an edited switch.
+  const windowSeconds = opts.sustainedFailureWindowSeconds ?? resolveWebhookSustainedFailureWindow().seconds;
   const timer = setInterval(() => {
     void retryDueWebhookDeliveries(opts.db, {
       secret: opts.webhookSecret,
       dataDir: opts.dataDir,
       fetchImpl: opts.fetchImpl,
+      sustainedFailureWindowSeconds: windowSeconds,
     }).catch(() => undefined);
     try {
       void runDueScheduledDeployments(opts.db, opts.sessionManager, {
@@ -139,6 +177,7 @@ export function startOperationsTimers(opts: OperationsBridgeOptions): () => void
             secret: opts.webhookSecret,
             dataDir: opts.dataDir,
             fetchImpl: opts.fetchImpl,
+            sustainedFailureWindowSeconds: windowSeconds,
           });
         },
       }).catch(() => undefined);

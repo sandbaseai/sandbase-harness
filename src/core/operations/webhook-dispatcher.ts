@@ -38,6 +38,13 @@ export type WebhookDispatchOptions = {
   addressPolicy?: WebhookAddressPolicy;
   /** Jitter source for retry backoff; injectable so the published window can be asserted. */
   random?: () => number;
+  /**
+   * How long an endpoint must fail without interruption before the sustained-failure
+   * auto-disable fires, in seconds. Unset means the deployment's switch decides —
+   * `webhookSustainedFailureWindowSeconds` reads it, and the runtime records what it
+   * resolved at startup — so a caller only sets this to override that for a test.
+   */
+  sustainedFailureWindowSeconds?: number;
 };
 
 export type WebhookDeliveryResult = {
@@ -143,7 +150,7 @@ async function attemptDelivery(
   // when the attempt was an ordinary failure. The streak advances on both outcomes: a `2xx`
   // clears it, which is the published reset and the reason a single flaky event cannot
   // accumulate into a disable.
-  if (!autoDisableReason && recordFailureStreak(db, webhook.id, attempt.ok, createdAt) === 'overdue') {
+  if (!autoDisableReason && recordFailureStreak(db, webhook.id, attempt.ok, createdAt, sustainedFailureWindowSeconds(opts)) === 'overdue') {
     autoDisableReason = SUSTAINED_DISABLED_REASON;
   }
   if (autoDisableReason) disableEndpoint(db, webhook.id, autoDisableReason, createdAt);
@@ -202,7 +209,7 @@ async function retryDelivery(
       : null;
   // A retry is where this rule is most likely to fire: the first attempt starts the streak and
   // the retries that follow are what carry it across the window.
-  if (!autoDisableReason && recordFailureStreak(db, row.webhook_id, attempt.ok, attemptTime.toISOString()) === 'overdue') {
+  if (!autoDisableReason && recordFailureStreak(db, row.webhook_id, attempt.ok, attemptTime.toISOString(), sustainedFailureWindowSeconds(opts)) === 'overdue') {
     autoDisableReason = SUSTAINED_DISABLED_REASON;
   }
   if (autoDisableReason) disableEndpoint(db, row.webhook_id, autoDisableReason, attemptTime.toISOString());
@@ -396,16 +403,84 @@ function disableEndpoint(db: Database, webhookId: string, reason: string, nowIso
 
 /**
  * How long an endpoint must fail without interruption before the third published auto-disable
- * case fires.
+ * case fires, when the deployment has not set its own.
  *
  * **This number is not published.** The contract states that the trigger is the *duration* of
  * uninterrupted failure rather than a delivery count, and that a `2xx` resets the window; it
- * never says how long that duration is. So this is a local parameter, not a conformed value,
- * and it is chosen long enough that an ordinary outage — the thing the published sentence
- * exists to tolerate — cannot reach it. Recording it as a local choice is the point: a
- * sentence claiming "the published window" here would claim something the contract does not say.
+ * never says how long that duration is, so this is a local parameter rather than a conformed
+ * value. Recording it as a local choice is the point: a sentence claiming "the published
+ * window" here would claim something the contract does not say.
+ *
+ * Ten minutes is the local policy. It is long enough that a receiver restarting or a network
+ * blip — what the published sentence exists to tolerate — is not enough to switch an endpoint
+ * off, and short enough that a subscriber which has permanently gone away stops being retried
+ * in the same afternoon rather than the next day. The deployment may set its own window with
+ * {@link WEBHOOK_SUSTAINED_FAILURE_WINDOW_ENV}; an earlier value of 24 hours was neither the
+ * published one nor configurable.
  */
-const SUSTAINED_FAILURE_WINDOW_MS = 24 * 60 * 60 * 1000;
+export const DEFAULT_SUSTAINED_FAILURE_WINDOW_SECONDS = 600;
+
+/**
+ * Bounds for the deployment's own window. A typo guard rather than a policy: a window an
+ * operator sets has to be one they could plausibly mean, and the ceiling is the same 30 days
+ * the parked-wait bound uses.
+ */
+const MIN_SUSTAINED_FAILURE_WINDOW_SECONDS = 1;
+const MAX_SUSTAINED_FAILURE_WINDOW_SECONDS = 2_592_000;
+
+/**
+ * The deployment switch that sets the sustained-failure window, in seconds.
+ *
+ * This sits beside `MANAGED_AGENTS_WEBHOOK_SCREEN_PRIVATE_ADDRESSES` because both are policies
+ * of the same delivery subsystem and both are deployment properties rather than parts of the
+ * versioned Settings document, whose areas are adapters (`model`, loop engine, storage,
+ * memory, sandbox). The runtime records the window it resolves at startup, which is this
+ * switch's change trail: a deployment-level variable has no write path of its own to record.
+ */
+export const WEBHOOK_SUSTAINED_FAILURE_WINDOW_ENV = 'MANAGED_AGENTS_WEBHOOK_SUSTAINED_FAILURE_WINDOW_SECONDS';
+
+/** Where the window in effect came from, for the startup record. */
+export type WebhookSustainedFailureWindowSource = 'deployment' | 'default' | 'unusable';
+
+export type WebhookSustainedFailureWindow = {
+  seconds: number;
+  /**
+   * `deployment` when the switch supplied a usable value, `default` when it was unset, and
+   * `unusable` when it was set to something the parser refused. The third state exists so a
+   * typo is recorded as a typo rather than presented as the default the deployment chose.
+   */
+  source: WebhookSustainedFailureWindowSource;
+};
+
+/**
+ * Resolve the sustained-failure window from the deployment, falling back to the local default.
+ *
+ * A value that is not a positive integer inside the bounds is refused rather than clamped: a
+ * window of zero would disable an endpoint on its first failure, and a malformed value must not
+ * quietly become a policy the operator never chose.
+ */
+export function resolveWebhookSustainedFailureWindow(
+  env: NodeJS.ProcessEnv = process.env,
+): WebhookSustainedFailureWindow {
+  const configured = (env[WEBHOOK_SUSTAINED_FAILURE_WINDOW_ENV] ?? '').trim();
+  if (!configured) return { seconds: DEFAULT_SUSTAINED_FAILURE_WINDOW_SECONDS, source: 'default' };
+  const seconds = Number(configured);
+  if (
+    !Number.isInteger(seconds)
+    || seconds < MIN_SUSTAINED_FAILURE_WINDOW_SECONDS
+    || seconds > MAX_SUSTAINED_FAILURE_WINDOW_SECONDS
+  ) {
+    return { seconds: DEFAULT_SUSTAINED_FAILURE_WINDOW_SECONDS, source: 'unusable' };
+  }
+  return { seconds, source: 'deployment' };
+}
+
+/** The window one dispatch call runs with: the caller's override, else the deployment's. */
+function sustainedFailureWindowSeconds(opts: WebhookDispatchOptions): number {
+  const requested = opts.sustainedFailureWindowSeconds;
+  if (requested !== undefined && Number.isInteger(requested) && requested > 0) return requested;
+  return resolveWebhookSustainedFailureWindow().seconds;
+}
 
 /**
  * Advance the per-endpoint failure streak and report where it stands.
@@ -415,13 +490,15 @@ const SUSTAINED_FAILURE_WINDOW_MS = 24 * 60 * 60 * 1000;
  * deployment the rule exists for. `started` opens a streak, `continuing` leaves one running,
  * `overdue` means the window elapsed, and `cleared` is the `2xx` reset — which is a write on
  * the success path, not a no-op, because only a `2xx` resets the window and an endpoint whose
- * failures are interrupted never accumulates toward a disable.
+ * failures are interrupted never accumulates toward a disable. The window itself is a
+ * parameter: it is the deployment's to set, so a constant here would be the wrong shape.
  */
 function recordFailureStreak(
   db: Database,
   webhookId: string,
   ok: boolean,
   nowIso: string,
+  windowSeconds: number,
 ): 'cleared' | 'started' | 'continuing' | 'overdue' {
   const row = db.prepare('SELECT failing_since FROM webhooks WHERE id = ?').get(webhookId) as
     | { failing_since: string | null }
@@ -437,7 +514,7 @@ function recordFailureStreak(
     db.prepare('UPDATE webhooks SET failing_since = ? WHERE id = ?').run(nowIso, webhookId);
     return 'started';
   }
-  return Date.parse(nowIso) - Date.parse(row.failing_since) >= SUSTAINED_FAILURE_WINDOW_MS
+  return Date.parse(nowIso) - Date.parse(row.failing_since) >= windowSeconds * 1000
     ? 'overdue'
     : 'continuing';
 }

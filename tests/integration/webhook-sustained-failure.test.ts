@@ -19,15 +19,18 @@
  * other test here and fail that one.
  *
  * **The window's value is not published**, so no test asserts a number the contract does not
- * state; the tests place failures comfortably inside and comfortably outside the local window.
- * A window that claimed to be "the published duration" would be claiming something the
- * contract does not say.
+ * state as though it were conformed. What the tests do assert is the local policy the runtime
+ * ships: the default is **ten minutes**, written out rather than read from the constant that
+ * defines it so the policy is pinned by behaviour, and a deployment can set its own with
+ * `MANAGED_AGENTS_WEBHOOK_SUSTAINED_FAILURE_WINDOW_SECONDS`. That switch is exercised the way
+ * a deployment sets it rather than through an injected option, because the switch is the
+ * surface an operator actually has.
  *
  * The receivers are real HTTP listeners, so a delivery that is supposed to happen is observed
  * happening, and the terminal assertions are about the rows the dispatcher writes afterwards.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer as createHttpServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -37,13 +40,15 @@ import { Database } from '@/core/db/database.js';
 import { SessionManager } from '@/core/session/session-manager.js';
 import { createServer } from '@/api/server.js';
 import {
+  WEBHOOK_SUSTAINED_FAILURE_WINDOW_ENV,
   dispatchWebhookEvent,
   retryDueWebhookDeliveries,
 } from '@/core/operations/webhook-dispatcher.js';
 
 const EVENT = 'session.status_idled';
 const REASON = 'auto-disabled after sustained delivery failures';
-const HOUR = 60 * 60 * 1000;
+const MINUTE = 60 * 1000;
+const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
 const T0 = new Date('2026-03-01T00:00:00.000Z');
 
@@ -63,6 +68,9 @@ describe('webhook sustained-failure auto-disable', () => {
   const stubs: Stub[] = [];
 
   beforeEach(() => {
+    // Pinned to "unset" so the default is what these cases measure. An empty value is how the
+    // parser spells "no switch", which is also what a deployment that never set it has.
+    vi.stubEnv(WEBHOOK_SUSTAINED_FAILURE_WINDOW_ENV, '');
     tmpDir = mkdtempSync(join(tmpdir(), 'ma-webhook-sustained-'));
     db = new Database(join(tmpDir, 'test.db'));
     db.runMigrations();
@@ -88,6 +96,7 @@ describe('webhook sustained-failure auto-disable', () => {
   });
 
   afterEach(async () => {
+    vi.unstubAllEnvs();
     for (const stub of stubs.splice(0)) await stub.close();
     db.close();
     rmSync(tmpDir, { recursive: true, force: true });
@@ -194,18 +203,52 @@ describe('webhook sustained-failure auto-disable', () => {
     expect(webhookRow('wh_interrupted').failing_since).toBe(at(HOUR).toISOString());
   });
 
-  it('does not disable for a failure that is still inside the window', async () => {
+  it('measures the local default of ten minutes on both sides of its boundary', async () => {
     const endpoint = await stub(500);
     subscribe('wh_inside', endpoint.url);
 
     await dispatchAt(T0);
-    const inside = await dispatchAt(at(HOUR));
+    // One millisecond short of the default window: the streak is still running, so the
+    // endpoint stays active and the attempt is still retried. The ten minutes are written
+    // out rather than read from the constant the code defines, so this case pins the policy
+    // by its behaviour and fails if the default is moved.
+    const windowMs = 10 * MINUTE;
+    const inside = await dispatchAt(at(windowMs - 1));
 
     expect(inside[0]).toMatchObject({ status: 'pending_retry' });
     expect(webhookRow('wh_inside').status).toBe('active');
     // The streak start is the first failure's, not the latest one: the window measures the
     // whole run, so a repeated failure must not restart the clock and postpone the rule.
     expect(webhookRow('wh_inside').failing_since).toBe(T0.toISOString());
+
+    // Inclusive at the boundary: exactly ten minutes after the streak opened, it is overdue.
+    const boundary = await dispatchAt(at(windowMs));
+    expect(boundary[0]).toMatchObject({ status: 'failed', next_retry_at: null });
+    expect(webhookRow('wh_inside')).toMatchObject({ status: 'disabled', disabled_reason: REASON });
+    // The disable is about elapsed time, not about a connection that never happened.
+    expect(endpoint.requests()).toBe(3);
+  });
+
+  it('takes the window from the deployment switch instead of the default', async () => {
+    const sixHours = 6 * 3600;
+    vi.stubEnv(WEBHOOK_SUSTAINED_FAILURE_WINDOW_ENV, String(sixHours));
+    const endpoint = await stub(500);
+    subscribe('wh_configured', endpoint.url);
+
+    await dispatchAt(T0);
+    // Half an hour is three times the default and still inside this deployment's window, so a
+    // window that ignored the switch would disable the endpoint here.
+    const inside = await dispatchAt(at(30 * MINUTE));
+    expect(inside[0]).toMatchObject({ status: 'pending_retry' });
+    expect(webhookRow('wh_configured').status).toBe('active');
+
+    const outside = await dispatchAt(at(sixHours * 1000));
+    expect(outside[0]).toMatchObject({ status: 'failed', next_retry_at: null });
+    expect(webhookRow('wh_configured')).toMatchObject({
+      status: 'disabled',
+      disabled_reason: REASON,
+    });
+    expect(endpoint.requests()).toBe(3);
   });
 
   it('applies the rule to a retry, where the streak has usually already crossed the window', async () => {

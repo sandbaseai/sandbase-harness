@@ -2025,6 +2025,22 @@ receiver keeps working. A retry keeps the same `webhook-id` and signs with its o
 `webhook-timestamp`, so the published header set is continuous across attempts and
 a receiver can deduplicate on the id.
 
+An endpoint is automatically disabled — `status: "disabled"` with a
+machine-readable `disabled_reason` — when a delivery observes a `3xx` (never
+followed), when address screening refuses the connection, or when deliveries have
+failed without interruption for the sustained-failure window. That window's length
+is a local parameter rather than a published one: the contract states the trigger's
+shape (a duration, reset by a single `2xx`) and not its length. It defaults to ten
+minutes, and a deployment sets its own in whole seconds with
+`MANAGED_AGENTS_WEBHOOK_SUSTAINED_FAILURE_WINDOW_SECONDS` (`1` to `2592000`;
+anything else is refused rather than clamped, because a window of zero would
+disable an endpoint on its first failure). The runtime records the window it
+resolved at startup as a `webhook_disable_window` log line carrying the value and
+whether it came from the deployment, from the default, or was refused — a
+deployment variable has no write path of its own, so that record is its change
+trail. Disabling is reversible through `PUT /v1/webhooks/{webhook_id}`, and events
+published while an endpoint is disabled are not replayed.
+
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/v1/webhooks` | List webhook subscriptions. |

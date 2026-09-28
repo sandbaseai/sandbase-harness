@@ -3,9 +3,54 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { Database } from '@/core/db/database.js';
-import { dispatchWebhookEvent, retryDueWebhookDeliveries, signPayload } from '@/core/operations/webhook-dispatcher.js';
+import {
+  DEFAULT_SUSTAINED_FAILURE_WINDOW_SECONDS,
+  WEBHOOK_SUSTAINED_FAILURE_WINDOW_ENV,
+  dispatchWebhookEvent,
+  resolveWebhookSustainedFailureWindow,
+  retryDueWebhookDeliveries,
+  signPayload,
+} from '@/core/operations/webhook-dispatcher.js';
 import { mintAndStoreWebhookSecret } from '@/core/operations/webhook-secrets.js';
 import { signWebhookDelivery } from '@/core/operations/webhook-signature.js';
+
+/**
+ * The sustained-failure window is the one number in the webhook auto-disable rules the
+ * published contract does not state, so it is a local policy with a default and a
+ * deployment switch. Nothing else in this file touches it; these cases pin the switch's
+ * contract on its own, including the states that must *not* silently become a policy.
+ */
+describe('webhook sustained-failure window switch', () => {
+  it('defaults to ten minutes when the deployment has not set a window', () => {
+    expect(DEFAULT_SUSTAINED_FAILURE_WINDOW_SECONDS).toBe(600);
+    expect(resolveWebhookSustainedFailureWindow({})).toEqual({ seconds: 600, source: 'default' });
+    expect(resolveWebhookSustainedFailureWindow({ [WEBHOOK_SUSTAINED_FAILURE_WINDOW_ENV]: '' }))
+      .toEqual({ seconds: 600, source: 'default' });
+    expect(resolveWebhookSustainedFailureWindow({ [WEBHOOK_SUSTAINED_FAILURE_WINDOW_ENV]: '   ' }))
+      .toEqual({ seconds: 600, source: 'default' });
+  });
+
+  it('takes a whole number of seconds from the deployment', () => {
+    expect(resolveWebhookSustainedFailureWindow({ [WEBHOOK_SUSTAINED_FAILURE_WINDOW_ENV]: '3600' }))
+      .toEqual({ seconds: 3600, source: 'deployment' });
+    // The bounds are inclusive; they exist to catch a typo, not to express a policy.
+    expect(resolveWebhookSustainedFailureWindow({ [WEBHOOK_SUSTAINED_FAILURE_WINDOW_ENV]: '1' }))
+      .toEqual({ seconds: 1, source: 'deployment' });
+    expect(resolveWebhookSustainedFailureWindow({ [WEBHOOK_SUSTAINED_FAILURE_WINDOW_ENV]: '2592000' }))
+      .toEqual({ seconds: 2_592_000, source: 'deployment' });
+    expect(resolveWebhookSustainedFailureWindow({ [WEBHOOK_SUSTAINED_FAILURE_WINDOW_ENV]: ' 3600 ' }))
+      .toEqual({ seconds: 3600, source: 'deployment' });
+  });
+
+  it('refuses a value it cannot honour rather than clamping it into a policy', () => {
+    for (const configured of ['0', '-5', '1.5', 'soon', '600s', '2592001', 'Infinity']) {
+      expect(resolveWebhookSustainedFailureWindow({ [WEBHOOK_SUSTAINED_FAILURE_WINDOW_ENV]: configured }))
+        .toEqual({ seconds: 600, source: 'unusable' });
+    }
+    // A window of zero would disable an endpoint on its very first failure, which is the one
+    // outcome clamping would produce, so the parsed value is refused instead.
+  });
+});
 
 describe('webhook dispatcher', () => {
   let db: Database;

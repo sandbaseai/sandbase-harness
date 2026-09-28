@@ -14,14 +14,16 @@
  * the local `{type: "webhook_event", ...}` one. Both are stated in the PR.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { join } from 'node:path';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Database } from '@/core/db/database.js';
 import { SessionManager } from '@/core/session/session-manager.js';
+import { createLogger } from '@/core/observability/logger.js';
 import { WEBHOOK_HEADERS, verifyWebhookDelivery } from '@/core/operations/webhook-signature.js';
+import { WEBHOOK_SUSTAINED_FAILURE_WINDOW_ENV } from '@/core/operations/webhook-dispatcher.js';
 import { rearmScheduledDeployments } from '@/core/operations/scheduler.js';
 import {
   composeOperations,
@@ -70,6 +72,7 @@ describe('Operations bridge (webhooks + scheduled deployments)', () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     db.close();
     rmSync(tmpDir, { recursive: true, force: true });
   });
@@ -137,6 +140,49 @@ describe('Operations bridge (webhooks + scheduled deployments)', () => {
     // ...and the due deployment ran, with no POST to `run-due`.
     const runs = db.prepare('SELECT id FROM scheduled_deployment_runs WHERE schedule_id = ?').all('sched_due');
     expect(runs.length).toBeGreaterThan(0);
+  });
+
+  it('records the auto-disable window it composes with, and the composed value is the one used', async () => {
+    // The switch is a deployment variable, so it has no write path of its own to record a
+    // change; the record the bridge writes at start-up is that change trail. It has to name
+    // the value the deliveries actually use, or it is a log line about nothing.
+    vi.stubEnv(WEBHOOK_SUSTAINED_FAILURE_WINDOW_ENV, '1');
+    const lines: string[] = [];
+    const { stopOperationsTimers } = composeOperations({
+      db,
+      sessionManager,
+      webhookSecret: WEBHOOK_SECRET,
+      fetchImpl: recordingFetch([500]),
+      intervalMs: 60_000,
+      logger: createLogger({ level: 'info', write: (line) => lines.push(line) }),
+    });
+    stopOperationsTimers();
+
+    const record = lines
+      .map((line) => JSON.parse(line) as Record<string, unknown>)
+      .find((entry) => entry.msg === 'webhook_disable_window');
+    expect(record).toMatchObject({ level: 'info', window_seconds: 1, source: 'deployment' });
+
+    // Cleared after the composition. Two seconds of uninterrupted failure is overdue against
+    // the second this composition recorded and nowhere near the ten-minute default, so the
+    // endpoint can only be disabled here if the listener carries the recorded value instead
+    // of re-reading the switch on every delivery.
+    vi.stubEnv(WEBHOOK_SUSTAINED_FAILURE_WINDOW_ENV, '');
+    db.prepare('UPDATE webhooks SET failing_since = ? WHERE id = ?')
+      .run(new Date(Date.now() - 2_000).toISOString(), 'wh_test');
+
+    await sessionManager.sendEvent('sess_a', {
+      type: 'user.message',
+      content: [{ type: 'text', text: 'streak' }],
+    } as never);
+    await sleep(30);
+
+    expect(db.prepare('SELECT status, disabled_reason FROM webhooks WHERE id = ?').get('wh_test'))
+      .toMatchObject({
+        status: 'disabled',
+        disabled_reason: 'auto-disabled after sustained delivery failures',
+      });
+    vi.unstubAllEnvs();
   });
 
   it('composes a listener and a timer, and stopping clears the timer', async () => {
