@@ -292,7 +292,7 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
     area: 'github-repository',
     id: 'github-repository-materialization',
     status: 'partial',
-    reason: 'The composition root injects the materializer and the discovered-skill path reaches the context builder: `createRuntimeSessionServices` builds a `createGithubMaterializer` default and the executor reads each discovered SKILL.md out of the sandbox. What still blocks a mounted repository is the backends: the clone is copied through the sandbox at the canonical `/workspace/<repo>` root, and the shipped providers confine every path to their own workspace root and refuse it, so a session that attaches a repository is accepted and then fails at provisioning. Not `supported` until a backend accepts the canonical mount roots.',
+    reason: 'The composition root injects the materializer, the clone is copied through the sandbox at the canonical `/workspace/<repo>` root, and the executor reads each discovered SKILL.md back out of the sandbox: on the local backend, which maps that root into its sandbox directory, an attached repository is cloned, checked out, and its skills reach the system prompt. What is still missing is the rest of the published contract: the agent is not told the mount path or the checkout it was given, and the container backends refuse the canonical root, so a session on one of those is accepted and then fails at provisioning. Not `supported` until the mount is announced to the agent and a session the selected backend cannot serve is refused when it is created.',
     contract: 'contracts/anthropic-cma/github-repository.md',
   },
   {
@@ -306,7 +306,7 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
     area: 'files',
     id: 'file-resources',
     status: 'partial',
-    reason: 'Upload, list, read, resource identity, and canonical mount-path derivation are implemented and tested, and the composition root now injects a reader built from the database and the artifact store, so an attached file is read back at provisioning. What still blocks the mount is the backends: the bytes are written to the canonical `/mnt/session/uploads` root, and the shipped providers confine every path to their own workspace root and refuse it, so a session created with file resources is accepted and then fails at provisioning. Not `supported` until a backend accepts the canonical mount roots.',
+    reason: 'Upload, list, read, resource identity, and canonical mount-path derivation are implemented and tested, and the composition root now injects a reader built from the database and the artifact store, so an attached file is written at provisioning. On the local backend, which maps the canonical `/mnt/session/uploads` root into its sandbox directory, the bytes land where the resource says they are and are readable through the same path. What is still missing is the rest of the published contract: the agent is not told the mount path it was given, and the container backends refuse the canonical root, so a session on one of those is accepted and then fails at provisioning. Not `supported` until the mount is announced to the agent and a session the selected backend cannot serve is refused when it is created.',
     contract: 'contracts/anthropic-cma/files.md',
   },
   {

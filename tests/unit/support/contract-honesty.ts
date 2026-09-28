@@ -64,10 +64,12 @@ export interface WiringRequirement {
    * These two capabilities are the case the wiring rule alone gets wrong. Both
    * symbols are injected by the composition root now, so "wired" no longer
    * implies "reachable": a session's resources are materialized through the
-   * selected sandbox backend, and the shipped backends confine every path to
-   * their own workspace root and refuse the canonical in-sandbox roots the
-   * lifecycle writes to. The runtime reaches the code and the code still cannot
-   * do the thing, which is exactly what `partial` means.
+   * selected sandbox backend. The local backend reaches the canonical in-sandbox
+   * roots the lifecycle writes to, so a session there does materialize what it
+   * declared; the container backends still refuse those roots, and the published
+   * contract asks for more than a writable mount (the agent has to be told where
+   * it landed). The runtime reaches the code and part of the claim is still
+   * unhonoured, which is exactly what `partial` means.
    *
    * Recording the blocker as a marker in the test that demonstrates it keeps the
    * status honest in both directions. The canary fails first when a backend is
@@ -84,8 +86,8 @@ export const PRODUCTION_WIRING: Readonly<Record<string, WiringRequirement>> = {
     symbol: 'githubMaterializer',
     blocker: {
       file: 'tests/integration/session-resource-wiring.test.ts',
-      symbol: 'still refuses the canonical repository mount root on the shipped providers',
-      detail: 'the shipped sandbox backends refuse the canonical /workspace mount root',
+      symbol: 'still refuses the canonical repository mount root on the container backends',
+      detail: 'the docker sandbox backend refuses the canonical /workspace mount root',
     },
   },
   'file-resources': {
@@ -93,8 +95,8 @@ export const PRODUCTION_WIRING: Readonly<Record<string, WiringRequirement>> = {
     symbol: 'fileArtifactReader',
     blocker: {
       file: 'tests/integration/session-resource-wiring.test.ts',
-      symbol: 'still refuses the canonical file mount root on the shipped providers',
-      detail: 'the shipped sandbox backends refuse the canonical /mnt/session/uploads mount root',
+      symbol: 'still refuses the canonical file mount root on the container backends',
+      detail: 'the docker and kubernetes sandbox backends refuse the canonical /mnt/session/uploads mount root',
     },
   },
   'local-delegation-subagent': {

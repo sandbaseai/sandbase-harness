@@ -12,6 +12,30 @@
  * `isolatedExecution: false` — suitable for trusted local development, not for
  * running untrusted agent output.
  *
+ * ## Canonical in-sandbox roots
+ *
+ * A session's resources are addressed by the paths this runtime publishes to the
+ * agent: a checkout under `/workspace`, and session data (uploaded files,
+ * published outputs, spilled tool output) under `/mnt/session`. A published path
+ * is a promise that the bytes are there, so the backend has to reach them at
+ * exactly that spelling.
+ *
+ * The sandbox directory stands for the sandbox's own filesystem root, and a
+ * canonical path maps into it by dropping the leading separator:
+ * `/workspace/<repo>` is `<sandbox>/workspace/<repo>` and
+ * `/mnt/session/uploads/x` is `<sandbox>/mnt/session/uploads/x`. The mapped path
+ * then goes through the same resolution and confinement as a relative input, so
+ * a canonical root is a second spelling for a path inside the sandbox rather
+ * than a wider reach: `/mnt/session/../../x` normalizes out of the sandbox and
+ * is refused exactly like `../x`.
+ *
+ * The two roots stay distinct directories rather than both aliasing the sandbox
+ * directory. One shared root would make `/workspace/uploads` and
+ * `/mnt/session/uploads` the same host directory, so a repository whose name is
+ * `uploads` or `outputs` would be written into the directory the runtime reads
+ * uploaded files from, publishes session outputs from, and spills oversized tool
+ * output into. Keeping the roots apart keeps the mapping injective.
+ *
  * Reference: OMA local-subprocess.ts
  */
 
@@ -25,7 +49,7 @@ import {
   existsSync,
   realpathSync,
 } from 'node:fs';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { dirname, join, posix, relative, resolve, sep } from 'node:path';
 import {
   sandboxCapabilities,
   type SandboxProvider,
@@ -62,6 +86,44 @@ function sandboxEnvironment(extra: Record<string, string> | undefined): Record<s
 
 function shellInvocation(command: string): { file: string; args: string[] } {
   return shellInvocationFor(command, process.platform, process.env, existsSync);
+}
+
+/**
+ * The absolute in-sandbox roots the runtime publishes to an agent.
+ *
+ * A backend maps each root into its own sandbox interior; the local backend
+ * maps them as the sandbox directory's own top-level entries (see the file
+ * header). Anything else absolute stays a refusal, so this list is the whole
+ * set of absolute paths a session can name.
+ */
+export const CANONICAL_SANDBOX_ROOTS = ['/workspace', '/mnt/session'] as const;
+
+/**
+ * Rewrite a canonical in-sandbox path as a path relative to the sandbox
+ * directory, or `undefined` when the input is not under a canonical root.
+ *
+ * The leading separator is the only thing dropped, which keeps the mapping
+ * injective and makes the result structurally identical to the relative path a
+ * shell inside the sandbox would use. The prefix test is whole-segment, so
+ * `/workspacex` is not a canonical path and stays subject to the ordinary
+ * confinement rules.
+ *
+ * A `..` segment inside a canonical path may not climb out of the root it was
+ * spelled in. `/mnt/session/../../x` normalizes to `/x`, which is a path the
+ * runtime never published, so it is refused rather than retargeted at the
+ * sandbox root. A `..` that stays inside the root is ordinary normalization:
+ * `/mnt/session/uploads/../notes.txt` is `/mnt/session/notes.txt`.
+ */
+export function canonicalRootRelativePath(inputPath: string): string | undefined {
+  for (const root of CANONICAL_SANDBOX_ROOTS) {
+    if (inputPath !== root && !inputPath.startsWith(`${root}/`)) continue;
+    const normalized = posix.normalize(inputPath);
+    if (normalized !== root && !normalized.startsWith(`${root}/`)) {
+      throw new Error(`Path escapes sandbox workspace: ${inputPath}`);
+    }
+    return normalized.slice(1);
+  }
+  return undefined;
 }
 
 /** Resolve the local command shell; parameters make platform fallback testable. */
@@ -129,7 +191,8 @@ class LocalSandboxInstance implements SandboxInstance {
   }
 
   private resolveInsideWorkDir(inputPath: string): string {
-    const fullPath = resolve(this.workDir, inputPath);
+    const canonical = this.canonicalRelativePath(inputPath);
+    const fullPath = resolve(this.workDir, canonical ?? inputPath);
     const workDir = resolve(this.workDir);
     const isInside = fullPath === workDir || fullPath.startsWith(`${workDir}${sep}`);
 
@@ -138,6 +201,24 @@ class LocalSandboxInstance implements SandboxInstance {
     }
 
     return fullPath;
+  }
+
+  /**
+   * The sandbox-relative spelling of a canonical in-sandbox path, or `undefined`.
+   *
+   * Mapping happens on the raw string, before any resolution, so the canonical
+   * form is recognized exactly as the runtime published it. A `undefined` result
+   * means the input goes to the filesystem as given, which is how every other
+   * absolute path keeps being refused by the ordinary containment check.
+   */
+  private canonicalRelativePath(inputPath: string): string | undefined {
+    // A NUL byte cannot appear in a real path, and `resolve` would carry it into
+    // a filesystem call whose error differs per platform. Refusing it here keeps
+    // the answer the same on every backend and in every method.
+    if (inputPath.includes('\0')) {
+      throw new Error('Path must not contain a NUL byte');
+    }
+    return canonicalRootRelativePath(inputPath);
   }
 
   private assertExistingPathInsideWorkDir(fullPath: string, inputPath: string): void {

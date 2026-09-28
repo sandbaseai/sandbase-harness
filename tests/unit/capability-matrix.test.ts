@@ -114,17 +114,19 @@ describe('capability matrix', () => {
     // and "present in the matrix" the same fact.
     // The materializer and the file mount are implemented and tested, and the
     // composition root injects both, so a session that declares one reaches
-    // them. The remaining blocker is the backends: they refuse the canonical
-    // in-sandbox roots the provisioning pass writes to, so the session is still
-    // accepted and then fails. `supported` here was the drift this work item
+    // them. The local backend now reaches the canonical in-sandbox roots the
+    // provisioning pass writes to, so a local session materializes its
+    // resources. What keeps the entries `partial` is the rest of the claim: the
+    // container backends still refuse those roots, and the mount path is not
+    // announced to the agent. `supported` here was the drift this work item
     // exists to remove: the helper worked and the capability was unreachable.
     expect(capabilityEntry('github-repository-materialization').status).toBe('partial');
     expect(capabilityEntry('github-repository-materialization').reason.toLowerCase())
-      .toContain('canonical mount roots');
+      .toContain('canonical `/workspace/<repo>` root');
     expect(capabilityEntry('github-repository-identity-freeze').status).toBe('supported');
     expect(capabilityEntry('file-resources').status).toBe('partial');
     expect(capabilityEntry('file-resources').reason.toLowerCase())
-      .toContain('canonical mount roots');
+      .toContain('canonical `/mnt/session/uploads` root');
     // Webhooks and scheduled deployments *are* covered by the published
     // contract (delivery behaviour, deployment lifecycle), so they are not
     // extensions and cannot be claimed as plain `supported` while the delivery

@@ -26,6 +26,9 @@ import { nanoid } from 'nanoid';
 /** Absolute sandbox directory whose contents are published as session files. */
 export const SESSION_OUTPUT_ROOT = '/mnt/session/outputs';
 
+/** The output root as it appears in a listing that is relative to the sandbox root. */
+const SESSION_OUTPUT_ROOT_RELATIVE = SESSION_OUTPUT_ROOT.replace(/^\/+/, '');
+
 /**
  * Guard against a runaway agent filling the artifact store in one pass.
  *
@@ -48,6 +51,13 @@ export interface SessionOutputFile {
  * Best-effort by design: an absent directory simply means the agent wrote no
  * deliverables, and a single unreadable file must not fail the turn that just
  * completed. A missing directory or listing error yields an empty result.
+ *
+ * An entry is read in the spelling its provider uses. The shipped providers
+ * answer with paths relative to the sandbox root
+ * (`mnt/session/outputs/report.md`), which is already the whole answer; a
+ * provider that answers with a name relative to the directory it was asked
+ * about is handled by descending into it, because a name is only known to be a
+ * file once reading it succeeds.
  *
  * Known limitation: the sandbox read interface yields text, so a binary
  * deliverable (`.zip`, image) is stored as its decoded text rather than its
@@ -74,27 +84,63 @@ export async function collectSessionOutputs(
       return;
     }
 
-    for (const entry of entries) {
-      const name = entry.replace(/[/\\]+$/, '');
-      if (name === '' || name === '.' || name === '..') continue;
-      const relative = relativeDir === '' ? name : `${relativeDir}/${name}`;
-      const absolute = `${absoluteDir}/${name}`;
+    for (const rawEntry of entries) {
+      const located = locateOutput(rawEntry, absoluteDir, relativeDir);
+      if (!located) continue;
 
-      // Probe with a read rather than a list: `listFiles` returns names only,
+      // Probe with a read rather than a list: `listFiles` returns paths only,
       // with no type bit, so a successful read is the only proof of a file.
       let content: string;
       try {
-        content = await target.readFile(absolute);
+        content = await target.readFile(located.absolute);
       } catch {
-        // Not readable as a file. Either a directory or an unreadable entry;
-        // descending into it is the only way to tell, and it is harmless for a
-        // leaf that simply cannot be read.
-        await walk(target, absolute, relative, out);
+        // Not readable as a file. A single segment may still be a directory the
+        // provider lists by name, so descend; a longer path came from the
+        // provider's own listing and has nothing below it to walk.
+        if (located.isName) await walk(target, located.absolute, located.relative, out);
         continue;
       }
-      out.push({ relativePath: relative, bytes: Buffer.from(content) });
+      out.push({ relativePath: located.relative, bytes: Buffer.from(content) });
     }
   }
+}
+
+interface LocatedOutput {
+  /** Path relative to {@link SESSION_OUTPUT_ROOT}, using `/` separators. */
+  relative: string;
+  /** Sandbox path to read the entry from. */
+  absolute: string;
+  /** The entry named one segment under `absoluteDir` rather than a full path. */
+  isName: boolean;
+}
+
+/**
+ * Interpret one listing entry as an output file.
+ *
+ * Two spellings name the same deliverable: a path relative to the sandbox root,
+ * and a name relative to the directory the provider was asked about. Both are
+ * accepted here rather than at every call site, and an entry that would name a
+ * path with a traversal segment or an empty segment is dropped — the provider is
+ * the source of these strings, and a caller-visible record keyed by them must
+ * still be a path inside the output root.
+ */
+function locateOutput(rawEntry: string, absoluteDir: string, relativeDir: string): LocatedOutput | undefined {
+  const entry = rawEntry.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '');
+  if (entry === '' || entry === '.' || entry === '..') return undefined;
+
+  const fromRoot = entry.startsWith(`${SESSION_OUTPUT_ROOT_RELATIVE}/`)
+    ? entry.slice(SESSION_OUTPUT_ROOT_RELATIVE.length + 1)
+    : undefined;
+  const relative = fromRoot ?? (relativeDir === '' ? entry : `${relativeDir}/${entry}`);
+  if (relative.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')) {
+    return undefined;
+  }
+
+  return {
+    relative,
+    absolute: fromRoot === undefined ? `${absoluteDir}/${entry}` : `${SESSION_OUTPUT_ROOT}/${fromRoot}`,
+    isName: fromRoot === undefined && !entry.includes('/'),
+  };
 }
 
 export interface RecordSessionOutputsResult {

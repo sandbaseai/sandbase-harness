@@ -138,13 +138,24 @@ export interface SandboxInstance {
   /** Execute a shell command */
   execute(command: string, options?: ExecOptions): Promise<ExecResult>;
 
-  /** Write a file (relative to working directory) */
+  /**
+   * Write a file (relative to the sandbox root, or at a canonical in-sandbox
+   * path such as `/workspace/...` or `/mnt/session/...`).
+   */
   writeFile(path: string, content: string | Buffer): Promise<void>;
 
-  /** Read a file (relative to working directory) */
+  /** Read a file (same path spelling as {@link writeFile}). */
   readFile(path: string): Promise<string>;
 
-  /** List files in a directory (relative to working directory) */
+  /**
+   * List every file under `path`, recursively.
+   *
+   * The result is relative to the sandbox root with `/` separators, so a sandbox
+   * holding `/mnt/session/outputs/report.md` answers `listFiles` for that
+   * directory with `mnt/session/outputs/report.md` — a path this interface's
+   * `readFile` accepts back. Callers must not assume bare child names: the
+   * shipped providers all answer with root-relative paths.
+   */
   listFiles(path: string): Promise<string[]>;
 
   /**

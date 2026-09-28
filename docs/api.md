@@ -588,12 +588,15 @@ A `memory_store` resource defaults to `/mnt/memory/<slugged-store-name>` when `m
 
 A `file` and a `github_repository` resource are both materialized at provisioning,
 into the canonical roots the runtime reserves for them
-(`/mnt/session/uploads/...` and `/workspace/<repo>`). The shipped in-process
-sandbox backends confine file paths to their own workspace root and refuse those
-roots, so a session that attaches either resource is accepted and then fails at
-provisioning. See [Mounting a file into a session](#mounting-a-file-into-a-session)
-for the file case and `contracts/anthropic-cma/github-repository.md` for the
-repository case; both capabilities are recorded as `partial`.
+(`/mnt/session/uploads/...` and `/workspace/<repo>`). The `local` backend maps
+those roots into the session's sandbox directory, so on a local session the
+resource is written where the resource says it is. The container backends confine
+file paths to their own workspace root and refuse those roots, so a session on one
+of them is accepted and then fails at provisioning, and the mount path is not yet
+part of the agent's instructions. See
+[Mounting a file into a session](#mounting-a-file-into-a-session) for the file
+case and `contracts/anthropic-cma/github-repository.md` for the repository case;
+both capabilities are recorded as `partial`.
 
 Only `user.*` events can be appended by clients:
 
@@ -1325,15 +1328,17 @@ existing request keeps working; it simply no longer maps to the mount root
 itself, which is why `/uploads/file.txt` and `/file.txt` both land at
 `/mnt/session/uploads/file.txt`.
 
-⚠️ The mapping is what the runtime attempts, and the write currently fails on the
-shipped in-process backends: `local` and `kubernetes` confine file paths to their
-own workspace root and reject the canonical `/mnt/session/uploads/...` target
-(`Path escapes sandbox workspace`), and `docker` rejects an absolute path
-outright. A session that attaches a file resource is therefore accepted and then
-fails at provisioning, which is why the capability is recorded as `partial` in
-`contracts/anthropic-cma/files.md`. A `self_hosted` worker is handed the path and
-decides for itself. Until a backend accepts the canonical roots, have the agent
-write into the workspace rather than relying on an attached file.
+On the `local` backend the bytes are written at that sandbox path and read back
+from it, so `LocalSandboxProvider` recognizes the canonical `/mnt/session/...`
+and `/workspace/...` roots by mapping them into the session's sandbox directory.
+The container backends still do not: `docker` rejects an absolute path outright
+and `kubernetes` rejects anything outside `/workspace`, so a session that attaches
+a file resource on one of those is accepted and then fails at provisioning
+(`Path escapes sandbox workspace`). A `self_hosted` worker is handed the path and
+decides for itself. The capability is recorded as `partial` in
+`contracts/anthropic-cma/files.md` for both reasons — the container refusal, and
+the mount path not being named in the agent's instructions yet. On `local`, the
+mount is readable; give the agent the path explicitly until it is announced.
 
 ## Session Artifacts
 

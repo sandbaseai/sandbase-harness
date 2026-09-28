@@ -4,8 +4,8 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { join } from 'node:path';
-import { existsSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { LocalSandboxProvider, shellInvocationFor } from '@/sandbox/local-provider.js';
 
@@ -245,6 +245,97 @@ describe('Local Sandbox Provider', () => {
       await expect(sandbox.listFiles('..')).rejects.toThrow(
         'Path escapes sandbox workspace',
       );
+    });
+  });
+
+  describe('canonical in-sandbox roots', () => {
+    async function sandboxFor(sessionId: string) {
+      return provider.provision(sessionId, { name: 'local', sandbox_provider: 'local' });
+    }
+
+    it('maps /workspace below the sandbox directory and reads it back', async () => {
+      const sandbox = await sandboxFor('sess_canonical_workspace');
+      await sandbox.writeFile('/workspace/widget/src/index.ts', 'export {};');
+
+      const workDir = join(tmpDir, 'sandbox', 'sess_canonical_workspace');
+      expect(readFileSync(join(workDir, 'workspace', 'widget', 'src', 'index.ts'), 'utf-8')).toBe('export {};');
+      // The spelling the runtime publishes is the spelling that reads back.
+      expect(await sandbox.readFile('/workspace/widget/src/index.ts')).toBe('export {};');
+      // A listing stays relative to the sandbox root, which is what the sandbox
+      // interface promises its callers.
+      expect(await sandbox.listFiles('/workspace')).toEqual(['workspace/widget/src/index.ts']);
+    });
+
+    it('maps /mnt/session to its own directory rather than to the workspace root', async () => {
+      const sandbox = await sandboxFor('sess_canonical_session');
+      await sandbox.writeFile('/mnt/session/uploads/notes.txt', 'uploaded');
+      await sandbox.writeFile('/workspace/notes.txt', 'checked out');
+
+      const workDir = join(tmpDir, 'sandbox', 'sess_canonical_session');
+      expect(readFileSync(join(workDir, 'mnt', 'session', 'uploads', 'notes.txt'), 'utf-8')).toBe('uploaded');
+      expect(readFileSync(join(workDir, 'workspace', 'notes.txt'), 'utf-8')).toBe('checked out');
+      expect(await sandbox.readFile('/mnt/session/uploads/notes.txt')).toBe('uploaded');
+      expect(await sandbox.readFile('/workspace/notes.txt')).toBe('checked out');
+    });
+
+    it('runs a command in a canonical working directory', async () => {
+      const sandbox = await sandboxFor('sess_canonical_cwd');
+      await sandbox.writeFile('/workspace/project/marker.txt', 'here');
+
+      const result = await sandbox.execute('node -p "process.cwd()"', { cwd: '/workspace/project' });
+      expect(result.exitCode, result.stderr).toBe(0);
+      expect(resolve(result.stdout.trim())).toBe(
+        join(tmpDir, 'sandbox', 'sess_canonical_cwd', 'workspace', 'project'),
+      );
+    });
+
+    it('refuses absolute paths outside the canonical roots', async () => {
+      const sandbox = await sandboxFor('sess_canonical_absolute');
+      await expect(sandbox.readFile('/etc/passwd')).rejects.toThrow('Path escapes sandbox workspace');
+      await expect(sandbox.writeFile('/tmp/escape.txt', 'oops')).rejects.toThrow('Path escapes sandbox workspace');
+      await expect(sandbox.listFiles('/etc')).rejects.toThrow('Path escapes sandbox workspace');
+    });
+
+    it('refuses a name that only shares a prefix with a canonical root', async () => {
+      const sandbox = await sandboxFor('sess_canonical_prefix');
+      await expect(sandbox.readFile('/workspacex/file.txt')).rejects.toThrow('Path escapes sandbox workspace');
+      await expect(sandbox.readFile('/mnt/sessionx/file.txt')).rejects.toThrow('Path escapes sandbox workspace');
+      await expect(sandbox.readFile('/mnt/session-other/file.txt')).rejects.toThrow('Path escapes sandbox workspace');
+    });
+
+    it('refuses a traversal that leaves the sandbox through a canonical root', async () => {
+      const sandbox = await sandboxFor('sess_canonical_traversal');
+      await expect(sandbox.readFile('/mnt/session/../../outside.txt')).rejects.toThrow('Path escapes sandbox workspace');
+      await expect(sandbox.readFile('/workspace/../../outside.txt')).rejects.toThrow('Path escapes sandbox workspace');
+      await expect(sandbox.execute('pwd', { cwd: '/workspace/../..' })).rejects.toThrow('Path escapes sandbox workspace');
+
+      // A `..` that stays inside the root it was spelled in is ordinary
+      // normalization rather than an escape.
+      await sandbox.writeFile('/mnt/session/notes.txt', 'inside');
+      expect(await sandbox.readFile('/mnt/session/uploads/../notes.txt')).toBe('inside');
+    });
+
+    it('refuses a NUL byte in a canonical path', async () => {
+      const sandbox = await sandboxFor('sess_canonical_nul');
+      await expect(sandbox.readFile('/mnt/session/uploads/notes\u0000.txt')).rejects.toThrow('NUL');
+      await expect(sandbox.writeFile('/workspace/notes\u0000.txt', 'oops')).rejects.toThrow('NUL');
+    });
+
+    it.skipIf(process.platform === 'win32')('refuses a canonical path that resolves through a symlink out of the sandbox', async () => {
+      const sandbox = await sandboxFor('sess_canonical_symlink');
+      const workDir = join(tmpDir, 'sandbox', 'sess_canonical_symlink');
+      const outsidePath = join(tmpDir, 'outside-canonical.txt');
+      writeFileSync(outsidePath, 'outside');
+      mkdirSync(join(workDir, 'workspace'), { recursive: true });
+      symlinkSync(outsidePath, join(workDir, 'workspace', 'link.txt'));
+
+      await expect(sandbox.writeFile('/workspace/link.txt', 'oops')).rejects.toThrow('Path escapes sandbox workspace');
+      expect(readFileSync(outsidePath, 'utf-8')).toBe('outside');
+    });
+
+    it.skipIf(process.platform !== 'win32')('refuses a Windows drive path', async () => {
+      const sandbox = await sandboxFor('sess_canonical_drive');
+      await expect(sandbox.readFile('C:\\Windows\\win.ini')).rejects.toThrow('Path escapes sandbox workspace');
     });
   });
 

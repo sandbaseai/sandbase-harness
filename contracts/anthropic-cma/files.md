@@ -1,9 +1,10 @@
 # CMA Contract — files
 
 Contract area: `/v1/files` and file session resources.
-Status: `partial` — the Files API, the mount-path form, and the reader the
-provisioning pass calls are implemented, but the shipped sandbox backends refuse
-the canonical mount root, so an attached file still cannot be written. See §4.
+Status: `partial` — the Files API, the mount-path form, the reader the
+provisioning pass calls, and the write itself on the local backend are
+implemented; the container backends still refuse the canonical mount root, and
+the agent is not yet told where the mount landed. See §4.
 Source: `src/core/session/file-mount-path.ts`,
 `src/api/routes/session-resources.ts`, `src/core/session/session-resources.ts`,
 `src/core/runtime/session-runtime.ts`, `src/api/routes/files.ts`.
@@ -58,7 +59,7 @@ Session file resources:
   differs from `memory_store` (creation-only) and `github_repository` (token
   rotation only).
 
-Mounting is composed and still blocked by the backends:
+Mounting is composed and blocked by the container backends:
 
 - `SandboxLifecycle.materializeFileResources` writes each attached file into the
   sandbox by calling an injected `fileArtifactReader`. The composition root
@@ -70,15 +71,16 @@ Mounting is composed and still blocked by the backends:
   artifact that is on disk — so a resource the API accepted cannot fail here for
   a different reason, and an archived upload or a session artifact cannot be
   mounted through this path.
-- What still fails is the write itself. The bytes go to the canonical
-  `/mnt/session/uploads` root, and the shipped sandbox backends confine every
-  path to their own workspace root: `LocalSandboxProvider` (and Kubernetes for
-  the `/mnt/...` root) answer `Path escapes sandbox workspace`. A session created
-  with a file resource therefore succeeds and then fails at provisioning, rather
-  than failing at creation with a missing dependency named. The entry stays
-  `partial` for that reason, and
-  `tests/integration/session-resource-wiring.test.ts` pins the refusal so that
-  fixing a backend forces the status to move.
+- The write lands at the canonical `/mnt/session/uploads` root. The local backend
+  maps that root into its sandbox directory, so on a local session the bytes are
+  written where the resource says they are and read back through the same path
+  (`LocalSandboxProvider`; see `tests/integration/local-canonical-roots.test.ts`).
+  The container backends do not: `docker` refuses an absolute path at all and
+  Kubernetes refuses anything outside `/workspace`, so a session on one of those
+  is accepted and then fails at provisioning. The entry stays `partial` for that
+  reason, and because the agent is not told the mount path it was given;
+  `tests/integration/session-resource-wiring.test.ts` pins the container refusal
+  so that fixing one forces the status to move.
 
 ## 3. Alignment
 
@@ -96,7 +98,8 @@ artifact.
 | Mount root | SandBase mounts under its own sandbox root layout. The published contract specifies a logical path, not a host directory. |
 | What a scoped listing contains | `scope_id` selects files whose recorded session is that session. A file created directly through `POST /v1/files` records no session, so it appears in the unscoped listing and in **no** scoped one — it is not attributed to a session that did not create it. The published contract describes session outputs; it does not state where a session-less upload should appear, so the choice is to leave it unattributed rather than guess an owner. |
 | The listing excludes `role = 'artifact'` | Rows written with `role = 'artifact'` are outside this listing in both scoped and unscoped form. That predates the scope parameter and is unchanged by it; recorded here because a caller reasoning about "every file for this session" should know the listing is not the whole table. |
-| The shipped backends refuse the mount root | The mount path is derived and validated, and the reader is wired, but the write lands on `/mnt/session/uploads`, which the shipped providers reject as outside their workspace root. Recorded as `partial` rather than `supported` until a backend accepts the canonical roots. |
+| The container backends refuse the mount root | The mount path is derived and validated, the reader is wired, and the local backend writes the bytes at `/mnt/session/uploads`, but `docker` and Kubernetes reject that root as outside their own workspace root. Recorded as `partial` rather than `supported` until every backend a session can select either serves the canonical root or refuses the resource at creation. |
+| The agent is not told the mount path | The published contract has the file mounted so the agent can read it. The bytes are readable at the canonical path, but the path is not named in the system prompt, so an agent that does not guess it will not open the file. Recorded as `partial` while the announcement is missing. |
 
 ## 5. Reason for the difference
 
@@ -111,8 +114,10 @@ artifact.
   root is where the host-facing default belongs, because that is the only layer
   holding the workspace directory, the database, and the artifact store at once.
   It is wired there now rather than in the lifecycle, and the entry stays
-  `partial` only because the mount still cannot be written on the shipped
-  backends.
+  `partial` because the mount reaches the agent in two halves — the bytes at the
+  canonical path, and the path named in its instructions. The first half holds on
+  the local backend; the container backends still refuse the path, and the second
+  half is missing on every backend.
 
 ## 6. Corresponding tests
 
@@ -132,9 +137,19 @@ artifact.
   composition root instead of a hand-built lifecycle: an uploaded file's bytes
   reach the sandbox at `/mnt/session/uploads/notes/input.txt` for a session
   created by `POST /v1/sessions` and by `POST /v1/runs`, a resource whose row is
-  gone is reported as `File not found` by the default reader, and the shipped
+  gone is reported as `File not found` by the default reader, and the container
   backends' refusal of the canonical root is pinned so that fixing one forces the
   status to move.
+- `tests/integration/local-canonical-roots.test.ts` — the same paths on the real
+  `LocalSandboxProvider`: an attached file is readable at
+  `/mnt/session/uploads/notes/input.txt`, a file written under
+  `/mnt/session/outputs` is collected and published through the scoped Files API,
+  and a spilled tool output is readable at the canonical path the model was given.
+- `tests/unit/local-sandbox.test.ts` — the path mapping itself: `/workspace` and
+  `/mnt/session` resolve below the sandbox directory, a command runs in a
+  canonical working directory, and another absolute path, a prefix-sharing name,
+  a traversal out of a root, a NUL byte, and a symlink out of the sandbox are all
+  refused.
 - `tests/unit/file-artifact-reader.test.ts` — the default reader's row
   semantics: the bytes the Files API stored, an archived file, a row whose
   artifact is gone, and a session artifact, each answered as the resource
@@ -151,9 +166,10 @@ artifact.
 
 `partial` — file upload/list/read, mount path derivation, resource identity, the
 running-session resource lifecycle, and the reader the provisioning pass calls
-are implemented and covered by tests. It is not `supported` because the write
-itself is refused: the bytes go to the canonical `/mnt/session/uploads` root and
-the shipped sandbox backends confine every path to their own workspace root, so a
-session that attaches a file is accepted and then fails at provisioning. The
-mount-path entry is `supported` on its own, because path derivation and
-validation are complete and tested.
+are implemented and covered by tests, and on the local backend the bytes are
+written at the canonical `/mnt/session/uploads` root and read back from it. It is
+not `supported` for two reasons: the container backends still refuse that root, so
+a session that attaches a file on one of them is accepted and then fails at
+provisioning; and the agent is never told the mount path, so the mount is
+readable but not announced. The mount-path entry is `supported` on its own,
+because path derivation and validation are complete and tested.
