@@ -1531,14 +1531,21 @@ side effect, and the work is still wanted. An unusable `--port`, `--interval-ms`
 unparseable interval would otherwise become a poll loop with no delay at all.
 
 The server waits on a work item with a bound of its own, and when that bound passes
-the failure carries a code rather than only a message, because the three ways it can
-end call for opposite responses. `work_queue_timeout` means the item was still
-`pending`, so no worker ever took it and submitting the intent again is safe.
-`work_outcome_unknown` means an executor held it and the lease lapsed with no result,
-so the effect may already have happened on the operator's machine and a blind replay
-can duplicate it. `work_lease_lost` means the session ended and stopped the work, so
-no result is wanted at all. A stop is reported ahead of the item's state, because an
-item the session stopped while nobody held it is still `pending`, and reporting that
+the failure carries a code rather than only a message, because the ways it can end
+call for opposite responses. `work_queue_timeout` means nothing ever committed to
+running the item, so nothing has run and submitting the intent again is safe:
+either the item was still `pending` and no worker ever took it, or a worker claimed
+it and was abandoned before any executor accepted it. The abandonment is part of
+reporting that reason rather than a detail beside it - a claimed row is claimable
+again the moment its lease passes, so a caller told to resubmit while the stale item
+stayed live would have both executed. An abandoned item can never be handed out or
+accepted again; a refusal to accept it answers `work_lease_lost`, and its holder may
+still report a result that did happen.
+`work_outcome_unknown` means an executor accepted the item and the lease lapsed with
+no result, so the effect may already have happened on the operator's machine and a
+blind replay can duplicate it. `work_lease_lost` means the session ended and stopped
+the work, so no result is wanted at all. A stop is reported ahead of the item's state,
+because an item the session stopped while nobody held it is still `pending`, and reporting that
 as "submit it again" would send work back to a session that has ended. A result
 reported before the deadline still resolves the wait, stopped work included: the
 marker says the result is not wanted, not that the effect did not happen.

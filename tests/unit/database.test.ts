@@ -219,6 +219,35 @@ describe('Database migrations', () => {
     upgraded.close();
   });
 
+  it('adds the work-item abandonment marker to a fresh workspace and to an existing one', () => {
+    const fresh = new Database(join(tmpDir, 'fresh-abandon.db'));
+    fresh.runMigrations();
+    expect(columnsOf(fresh, 'work_items')).toContain('abandoned_at');
+    expect(fresh.prepare('SELECT name FROM _migrations WHERE version = 47').get()).toEqual({
+      name: '047_work_item_abandon',
+    });
+    fresh.close();
+
+    // An absent marker must read as "no wait gave up on this". An earlier build could not
+    // abandon anything, so back-filling one would claim a decision that was never made -
+    // and a reader checking whether the runtime had given up on a row would be told yes.
+    const upgradedPath = join(tmpDir, 'upgraded-abandon.db');
+    const upgraded = new Database(upgradedPath);
+    upgraded.runMigrations(MIGRATIONS.filter((migration) => migration.version <= 46));
+    expect(columnsOf(upgraded, 'work_items')).not.toContain('abandoned_at');
+    upgraded.exec(`
+      INSERT INTO work_items (id, session_id, kind, payload, status, claimed_by, claimed_at)
+      VALUES ('work_b', 'sess_b', 'exec', '{"command":"echo hi"}', 'claimed', 'w1', datetime('now'))
+    `);
+
+    upgraded.runMigrations();
+    expect(columnsOf(upgraded, 'work_items')).toContain('abandoned_at');
+    expect(
+      upgraded.prepare('SELECT status, abandoned_at FROM work_items WHERE id = ?').get('work_b'),
+    ).toEqual({ status: 'claimed', abandoned_at: null });
+    upgraded.close();
+  });
+
   it('transaction rolls back on error', () => {
     const db = new Database(dbPath);
     db.runMigrations();

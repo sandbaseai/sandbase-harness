@@ -112,14 +112,18 @@ describe('WorkQueue', () => {
     // a log line and a code answer different questions.
     await expect(queue.await(unclaimed, { timeoutMs: 60, pollMs: 10 })).rejects.toThrow(/timed out/);
 
-    // Claimed and never reported. The item is still `claimed` afterwards on purpose - the
-    // work is alive for whoever holds it - and the reason says only that this caller no
-    // longer knows the outcome, which is why it must not be replayed blindly.
-    const abandoned = queue.enqueue('sess_abandoned', 'exec', { command: 'maybe ran' });
-    expect(queue.claim('w1', 'sess_abandoned')!.id).toBe(abandoned);
-    await expect(queue.await(abandoned, { timeoutMs: 60, pollMs: 10 }))
+    // Claimed, **accepted**, and never reported. The item is still `claimed` afterwards on
+    // purpose - the work is alive for whoever holds it - and the reason says only that this
+    // caller no longer knows the outcome, which is why it must not be replayed blindly.
+    // Acceptance is what makes it unknown rather than safe: it is the executor's own
+    // statement that it was about to start.
+    const unknown = queue.enqueue('sess_unknown', 'exec', { command: 'maybe ran' });
+    expect(queue.claim('w1', 'sess_unknown')!.id).toBe(unknown);
+    expect(queue.accept(unknown, 'w1')).toBe('accepted');
+    await expect(queue.await(unknown, { timeoutMs: 60, pollMs: 10 }))
       .rejects.toMatchObject({ code: 'work_outcome_unknown' });
-    expect(queue.get(abandoned)!.status).toBe('claimed');
+    expect(queue.get(unknown)!.status).toBe('claimed');
+    expect(queue.get(unknown)!.abandonedAt).toBeNull();
 
     // Stopped: the session ended and the work is not wanted at all. This is the fact a
     // refused renewal already reports, so it reuses that engine-neutral code rather than
@@ -129,6 +133,75 @@ describe('WorkQueue', () => {
     expect(queue.stop('sess_stopped')).toBe(1);
     await expect(queue.await(stopped, { timeoutMs: 60, pollMs: 10 }))
       .rejects.toMatchObject({ code: 'work_lease_lost' });
+  });
+
+  it('abandons work no executor accepted before it calls the retry safe', async () => {
+    // The retryable reason is a promise, and a promise about work that is still claimable
+    // would be a lie with a side effect: the caller resubmits, a new intent is enqueued,
+    // and the stale item is *also* still in the queue - so the effect happens twice on the
+    // operator's machine. The wait therefore has to make its own promise true, and the two
+    // halves are one step rather than two.
+    const id = queue.enqueue('sess_gaveup', 'exec', { command: 'never started' });
+    expect(queue.claim('w1', 'sess_gaveup')!.id).toBe(id);
+    expect(queue.get(id)!.acceptedAt).toBeNull();
+
+    await expect(queue.await(id, { timeoutMs: 60, pollMs: 10 }))
+      .rejects.toMatchObject({ code: 'work_queue_timeout' });
+
+    // The promise, and the action behind it. `stoppedAt` is untouched, because the session
+    // is still alive and still owed an answer - it is the wait that gave up, not the work
+    // that became unwanted.
+    const row = queue.get(id)!;
+    expect(row.abandonedAt).toBeTruthy();
+    expect(row.stoppedAt).toBeNull();
+    expect(row.status).toBe('claimed');
+
+    // Both doors are shut, and they are the two doors that matter. Handing the stale item
+    // to a worker is exactly the duplicate the abandonment exists to prevent; accepting it
+    // would authorize the start the wait just reported as never happening.
+    expect(queue.claim('w2', 'sess_gaveup')).toBeNull();
+    expect(queue.accept(id, 'w1')).toBe('work_lease_lost');
+    expect(queue.heartbeat(id, 'w1')).toBe('work_lease_lost');
+
+    // And a second wait on it repeats the safe reason rather than escalating to the unknown
+    // one: the work is still provably not done, and it can no longer accidentally start.
+    await expect(queue.await(id, { timeoutMs: 60, pollMs: 10 }))
+      .rejects.toMatchObject({ code: 'work_queue_timeout' });
+
+    // Abandoning does not deny the holder a result that did happen - the same distinction
+    // the session-driven stop makes. It says the runtime no longer wants the work.
+    expect(queue.complete(id, 'w1', { exitCode: 0, stdout: 'finished anyway' })).toBe('completed');
+    expect(queue.get(id)!.result).toMatchObject({ stdout: 'finished anyway' });
+  });
+
+  it('abandons only work nobody accepted, leaving a claimed start to its holder', async () => {
+    // The abandonment is one guarded write, so the holder accepting between the wait
+    // reading the row and writing it is a fence rather than a check the write can slip
+    // past. This drives the guard directly on the arm that wins, because the race itself is
+    // a race: an item the executor already accepted may be running right now, and marking
+    // it would tell a caller that work which is about to happen did not.
+    const accepted = queue.enqueue('sess_started', 'exec', { command: 'running' });
+    expect(queue.claim('w1', 'sess_started')!.id).toBe(accepted);
+    expect(queue.accept(accepted, 'w1')).toBe('accepted');
+    expect(queue.abandon(accepted)).toBe(false);
+    expect(queue.get(accepted)!.abandonedAt).toBeNull();
+    // Untouched, so its holder still holds it and may still report.
+    expect(queue.get(accepted)!.acceptedAt).toBeTruthy();
+    expect(queue.heartbeat(accepted, 'w1')).toBe('renewed');
+
+    // Work that was never claimed is not this method's business either: there is no claim
+    // to give up on, and `pending` already answers the caller honestly.
+    const pending = queue.enqueue('sess_queued', 'exec', { command: 'waiting' });
+    expect(queue.abandon(pending)).toBe(false);
+    expect(queue.get(pending)!.abandonedAt).toBeNull();
+    expect(queue.get(pending)!.status).toBe('pending');
+
+    // Nor work the session already stopped, which is a different fact with its own code.
+    const stopped = queue.enqueue('sess_over', 'exec', { command: 'unwanted' });
+    expect(queue.claim('w3', 'sess_over')!.id).toBe(stopped);
+    expect(queue.stop('sess_over')).toBe(1);
+    expect(queue.abandon(stopped)).toBe(false);
+    expect(queue.abandon('work_missing')).toBe(false);
   });
 
   it('classifies a stopped item by the stop, not by the state it was in', async () => {

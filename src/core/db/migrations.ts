@@ -1013,6 +1013,30 @@ const M046_WORK_ITEM_ACCEPT = `
 ALTER TABLE work_items ADD COLUMN accepted_at TEXT;
 `;
 
+/**
+ * Work a bounded wait gave up on before any executor committed to running it.
+ *
+ * A row nobody ever accepted is one where the effect provably did not happen: accept is
+ * the last thing a worker does before it starts, so an unaccepted item was never started.
+ * That makes it safe to tell a waiting caller to submit the intent again - but only if
+ * the old intent is dead first. The row is still claimable while the wait runs, so a
+ * caller that resubmitted while it stayed claimable would have both the stale item and
+ * the new one executed.
+ *
+ * Deliberately a second column rather than a second meaning for `stopped_at`. A stop is
+ * the session's decision that it no longer wants the work; this is the runtime giving up
+ * on a wait, with the session still alive and still owed an answer. The two agree on what
+ * must not happen next - the item must not be handed out - and disagree on everything a
+ * reader asks afterwards, so one column holding both would make the difference unreadable
+ * exactly where it matters.
+ *
+ * Existing rows stay NULL: an earlier build could not abandon anything, so an absent
+ * marker must read as "no wait gave up on this" rather than as an unknown.
+ */
+const M047_WORK_ITEM_ABANDON = `
+ALTER TABLE work_items ADD COLUMN abandoned_at TEXT;
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: '001_initial', sql: M001_INITIAL },
   { version: 2, name: '002_memory', sql: M002_MEMORY },
@@ -1060,4 +1084,5 @@ export const MIGRATIONS: Migration[] = [
   { version: 44, name: '044_webhook_failing_since', sql: M044_WEBHOOK_FAILING_SINCE },
   { version: 45, name: '045_work_item_stop', sql: M045_WORK_ITEM_STOP },
   { version: 46, name: '046_work_item_accept', sql: M046_WORK_ITEM_ACCEPT },
+  { version: 47, name: '047_work_item_abandon', sql: M047_WORK_ITEM_ABANDON },
 ];

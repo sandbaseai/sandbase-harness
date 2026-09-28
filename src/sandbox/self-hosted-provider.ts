@@ -51,6 +51,14 @@ export interface WorkItem {
    * it, because acceptance belongs to the holder that asked for it.
    */
   acceptedAt?: string | null;
+  /**
+   * When a bounded wait gave up on this item before any executor committed to running it.
+   * An abandoned item is never handed out and never accepted, which is what makes the
+   * "nothing ran, submit the intent again" it reports to its caller true rather than only
+   * plausible. Distinct from `stoppedAt`: the session here is still alive and still owed
+   * an answer - it is the wait that gave up, not the work that became unwanted.
+   */
+  abandonedAt?: string | null;
 }
 
 export type WorkCompletionResult = 'completed' | 'not_found' | 'not_claimed_by_worker';
@@ -235,9 +243,13 @@ export class WorkQueue {
     // is NULL and every comparison against it is NULL, which reads as "nothing is ever
     // reclaimable". Seconds, with a fractional part, is the modifier that exists.
     const leaseModifier = `-${this.leaseMs / 1000} seconds`;
-    // The row's own condition: unstopped, and either pending or a claim whose lease ran out.
+    // The row's own condition: neither stopped nor abandoned, and either pending or a
+    // claim whose lease ran out. Abandonment is excluded here and not only at the accept
+    // step, because the whole point of abandoning is that the row must never be handed out
+    // again - a marker the selection ignored would leave the stale intent claimable and the
+    // caller's resubmission running alongside it.
     const rowClaimable = (prefix: string): string =>
-      `(${prefix}stopped_at IS NULL AND (${prefix}status = 'pending' OR (${prefix}status = 'claimed' AND ${prefix}claimed_at IS NOT NULL AND ${prefix}claimed_at <= datetime('now', ?))))`;
+      `(${prefix}stopped_at IS NULL AND ${prefix}abandoned_at IS NULL AND (${prefix}status = 'pending' OR (${prefix}status = 'claimed' AND ${prefix}claimed_at IS NOT NULL AND ${prefix}claimed_at <= datetime('now', ?))))`;
     // The session's condition, as a correlated subquery so one fragment serves the
     // scoped and unscoped selections and the guarded update alike. `IS NULL` keeps work
     // for an unknown session id claimable: an id with no row is a caller's mistake
@@ -327,7 +339,7 @@ export class WorkQueue {
     // than a check the write can slip past: a stop that lands while this statement is
     // in flight simply leaves the row un-renewed instead of being overwritten by it.
     const update = this.db
-      .prepare("UPDATE work_items SET claimed_at = datetime('now') WHERE id = ? AND status = 'claimed' AND claimed_by = ? AND stopped_at IS NULL")
+      .prepare("UPDATE work_items SET claimed_at = datetime('now') WHERE id = ? AND status = 'claimed' AND claimed_by = ? AND stopped_at IS NULL AND abandoned_at IS NULL")
       .run(id, workerId) as { changes: number };
     if (update.changes === 1) return 'renewed';
     // The failed write is classified afterwards, and the work-level fact comes first:
@@ -335,7 +347,40 @@ export class WorkQueue {
     const row = this.get(id);
     if (!row) return 'not_found';
     if (row.stoppedAt) return 'work_lease_lost';
+    // Abandoned work is refused the same way, and it is the same instruction: a wait gave
+    // up on this item and told its caller to submit the intent again, so keeping the old
+    // claim alive would be keeping alive the copy that was just promised dead.
+    if (row.abandonedAt) return 'work_lease_lost';
     return 'not_claimed_by_worker';
+  }
+
+  /**
+   * Give up on work that no executor ever committed to running, so it can never be handed
+   * out or accepted.
+   *
+   * This is the action behind the promise a bounded wait makes. A claimed row with no
+   * `accepted_at` proves the effect did not happen - accept is the last thing a worker does
+   * before it starts - so the honest reason for a timeout on it is the retryable one. But
+   * the row is still claimable while its lease lives, so reporting "submit the intent
+   * again" without marking it would have the caller's resubmission and the stale item both
+   * executed: the same double execution the accept step exists to prevent, arriving by a
+   * different route and caused by the promise itself.
+   *
+   * The three conditions are one conditional UPDATE, so each is a fence rather than a check
+   * the write can slip past. `accepted_at IS NULL` is the one that matters: the holder may
+   * accept in the gap between the wait reading the row and writing it, and if it does, the
+   * effect may now happen and this must not claim otherwise. Returns false in that case, so
+   * the caller can report the unknown outcome instead of the safe one.
+   */
+  abandon(id: string): boolean {
+    const res = this.db
+      .prepare(
+        `UPDATE work_items SET abandoned_at = datetime('now')
+         WHERE id = ? AND status = 'claimed' AND stopped_at IS NULL
+           AND abandoned_at IS NULL AND accepted_at IS NULL`,
+      )
+      .run(id) as { changes: number };
+    return res.changes === 1;
   }
 
   /**
@@ -370,6 +415,7 @@ export class WorkQueue {
       .prepare(
         `UPDATE work_items SET accepted_at = datetime('now')
          WHERE id = ? AND status = 'claimed' AND claimed_by = ? AND stopped_at IS NULL
+           AND abandoned_at IS NULL
            AND claimed_at IS NOT NULL AND claimed_at > datetime('now', ?)`,
       )
       .run(id, workerId, leaseModifier) as { changes: number };
@@ -381,6 +427,11 @@ export class WorkQueue {
     const row = this.get(id);
     if (!row) return 'not_found';
     if (row.stoppedAt) return 'work_lease_lost';
+    // An abandoned item is refused with the same instruction as a stopped one, and for a
+    // related reason: the runtime has given up on it, so nothing is waiting for it to run.
+    // The difference a reader cares about is elsewhere - the session is still alive - but
+    // the worker's answer is the same, do not run it.
+    if (row.abandonedAt) return 'work_lease_lost';
     if (row.status === 'claimed' && row.claimedBy === workerId) {
       // The holder, with a lease that has run out. The message distinguishes this from a
       // stop; the code does not, because the instruction to the worker is identical.
@@ -484,16 +535,28 @@ export class WorkQueue {
   /**
    * Why a bounded wait ended without a result, from what the row records.
    *
-   * The order of these three checks is the decision, not an accident of writing:
+   * The order of these checks is the decision, not an accident of writing:
    *
    * 1. **stopped first**, because a stopped item that was never claimed is still
    *    `pending`, and reporting it as "no worker ever took it, submit again" would
    *    invite a caller to resubmit work for a session that has already ended. The stop
    *    is the cause; `pending` is only the state it was in when the cause landed.
-   * 2. **`pending` next**, and this is the one case that is provably safe to replay:
-   *    a row becomes `claimed` when it is handed out and nothing ever moves it back, so
-   *    `pending` at the deadline means no executor has seen it.
-   * 3. **everything else is unknown**, including a row that cannot be read at all.
+   * 2. **abandoned next**, and this is not a special case of the one below it. A row an
+   *    earlier wait gave up on is still `claimed` and still unaccepted, so it would enter
+   *    the branch that tries to abandon it, fail - there is nothing left to mark - and
+   *    fall through to the unknown outcome for a second waiter. That would hand two
+   *    callers opposite answers about the same provably-unstarted work, and the second one
+   *    is worse than inconsistent: it is false, because the item can no longer start.
+   * 3. **`pending` next**, and this is one of the two cases that are provably safe to
+   *    replay: a row becomes `claimed` when it is handed out and nothing ever moves it
+   *    back, so `pending` at the deadline means no executor has seen it.
+   * 4. **claimed but never accepted**, which the accept step makes knowable: the effect
+   *    provably did not happen, because accepting is the last thing a worker does before
+   *    it starts. Knowing it is not enough to say it - the row is still claimable, so the
+   *    wait **abandons** it, and only a successful abandonment makes the retryable reason
+   *    true. Losing that race means the holder accepted and may now run the item, so the
+   *    answer has to be the unknown one and the row must have been left alone.
+   * 5. **everything else is unknown**, including a row that cannot be read at all.
    *    Absence proves nothing about whether the work ran, and of the two ways to be
    *    wrong, replaying an effect that already happened is the expensive one.
    */
@@ -504,15 +567,33 @@ export class WorkQueue {
         `work item ${id} timed out and was stopped: the session that queued it has ended`,
       );
     }
+    if (item?.abandonedAt) {
+      return new WorkWaitTimeoutError(
+        WORK_QUEUE_TIMEOUT_CODE,
+        `work item ${id} timed out and has been abandoned: nothing ran, and submitting the intent again is safe`,
+      );
+    }
     if (item?.status === 'pending') {
       return new WorkWaitTimeoutError(
         WORK_QUEUE_TIMEOUT_CODE,
         `work item ${id} timed out without an executor: no worker ever claimed it`,
       );
     }
+    if (item?.status === 'claimed' && !item.acceptedAt) {
+      if (this.abandon(id)) {
+        return new WorkWaitTimeoutError(
+          WORK_QUEUE_TIMEOUT_CODE,
+          `work item ${id} timed out after it was claimed but before any executor accepted it, and has been abandoned: nothing ran, and submitting the intent again is safe`,
+        );
+      }
+      return new WorkWaitTimeoutError(
+        WORK_OUTCOME_UNKNOWN_CODE,
+        `work item ${id} timed out as its executor accepted it: the outcome is unknown and must not be replayed`,
+      );
+    }
     return new WorkWaitTimeoutError(
       WORK_OUTCOME_UNKNOWN_CODE,
-      `work item ${id} timed out after it was claimed: the outcome is unknown and must not be replayed`,
+      `work item ${id} timed out after it was accepted: the outcome is unknown and must not be replayed`,
     );
   }
 }
@@ -598,6 +679,7 @@ interface RawWorkItem {
   completed_at: string | null;
   stopped_at: string | null;
   accepted_at: string | null;
+  abandoned_at: string | null;
 }
 
 function toWorkItem(r: RawWorkItem): WorkItem {
@@ -614,6 +696,7 @@ function toWorkItem(r: RawWorkItem): WorkItem {
     completedAt: r.completed_at ?? null,
     stoppedAt: r.stopped_at ?? null,
     acceptedAt: r.accepted_at ?? null,
+    abandonedAt: r.abandoned_at ?? null,
   };
 }
 

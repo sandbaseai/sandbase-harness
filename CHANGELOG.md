@@ -3,6 +3,24 @@
 ## Unreleased
 
 ### Changed
+- A bounded wait on a self-hosted work item no longer promises that submitting the intent
+  again is safe while the work it gave up on is still runnable. `WorkQueue.await` reported
+  `work_outcome_unknown` for every claimed row and the retryable `work_queue_timeout` only
+  for a row still `pending`. The accept step added in the previous change makes a third case
+  knowable - a row a worker claimed but never accepted is one where the effect provably did
+  not happen, because accepting is the last thing a worker does before it starts - but
+  knowing it is not enough to say it: the row is claimable again the moment its lease
+  passes, so a caller told to resubmit would have both the stale item and the new one
+  executed. The wait now abandons such an item (`abandoned_at`, migration 047) before
+  reporting the retryable reason, which makes the promise true rather than merely
+  plausible. Abandoned work is never handed out or accepted again - a refused `accept` or
+  `heartbeat` answers the engine-neutral `work_lease_lost`, and a claim is handed nothing
+  older - while its holder may still report a result that did happen. The abandonment is
+  one guarded write fenced on `accepted_at IS NULL`, so a holder that accepts in the gap
+  between the wait reading the row and writing it keeps its claim and the wait reports
+  `work_outcome_unknown` instead. A second wait on already-abandoned work repeats the
+  retryable reason rather than escalating to the unknown one, because the work is still
+  provably unstarted and can no longer accidentally start.
 - Self-hosted workers now confirm a claimed work item with `POST /v1/x/worker/accept`
   immediately before running it, and only a success authorizes execution. A claim is a
   lease on running an item rather than ownership of it: the row becomes claimable again
