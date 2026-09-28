@@ -89,6 +89,24 @@ git worktree add .worktrees/<feature-name> -b feat/<feature-name> origin/main
   number after updating from `main` and revalidates fresh and existing
   workspaces.
 
+### After a pull request merges
+
+Clean up as part of the merge, not later:
+
+- Delete the topic branch on the remote that hosts it. `gh pr merge --squash
+  --delete-branch` does this at merge time, including for a branch on a fork
+  you own; the repository's automatic head-branch deletion covers only
+  branches in the repository itself. The pull request keeps the commits and
+  the diff, and the branch can be restored from it if it is needed again.
+- Remove the worktree and the local branch:
+  `git worktree remove .worktrees/<feature-name>`, then
+  `git branch -D <branch>`. `-D` is required because a squash merge does not
+  make the topic branch an ancestor of `main`, so `-d` refuses it.
+- Keep a branch only while it is the base of another open pull request, or
+  when its pull request was closed unmerged and will be resumed; say which in
+  the pull request.
+- Never delete `main` or a release branch.
+
 ## Review and pull requests
 
 Choose the review method based on scope and risk. Self-review with suitable

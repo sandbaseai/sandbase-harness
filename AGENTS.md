@@ -46,6 +46,9 @@ Before choosing work:
    unrelated changes, resolve that first — do not layer a new topic on top.
 4. Create a worktree for the topic. See
    [`CONTRIBUTING.md#branch-and-worktree-workflow`](./CONTRIBUTING.md#branch-and-worktree-workflow).
+5. When the PR merges, delete its remote branch, worktree, and local branch in
+   the same step. See
+   [`CONTRIBUTING.md#after-a-pull-request-merges`](./CONTRIBUTING.md#after-a-pull-request-merges).
 
 ## Non-negotiables
 
