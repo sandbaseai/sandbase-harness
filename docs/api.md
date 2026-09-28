@@ -1526,7 +1526,19 @@ running work nobody is waiting for, and the renewal is the only way the stop rea
 the process holding the command. Every other renewal failure, including a transport
 error and the refusal that means the item belongs to another worker, is only a
 suspicion and leaves the item running: a command stopped halfway leaves a half-applied
-side effect, and the work is still wanted. Before running an item the worker asks the
+side effect, and the work is still wanted. Each renewal is bounded by
+`--heartbeat-timeout-ms` (default `10000`, half the renewal interval), and here the
+bound is worth more than it looks: the renewal is issued from a timer, so a runtime
+that accepted the connection and never answered did not park the worker once but
+again on **every tick**, and no tick ever reached the warning, because a promise that
+never settles never reaches the `catch` that prints one. With the bound the worker
+warns with the machine-readable `work_heartbeat_unconfirmed` and the bound it waited,
+so "the runtime is not answering my renewals" is readable directly instead of
+surfacing late as a claim that quietly lapsed and an item the queue moved to
+`unknown`. It deliberately does not change the rule above - a timeout is the same
+kind of suspicion as a transport error, so the item **keeps running**, and
+`work_lease_lost` remains the only renewal answer that aborts one. Before running an
+item the worker asks the
 runtime to confirm its claim with `POST /v1/x/worker/accept`, and waits at most
 `--ack-timeout-ms` (default `10000`) for the answer. A refusal means the item is not
 run and not reported; so does an answer that never arrives, because an unconfirmed
@@ -1535,7 +1547,8 @@ differently on purpose - a refusal names the status the runtime returned, while 
 expired bound fails with the machine-readable `work_accept_unconfirmed` and the
 bound it waited - since a runtime that refused and a runtime that went quiet need
 different diagnoses. In both cases the worker warns, runs nothing, reports nothing,
-and keeps polling. An unusable `--port`, `--interval-ms`, `--heartbeat-ms` or
+and keeps polling. An unusable `--port`, `--interval-ms`, `--heartbeat-ms`,
+`--heartbeat-timeout-ms` or
 `--ack-timeout-ms` stops the worker at startup with a message naming the option: an
 unparseable interval would otherwise become a poll loop with no delay at all.
 

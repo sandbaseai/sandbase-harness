@@ -5,7 +5,7 @@
  * `--workdir`, and reports each result to `POST /v1/x/worker/complete`. The server
  * never runs them — this process does.
  *
- * Seven invariants this file has to hold, none of which it held before:
+ * Eight invariants this file has to hold, none of which it held before:
  *
  * 1. `complete` carries the same `worker_id` that `claim` sent. The route requires
  *    it (`src/api/routes/worker.ts:44`) and matches the row on it
@@ -45,6 +45,15 @@
  *    second request was refused too, nothing caught it, and the refusal escaped the poll
  *    loop and terminated the process. The delivery now has its own `catch` and its own
  *    type, and neither re-runs the item nor re-reports it.
+ * 8. The **renewal is bounded** too, and its bound makes a failure visible rather than
+ *    changing what the worker does about it. The renewal is issued from a `setInterval`, so an
+ *    unanswered request did not park the worker once - it parked it again on **every tick**,
+ *    and no tick ever reached the warning, because a promise that never settles never reaches
+ *    a `.catch`. The only symptom was indirect and arrived late: the claim lapsed, the queue
+ *    moved the healthy worker's item to `unknown`, and its real result was refused as a late
+ *    write. With a bound the failure is reported as `work_heartbeat_unconfirmed` and the item
+ *    **keeps running**, because a timeout is still only a suspicion - `work_lease_lost` remains
+ *    the one renewal answer that aborts an item.
  */
 
 import { execFile } from 'node:child_process';
@@ -81,6 +90,26 @@ const MIN_ACK_TIMEOUT_MS = 1;
 
 const DEFAULT_ACK_TIMEOUT_MS = 10_000;
 
+/**
+ * How long the worker waits for a renewal of its claim to be answered.
+ *
+ * Half the default `--heartbeat-ms`, so a renewal that is not going to be answered stops
+ * being in flight before the next tick is due. That relationship is the point of having a
+ * bound at all here: the renewal is issued from a `setInterval`, and an unbounded request
+ * does not park the worker once - **it parks it again on every tick**, silently, because a
+ * promise that never settles never reaches the `.catch` that would have warned. The
+ * diagnosis then arrives only indirectly, as a claim that quietly lapsed and an item the
+ * queue moved to `unknown` while the worker was healthy.
+ *
+ * It is not enforced as a relationship between the two options, only stated as the default:
+ * a test that wants a slow renewal against a fast tick sets both deliberately, and refusing
+ * that combination would make the defect this option exists to expose untestable. The bound
+ * is a local diagnosis window over a localhost request, not a protocol parameter.
+ */
+const MIN_HEARTBEAT_TIMEOUT_MS = 1;
+
+const DEFAULT_HEARTBEAT_TIMEOUT_MS = 10_000;
+
 export type WorkerPollOptions = {
   port: string;
   apiKey?: string;
@@ -91,6 +120,7 @@ export type WorkerPollOptions = {
   once?: boolean;
   intervalMs?: string;
   heartbeatMs?: string;
+  heartbeatTimeoutMs?: string;
   ackTimeoutMs?: string;
 };
 
@@ -105,6 +135,7 @@ export type ResolvedWorkerPollOptions = {
   once: boolean;
   intervalMs: number;
   heartbeatMs: number;
+  heartbeatTimeoutMs: number;
   ackTimeoutMs: number;
 };
 
@@ -137,6 +168,13 @@ export function resolveWorkerPollOptions(opts: WorkerPollOptions): ResolvedWorke
     );
   }
 
+  const heartbeatTimeoutMs = Number(opts.heartbeatTimeoutMs ?? DEFAULT_HEARTBEAT_TIMEOUT_MS);
+  if (!Number.isFinite(heartbeatTimeoutMs) || heartbeatTimeoutMs < MIN_HEARTBEAT_TIMEOUT_MS) {
+    throw new Error(
+      `Invalid --heartbeat-timeout-ms value "${opts.heartbeatTimeoutMs}". Expected a number of at least ${MIN_HEARTBEAT_TIMEOUT_MS}.`,
+    );
+  }
+
   const ackTimeoutMs = Number(opts.ackTimeoutMs ?? DEFAULT_ACK_TIMEOUT_MS);
   if (!Number.isFinite(ackTimeoutMs) || ackTimeoutMs < MIN_ACK_TIMEOUT_MS) {
     throw new Error(
@@ -154,6 +192,7 @@ export function resolveWorkerPollOptions(opts: WorkerPollOptions): ResolvedWorke
     once: opts.once === true,
     intervalMs,
     heartbeatMs,
+    heartbeatTimeoutMs,
     ackTimeoutMs,
   };
 }
@@ -245,6 +284,14 @@ export async function workerPollCommand(opts: WorkerPollOptions) {
  * command halfway through on a suspicion would leave a half-applied side effect - the same
  * conservative rule the session file lease states, where a failed renewal may only make the
  * lease look stale later rather than make it immediately stealable.
+ *
+ * Every renewal is individually bounded by `heartbeatTimeoutMs`, which is what makes a
+ * renewal the runtime never answers a **logged** failure instead of an invisible one. The
+ * bound does not change the rule above: an expired bound is the same kind of suspicion as a
+ * transport error, so it warns and the item keeps running. What it removes is the case where
+ * the suspicion was never formed at all - an unbounded request issued from this interval
+ * never settled, so it reached neither the `work_lease_lost` branch nor the warning below,
+ * and the first thing an operator saw was an item the queue had moved to `unknown`.
  *
  * `work_lease_lost` is not a suspicion. The server has stated that the session ended and
  * stopped the work, so continuing would run a command nobody is waiting for, and the
@@ -356,6 +403,41 @@ export class WorkCompletionUndeliveredError extends Error {
 }
 
 /**
+ * A renewal of this worker's claim was not answered inside the bound.
+ *
+ * **This is a suspicion, not a refusal, and the caller must act on it accordingly.** The
+ * runtime may be busy, paused, or unreachable; nothing has said the claim is gone. A renewal
+ * failure has always been best-effort - the item keeps running - because stopping a command
+ * halfway through on a suspicion leaves a half-applied side effect, which is the same
+ * conservative rule the session file lease states. This class exists so that the *failure
+ * becomes visible* rather than changing what the worker does about it: before the bound,
+ * this case produced no warning at all, and the first symptom was an item the queue had
+ * moved to `unknown` while the worker was perfectly healthy.
+ *
+ * Deliberately distinct from `WorkLeaseLostError`, which *is* a decision - the server has
+ * stated that the session ended and stopped the work - and is the only renewal failure that
+ * aborts a running item. Conflating them would abort commands on a timeout.
+ *
+ * Like the other worker-local codes, this is a class property rather than an exported `_CODE`
+ * constant, so it stays out of `tests/fixtures/error-codes.json`: nothing on the wire emits
+ * it. The code is repeated inside the message because the warning line is the only channel a
+ * supervisor sees.
+ */
+export class WorkHeartbeatUnconfirmedError extends Error {
+  readonly code = 'work_heartbeat_unconfirmed';
+  readonly timeoutMs: number;
+
+  constructor(itemId: string, timeoutMs: number) {
+    super(
+      `renewal unconfirmed for ${itemId}: work_heartbeat_unconfirmed - no answer within ${timeoutMs}ms, ` +
+        'so the claim is on course to lapse; the item keeps running because a timeout is not a stop',
+    );
+    this.name = 'WorkHeartbeatUnconfirmedError';
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+/**
  * The claim was never confirmed because no answer arrived inside the bound.
  *
  * Deliberately a **different type** from `WorkAcceptRefusedError`, and the reason is
@@ -423,11 +505,29 @@ async function acceptWorkItem(opts: ResolvedWorkerPollOptions, itemId: string): 
 }
 
 async function renewClaim(opts: ResolvedWorkerPollOptions, itemId: string): Promise<void> {
-  const res = await fetch(`http://localhost:${opts.port}/v1/x/worker/heartbeat`, {
-    method: 'POST',
-    headers: jsonHeaders(opts),
-    body: JSON.stringify({ id: itemId, worker_id: opts.workerId }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`http://localhost:${opts.port}/v1/x/worker/heartbeat`, {
+      method: 'POST',
+      headers: jsonHeaders(opts),
+      body: JSON.stringify({ id: itemId, worker_id: opts.workerId }),
+      // Unbounded was the defect, and here it was worse than a single hang: this call is
+      // issued from a `setInterval`, so a request that never settled did not park the worker
+      // once but again on every tick, and it reached the warning below on no tick at all. The
+      // bound is what makes a renewal that is not going to be answered an *observable*
+      // failure instead of a growing pile of silent ones.
+      signal: AbortSignal.timeout(opts.heartbeatTimeoutMs),
+    });
+  } catch (error) {
+    // A bound that expires is reported as its own thing rather than as a generic transport
+    // error, because the two call for different reading: a refused connection says the
+    // runtime is not there, while a timeout says it is there and is not renewing - and only
+    // the second one means the claim is on course to lapse while this worker is healthy.
+    if (error instanceof Error && error.name === 'TimeoutError') {
+      throw new WorkHeartbeatUnconfirmedError(itemId, opts.heartbeatTimeoutMs);
+    }
+    throw error;
+  }
   if (res.ok) return;
   const body = await res.text();
   // The code is what a caller decides on; the message only explains it. Matching on the

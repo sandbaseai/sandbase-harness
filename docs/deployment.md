@@ -250,6 +250,7 @@ being left claimed. Useful flags:
 | `--once` | Claim and run at most one item, then exit. |
 | `--interval-ms <ms>` | Delay between polls when the queue is empty (default `1000`, minimum `250`). |
 | `--heartbeat-ms <ms>` | Renew the claim on this interval while an item runs (default `20000`, minimum `25`). |
+| `--heartbeat-timeout-ms <ms>` | How long to wait for a renewal to be answered before reporting it as unconfirmed (default `10000`, minimum `1`). |
 | `--ack-timeout-ms <ms>` | How long to wait for the runtime to confirm a claim before giving up on the item (default `10000`, minimum `1`). |
 | `--worker-id <id>` | Identity reported on the claim and the completion (default `worker_<pid>`). |
 
@@ -260,6 +261,21 @@ every `--heartbeat-ms`, and stops renewing when the item finishes. A failed rene
 is logged and the command keeps running: the server refuses a completion from a worker
 that no longer holds the claim, and stopping a command halfway on a suspicion that the
 claim lapsed would leave a half-applied side effect.
+
+Each renewal is also individually bounded by `--heartbeat-timeout-ms`, and here the
+bound matters more than it looks. The renewal is issued from a timer, so a runtime that
+accepted the connection and never answered did not park the worker once - it parked it
+again on **every tick**, and no tick ever reached the warning, because a promise that
+never settles never reaches the `catch` that would have printed one. The bound turns that
+into a visible failure: the worker warns with the machine-readable
+`work_heartbeat_unconfirmed` and the bound it waited, so "the runtime is not answering my
+renewals" is readable directly instead of arriving late as a claim that quietly lapsed.
+The bound deliberately does **not** change what the worker does about it - the item keeps
+running, because an expired bound is the same kind of suspicion as a transport error, and
+only `work_lease_lost` aborts a running item. The default is half `--heartbeat-ms`, so a
+renewal that is not going to be answered stops being in flight before the next tick is
+due; the two are not coupled by validation, because a test that needs a slow renewal
+against a fast tick has to be able to say so.
 
 Before it runs an item the worker confirms its claim against the runtime and waits at
 most `--ack-timeout-ms` for the answer. The bound is deliberately below the lease
@@ -286,7 +302,8 @@ replayed. A command that genuinely failed is still reported as failed with its o
 and if that report is refused the row is left unrecorded rather than being given a
 failure the worker could not substantiate.
 
-An unusable `--port`, `--interval-ms`, `--heartbeat-ms` or `--ack-timeout-ms` stops the
+An unusable `--port`, `--interval-ms`, `--heartbeat-ms`, `--heartbeat-timeout-ms` or
+`--ack-timeout-ms` stops the
 worker at startup with a message naming the option, which matters for a long-running
 process on someone else's machine: a `--interval-ms` that does not parse would otherwise
 poll with no delay at all instead of failing.

@@ -3,6 +3,20 @@
 ## Unreleased
 
 ### Changed
+- **A work-item renewal the runtime never answers is now an observable failure instead of
+  a silent pile-up.** The worker renews its claim on an interval, and that renewal had no
+  bound and no `AbortSignal`. Because it is issued from a timer, a runtime that accepted
+  the connection and never answered did not park the worker once - it parked it again on
+  every tick - and no tick ever reached the warning, since a promise that never settles
+  never reaches the `catch` that prints one. The only symptom was indirect: the lease
+  lapsed, the queue moved a healthy worker's item to `unknown`, and the item's real result
+  was refused as a late write. Each renewal now carries `--heartbeat-timeout-ms` (default
+  `10000`, half the renewal interval, minimum `1`) and reports the machine-readable
+  `work_heartbeat_unconfirmed` with the bound it waited. The bound deliberately does not
+  change the worker's response - the item keeps running, because a timeout is a suspicion
+  that the claim lapsed rather than a statement that it did, and only `work_lease_lost`
+  aborts a running item. An unusable value stops the worker at startup like the other
+  options.
 - A worker no longer records succeeded work as failed when the runtime refuses its completion, and a refused completion no longer terminates the worker. The success path called `completeWorkItem` inside the same `try` whose `catch` exists to report a **failed command**, so a completion the server refused was answered by reporting the same item a second time with `failed: true`: the row was written `failed` for an item whose command exited `0`, carrying the transport error as its result. Worse, `409` is the *expected* answer once the lease has lapsed and the queue has moved an accepted item to `unknown`, so the second request was refused as well, nothing caught it, and the refusal escaped the poll loop and rejected `workerPollCommand` - one late completion ended the whole worker process, and the operator saw a crash instead of a refusal. Producing an outcome and delivering it are now separate steps: the run yields a `PromiseSettledResult`, and delivery has its own `catch` and its own type, `WorkCompletionUndeliveredError`. A delivery that does not happen is reported as exactly that - the machine-readable `work_completion_undelivered`, with the status it was refused with, or that the request never reached the runtime - while the item is neither re-run nor re-reported and the loop keeps polling. A command that genuinely failed is still reported `failed: true` with its own error, and if *that* report is refused the row is left unrecorded rather than being given a failure the worker could not substantiate. The queue is left holding the truth in every case: an item whose outcome was not delivered keeps its lease and becomes `unknown` when the lease lapses, which is the record that says the effect may have happened and must not be replayed. `work_completion_undelivered` is a worker-local string and is deliberately **not** added to the published error taxonomy, matching `work_accept_unconfirmed`: nothing on the wire emits it. Documented in `docs/api.md` and `docs/deployment.md`.
 - Work-item statuses are renamed to the vocabulary the frozen worker-protocol spec fixes:
   `queued -> accepted -> applied`, plus `failed` and `unknown`. The old `claimed` was written the

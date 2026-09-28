@@ -393,6 +393,7 @@ describe('CLI program', () => {
       '--environment-id',
       '--environment-key',
       '--heartbeat-ms',
+      '--heartbeat-timeout-ms',
       '--interval-ms',
       '--once',
       '--port',
@@ -408,6 +409,7 @@ describe('CLI program', () => {
       intervalMs: '1000',
       once: false,
       heartbeatMs: '20000',
+      heartbeatTimeoutMs: '10000',
       ackTimeoutMs: '10000',
     });
   });

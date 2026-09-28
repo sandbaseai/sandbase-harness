@@ -579,6 +579,119 @@ describe('worker poll CLI', () => {
     expect(resolveWorkerPollOptions({ port: '3000', workdir: '.', heartbeatMs: '25' }).heartbeatMs).toBe(25);
   });
 
+  it('reports a renewal the runtime never answers, and does not stop the item for it', async () => {
+    // The renewal is issued from a `setInterval`, which is what made the missing bound worse
+    // here than anywhere else: an unanswered request did not park the worker once, it parked
+    // it again on **every tick**, and no tick ever reached the warning, because a promise that
+    // never settles never reaches a `.catch`. The only symptom was indirect and late - the
+    // claim lapsed, the queue moved a healthy worker's item to `unknown`, and its real result
+    // was refused as a late write.
+    //
+    // The bound makes that observable. It must not change what the worker does about it: a
+    // timeout is still a *suspicion* that the claim lapsed, so the item keeps running, and
+    // `work_lease_lost` stays the one renewal answer that aborts one.
+    const { queue, port, workdir } = await startRuntime();
+    writeFileSync(join(workdir, 'greeting.txt'), 'still here', 'utf8');
+    const id = queue.enqueue('sess_worker', 'read', { path: 'greeting.txt' });
+    expect(queue.claim('worker_test')?.id).toBe(id);
+
+    const opts = resolveWorkerPollOptions({
+      port: String(port), workdir, workerId: 'worker_test', heartbeatMs: '40', heartbeatTimeoutMs: '7',
+    });
+
+    const realFetch = globalThis.fetch;
+    let beats = 0;
+    let sawSignal: AbortSignal | undefined;
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(((input: unknown, init?: unknown) => {
+      const url = String(input);
+      if (!url.endsWith('/v1/x/worker/heartbeat')) {
+        return realFetch(input as Parameters<typeof realFetch>[0], init as Parameters<typeof realFetch>[1]);
+      }
+      beats += 1;
+      const signal = (init as { signal?: AbortSignal } | undefined)?.signal;
+      sawSignal = signal;
+      // **A hanging server modelled literally**: nothing settles on its own, and it rejects
+      // only when the signal it was given aborts. A mock that rejected unconditionally would
+      // let a missing bound pass, because the rejection would arrive without one - the same
+      // fidelity trap that made an earlier bound probe assert the error mapping rather than
+      // the bound.
+      return new Promise((_resolve, reject) => {
+        if (!signal) return;
+        signal.addEventListener('abort', () => {
+          const abort = new Error('The operation was aborted due to timeout');
+          abort.name = 'TimeoutError';
+          reject(abort);
+        });
+      });
+    }) as typeof realFetch);
+
+    const warnings: string[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warnings.push(args.join(' ')); });
+    // Asserted as a named diagnosis against an explicit short budget rather than by inheriting
+    // the runner's 30s timeout, so a missing bound fails in seconds and cannot be blamed on a
+    // slow runner.
+    const hangBudgetMs = 5_000;
+    let budget: ReturnType<typeof setTimeout> | undefined;
+    let runSignal: AbortSignal | undefined;
+    let value: unknown;
+    try {
+      value = await Promise.race([
+        renewWhileRunning(opts, id, (signal) => {
+          runSignal = signal;
+          return new Promise((r) => setTimeout(() => r('ran despite the silence'), 500));
+        }),
+        new Promise<never>((_resolve, reject) => {
+          budget = setTimeout(
+            () => reject(new Error(
+              `the renewal was not bounded: nothing returned within ${hangBudgetMs}ms`,
+            )),
+            hangBudgetMs,
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(budget);
+      warn.mockRestore();
+      spy.mockRestore();
+    }
+
+    // A bound really was applied, and it is the configured option rather than an incidental
+    // default.
+    expect(sawSignal).toBeInstanceOf(AbortSignal);
+    // Every tick was bounded rather than left in flight: more than one renewal was attempted
+    // during the run, so this is the pile-up path and not a single request.
+    expect(beats).toBeGreaterThanOrEqual(2);
+    // The item kept running and produced its result. This is the half that must not regress -
+    // an expired bound is a suspicion, and abandoning a command on one leaves a half-applied
+    // side effect.
+    expect(value).toBe('ran despite the silence');
+    expect(runSignal?.aborted).toBe(false);
+    // And the failure is now visible on the existing best-effort channel, naming the code and
+    // the bound it waited, so "the runtime is not answering my renewals" can be read without
+    // parsing prose.
+    expect(warnings.join('\n')).toContain(`renewal failed for ${id}`);
+    expect(warnings.join('\n')).toContain(`renewal unconfirmed for ${id}`);
+    expect(warnings.join('\n')).toContain('work_heartbeat_unconfirmed');
+    expect(warnings.join('\n')).toContain('7ms');
+    // Not the abort path: a timeout must never be reported as the stop that ends an item.
+    expect(warnings.join('\n')).not.toContain('work_lease_lost');
+  });
+
+  it('refuses an unusable renewal bound at startup', () => {
+    // The same rule as every other option: a worker is a long-running process executing
+    // commands on someone's machine, so a value it cannot honour stops it where the operator
+    // is still reading. `AbortSignal.timeout(NaN)` would otherwise throw from inside the
+    // interval, where the failure reads as a request failure rather than a bad option.
+    for (const bad of ['abc', '', 'NaN', '-1', '0']) {
+      expect(() => resolveWorkerPollOptions({ port: '3000', workdir: '.', heartbeatTimeoutMs: bad }))
+        .toThrow(/heartbeat-timeout-ms/);
+    }
+    // The default is half the default renewal interval, so a renewal that is not going to be
+    // answered stops being in flight before the next tick is due.
+    expect(resolveWorkerPollOptions({ port: '3000', workdir: '.' }).heartbeatTimeoutMs).toBe(10_000);
+    expect(resolveWorkerPollOptions({ port: '3000', workdir: '.', heartbeatTimeoutMs: '25' }).heartbeatTimeoutMs).toBe(25);
+  });
+
   it('stops running an item when the server says its lease is gone', async () => {
     // A renewal has two kinds of failure and they must not be treated alike. A transport
     // failure is a suspicion that the claim may have lapsed; `work_lease_lost` is the server

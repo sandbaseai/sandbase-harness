@@ -363,6 +363,11 @@ export function createCliProgram({ version, startServer }: CliProgramOptions): C
     .option('--interval-ms <ms>', 'Delay between polls when the queue is empty', '1000')
     .option('--heartbeat-ms <ms>', 'Renew the claim on this interval while an item runs', '20000')
     .option(
+      '--heartbeat-timeout-ms <ms>',
+      'How long to wait for a renewal to be answered before reporting it as unconfirmed',
+      '10000',
+    )
+    .option(
       '--ack-timeout-ms <ms>',
       'How long to wait for the runtime to confirm a claim before giving up on the item',
       '10000',
