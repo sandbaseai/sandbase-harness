@@ -252,6 +252,7 @@ being left claimed. Useful flags:
 | `--claim-timeout-ms <ms>` | How long to wait for a claim to be answered before polling again (default `10000`, minimum `1`). |
 | `--heartbeat-ms <ms>` | Renew the claim on this interval while an item runs (default `20000`, minimum `25`). |
 | `--heartbeat-timeout-ms <ms>` | How long to wait for a renewal to be answered before reporting it as unconfirmed (default `10000`, minimum `1`). |
+| `--complete-timeout-ms <ms>` | How long to wait for an outcome to be recorded before reporting it as unconfirmed (default `10000`, minimum `1`). |
 | `--ack-timeout-ms <ms>` | How long to wait for the runtime to confirm a claim before giving up on the item (default `10000`, minimum `1`). |
 | `--worker-id <id>` | Identity reported on the claim and the completion (default `worker_<pid>`). |
 
@@ -323,8 +324,22 @@ replayed. A command that genuinely failed is still reported as failed with its o
 and if that report is refused the row is left unrecorded rather than being given a
 failure the worker could not substantiate.
 
+The completion is bounded by `--complete-timeout-ms`, which changes no control flow - the
+delivery already fails on its own - but does change the diagnosis, and the difference is
+the one thing an operator has to get right here. `work_completion_undelivered` with
+"the request did not reach the runtime" is true for a refused connection and **false for a
+timeout**: a request that timed out may have arrived and been applied, so the row may
+already say `applied` and only this worker does not know. An unanswered completion
+therefore reports its own `work_completion_unconfirmed` and says outright that the outcome
+may already have been recorded - look at the row rather than assume it is unrecorded. What
+it must never do is send the completion again, because the first request may already have
+taken effect and the queue refuses a late write to an item it has moved on. Nothing is
+lost while a completion hangs either: the item keeps its lease, but the worker stops
+polling until the bound expires, so one unanswered completion is enough to stop every
+later item from being claimed.
+
 An unusable `--port`, `--interval-ms`, `--claim-timeout-ms`, `--heartbeat-ms`,
-`--heartbeat-timeout-ms` or
+`--heartbeat-timeout-ms`, `--complete-timeout-ms` or
 `--ack-timeout-ms` stops the
 worker at startup with a message naming the option, which matters for a long-running
 process on someone else's machine: a `--interval-ms` that does not parse would otherwise

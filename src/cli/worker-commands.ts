@@ -5,7 +5,7 @@
  * `--workdir`, and reports each result to `POST /v1/x/worker/complete`. The server
  * never runs them — this process does.
  *
- * Nine invariants this file has to hold, none of which it held before:
+ * Ten invariants this file has to hold, none of which it held before:
  *
  * 1. `complete` carries the same `worker_id` that `claim` sent. The route requires
  *    it (`src/api/routes/worker.ts:44`) and matches the row on it
@@ -64,6 +64,17 @@
  *    and a claim that produced none - refused, failed, or never answered - leaves the worker
  *    polling. A bound without the `catch` would have traded the stall for a crash, because the
  *    timeout it raises would have taken the same uncaught path.
+ * 10. The **completion is bounded** as well, so no request in the loop is left unbounded, and
+ *    its bound needed a **new diagnosis** rather than the old one applied later. The bound
+ *    itself changes no control flow, because #657 / #658 already put the delivery in its own
+ *    `try`/`catch` with its own type - but `work_completion_undelivered` uses `status: null`
+ *    to say "this never reached the runtime", and that is false for a timeout: a request that
+ *    timed out may have arrived and been applied, in which case the row already says `applied`
+ *    and only this process does not know. So an unanswered completion reports
+ *    `work_completion_unconfirmed` and says that the outcome may already be recorded. What it
+ *    must never do is retry: the first request may already have taken effect, and the queue
+ *    refuses a late write to an item it has moved on - which makes a retry pointless rather
+ *    than merely redundant.
  */
 
 import { execFile } from 'node:child_process';
@@ -141,6 +152,23 @@ const MIN_HEARTBEAT_TIMEOUT_MS = 1;
 
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 10_000;
 
+/**
+ * How long the worker waits for the outcome to be recorded before calling it unconfirmed.
+ *
+ * The last request in the loop to get a bound, and the only one that needed a **new
+ * diagnosis** rather than the same one applied later. This call is already inside its own
+ * `try`/`catch` with its own type, so the bound changes no control flow at all - which is
+ * what #657 / #658 bought by separating the outcome from its delivery. What it could not buy
+ * is the meaning: `WorkCompletionUndeliveredError` uses `status: null` to say "the request
+ * never reached the runtime", and that is **false for a timeout**. A request that timed out
+ * may have arrived and been applied, so an operator reading "did not reach the runtime" would
+ * be told the opposite of what is possible - and the two imply different follow-up, because
+ * only the second one means the row may already be `applied` while this process does not know.
+ */
+const MIN_COMPLETE_TIMEOUT_MS = 1;
+
+const DEFAULT_COMPLETE_TIMEOUT_MS = 10_000;
+
 export type WorkerPollOptions = {
   port: string;
   apiKey?: string;
@@ -153,6 +181,7 @@ export type WorkerPollOptions = {
   heartbeatMs?: string;
   heartbeatTimeoutMs?: string;
   claimTimeoutMs?: string;
+  completeTimeoutMs?: string;
   ackTimeoutMs?: string;
 };
 
@@ -169,6 +198,7 @@ export type ResolvedWorkerPollOptions = {
   heartbeatMs: number;
   heartbeatTimeoutMs: number;
   claimTimeoutMs: number;
+  completeTimeoutMs: number;
   ackTimeoutMs: number;
 };
 
@@ -215,6 +245,13 @@ export function resolveWorkerPollOptions(opts: WorkerPollOptions): ResolvedWorke
     );
   }
 
+  const completeTimeoutMs = Number(opts.completeTimeoutMs ?? DEFAULT_COMPLETE_TIMEOUT_MS);
+  if (!Number.isFinite(completeTimeoutMs) || completeTimeoutMs < MIN_COMPLETE_TIMEOUT_MS) {
+    throw new Error(
+      `Invalid --complete-timeout-ms value "${opts.completeTimeoutMs}". Expected a number of at least ${MIN_COMPLETE_TIMEOUT_MS}.`,
+    );
+  }
+
   const ackTimeoutMs = Number(opts.ackTimeoutMs ?? DEFAULT_ACK_TIMEOUT_MS);
   if (!Number.isFinite(ackTimeoutMs) || ackTimeoutMs < MIN_ACK_TIMEOUT_MS) {
     throw new Error(
@@ -234,6 +271,7 @@ export function resolveWorkerPollOptions(opts: WorkerPollOptions): ResolvedWorke
     heartbeatMs,
     heartbeatTimeoutMs,
     claimTimeoutMs,
+    completeTimeoutMs,
     ackTimeoutMs,
   };
 }
@@ -498,6 +536,41 @@ export class WorkHeartbeatUnconfirmedError extends Error {
 }
 
 /**
+ * The outcome was sent but not answered inside the bound, so whether it was recorded is
+ * **unknown** - and that is a different fact from a request that never arrived.
+ *
+ * `WorkCompletionUndeliveredError` with `status: null` asserts the request did not reach the
+ * runtime. That is true for a refused connection and **false here**: a request that timed out
+ * may have arrived and been applied, in which case the row already says `applied` and only
+ * this process does not know it. Collapsing the two would tell an operator the outcome is
+ * definitively unrecorded at the exact moment the opposite is possible, and the follow-up
+ * differs - one is "nothing to see", the other is "check the row before assuming anything".
+ *
+ * What does **not** differ is the action, and that is why the message says it out loud: the
+ * item is not re-reported and not re-run. A retry is the one thing that must not happen,
+ * because the first request may already have been applied, and because the queue refuses a
+ * late write to an item it has already moved on - which is what makes the retry pointless
+ * rather than merely redundant.
+ *
+ * Declared as a class property rather than an exported `_CODE` constant, so it stays out of
+ * `tests/fixtures/error-codes.json`: no route emits it. The code is repeated inside the
+ * message because the warning line is the only channel a supervisor sees.
+ */
+export class WorkCompletionUnconfirmedError extends Error {
+  readonly code = 'work_completion_unconfirmed';
+  readonly timeoutMs: number;
+
+  constructor(itemId: string, timeoutMs: number) {
+    super(
+      `outcome unconfirmed for ${itemId}: work_completion_unconfirmed - no answer within ${timeoutMs}ms, ` +
+        'so it may already have been recorded; the item is not reported again and not re-run',
+    );
+    this.name = 'WorkCompletionUnconfirmedError';
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+/**
  * The claim was not answered inside the bound, so this iteration produced no item.
  *
  * A claim that fails and a claim that says nothing differ in one way that matters to an
@@ -722,8 +795,20 @@ async function completeWorkItem(
       method: 'POST',
       headers: jsonHeaders(opts),
       body: JSON.stringify(body),
+      // The last unbounded request in the loop. Nothing is lost while it hangs - the item
+      // keeps its lease - but the worker stops polling, so one unanswered completion stops
+      // every later item from being claimed at all.
+      signal: AbortSignal.timeout(opts.completeTimeoutMs),
     });
   } catch (error) {
+    // A timeout is **not** the same fact as a request that never arrived, and this is the one
+    // place in the file where that matters enough to need its own type: a connection that
+    // fails never reached the runtime, while a request that timed out may have arrived and
+    // been applied. Reporting the second as the first would tell an operator the outcome is
+    // definitively unrecorded when the row may already say `applied`.
+    if (error instanceof Error && error.name === 'TimeoutError') {
+      throw new WorkCompletionUnconfirmedError(item.id, opts.completeTimeoutMs);
+    }
     throw new WorkCompletionUndeliveredError(
       item.id,
       null,

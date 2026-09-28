@@ -1562,7 +1562,7 @@ bound it waited - since a runtime that refused and a runtime that went quiet nee
 different diagnoses. In both cases the worker warns, runs nothing, reports nothing,
 and keeps polling. An unusable `--port`, `--interval-ms`, `--claim-timeout-ms`,
 `--heartbeat-ms`,
-`--heartbeat-timeout-ms` or
+`--heartbeat-timeout-ms`, `--complete-timeout-ms` or
 `--ack-timeout-ms` stops the worker at startup with a message naming the option: an
 unparseable interval would otherwise become a poll loop with no delay at all.
 
@@ -1573,6 +1573,17 @@ the outcome, not a failure of the work, so the item is never re-run and never
 re-reported as failed. The worker warns with the machine-readable
 `work_completion_undelivered` and the status it was refused with, or, when no answer
 arrived at all, that the request did not reach the runtime, and then keeps polling.
+The completion is bounded by `--complete-timeout-ms` (default `10000`), and a bound
+that expires is reported as its **own** code, `work_completion_unconfirmed`, because
+"did not reach the runtime" is true for a refused connection and false for a timeout:
+a request that timed out may have arrived and been applied, so the row may already say
+`applied` while only this worker does not know. That warning says the outcome may
+already have been recorded, which is the fact that decides whether anyone should look
+at the row. The completion is never sent twice either way, because the first request
+may already have taken effect and the queue refuses a late write to an item it has
+moved on. While a completion hangs the item keeps its lease, but the worker stops
+polling until the bound expires, so one unanswered completion stops every later item
+from being claimed.
 The queue already holds the truth: an item whose outcome was not delivered keeps its
 lease and becomes `unknown` when the lease lapses, which is the record that says the
 outcome may have happened and must not be replayed. A command that genuinely failed is

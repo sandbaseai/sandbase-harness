@@ -913,6 +913,104 @@ describe('worker poll CLI', () => {
     expect(resolveWorkerPollOptions({ port: '3000', workdir: '.', claimTimeoutMs: '25' }).claimTimeoutMs).toBe(25);
   });
 
+  it('reports a completion the runtime never answers as unconfirmed, and does not send it twice', async () => {
+    // The completion was the last unbounded request in the loop. Nothing is lost while it
+    // hangs - the item keeps its lease - but the worker stops polling, so one unanswered
+    // completion stops every later item from being claimed at all.
+    //
+    // The bound changes no control flow, because the delivery already has its own `catch` and
+    // its own type. What it needed was a **different diagnosis**: `work_completion_undelivered`
+    // with `status: null` asserts the request never reached the runtime, which is false here.
+    // A request that timed out may have arrived and been applied, so the row may already say
+    // `applied` while this process does not know - and the two imply different follow-up.
+    const { queue, port, workdir } = await startRuntime();
+    const id = queue.enqueue('sess_worker', 'read', { path: 'greeting.txt' });
+    writeFileSync(join(workdir, 'greeting.txt'), 'ran fine', 'utf8');
+
+    const realFetch = globalThis.fetch;
+    let sawSignal: AbortSignal | undefined;
+    const completionBodies: Array<Record<string, unknown>> = [];
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(((input: unknown, init?: unknown) => {
+      const url = String(input);
+      if (!url.endsWith('/v1/x/worker/complete')) {
+        return realFetch(input as Parameters<typeof realFetch>[0], init as Parameters<typeof realFetch>[1]);
+      }
+      completionBodies.push(JSON.parse(String((init as { body?: unknown } | undefined)?.body)) as Record<string, unknown>);
+      const signal = (init as { signal?: AbortSignal } | undefined)?.signal;
+      sawSignal = signal;
+      // A hanging server, modelled literally: it settles only when the signal it was given
+      // aborts, so a missing bound cannot pass by rejecting on its own.
+      return new Promise((_resolve, reject) => {
+        if (!signal) return;
+        signal.addEventListener('abort', () => {
+          const abort = new Error('The operation was aborted due to timeout');
+          abort.name = 'TimeoutError';
+          reject(abort);
+        });
+      });
+    }) as typeof realFetch);
+
+    const warnings: string[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warnings.push(args.join(' ')); });
+    // A named diagnosis against an explicit budget, rather than inheriting the runner's 30s
+    // timeout: a missing bound should fail in seconds and cannot be blamed on a slow runner.
+    const hangBudgetMs = 5_000;
+    let budget: ReturnType<typeof setTimeout> | undefined;
+    let failure: unknown;
+    try {
+      await Promise.race([
+        withCapturedLog(() => workerPollCommand({
+          port: String(port), workdir, once: true, workerId: 'worker_test', completeTimeoutMs: '7',
+        })),
+        new Promise<never>((_resolve, reject) => {
+          budget = setTimeout(
+            () => reject(new Error(`the completion was not bounded: nothing returned within ${hangBudgetMs}ms`)),
+            hangBudgetMs,
+          );
+        }),
+      ]);
+    } catch (error) {
+      failure = error;
+    } finally {
+      clearTimeout(budget);
+      warn.mockRestore();
+      spy.mockRestore();
+    }
+
+    // `--once` is what makes "it kept going" assertable without abandoning a pending promise:
+    // the loop returns by itself after the item iteration, so a rejected command here would
+    // be the old symptom - a completion taking the worker down.
+    expect(failure).toBeUndefined();
+    expect(sawSignal).toBeInstanceOf(AbortSignal);
+    // Exactly one completion left this process. A retry is the one thing that must not happen:
+    // the first request may already have been applied.
+    expect(completionBodies).toHaveLength(1);
+    // The outcome was a success and is reported as one, not turned into a failure.
+    expect(completionBodies[0].failed).toBeUndefined();
+    expect(completionBodies[0].result).toBe('ran fine');
+    // The diagnosis is its own, and it says the thing that matters: the outcome may already
+    // be recorded, which is what tells an operator to look at the row rather than assume.
+    expect(warnings.join('\n')).toContain(`could not report ${id}`);
+    expect(warnings.join('\n')).toContain('work_completion_unconfirmed');
+    expect(warnings.join('\n')).toContain('7ms');
+    expect(warnings.join('\n')).toContain('may already have been recorded');
+    // And it is not reported as the other kind of non-delivery, which asserts the request
+    // never arrived - the opposite of what a timeout leaves possible.
+    expect(warnings.join('\n')).not.toContain('work_completion_undelivered');
+    expect(warnings.join('\n')).not.toContain('did not reach the runtime');
+    // The row is left exactly as the queue had it: claimed and accepted, outcome unrecorded.
+    expect(queue.get(id)!.status).toBe('accepted');
+  });
+
+  it('refuses an unusable completion bound at startup', () => {
+    for (const bad of ['abc', '', 'NaN', '-1', '0']) {
+      expect(() => resolveWorkerPollOptions({ port: '3000', workdir: '.', completeTimeoutMs: bad }))
+        .toThrow(/complete-timeout-ms/);
+    }
+    expect(resolveWorkerPollOptions({ port: '3000', workdir: '.' }).completeTimeoutMs).toBe(10_000);
+    expect(resolveWorkerPollOptions({ port: '3000', workdir: '.', completeTimeoutMs: '25' }).completeTimeoutMs).toBe(25);
+  });
+
   it('refuses an unusable --interval-ms instead of polling with no delay', () => {
     // `Number('abc')` is NaN and `setTimeout(fn, NaN)` fires immediately, so the old
     // `Math.max(250, Number(...))` produced a busy loop against the server rather than

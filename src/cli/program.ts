@@ -368,6 +368,11 @@ export function createCliProgram({ version, startServer }: CliProgramOptions): C
     )
     .option('--heartbeat-ms <ms>', 'Renew the claim on this interval while an item runs', '20000')
     .option(
+      '--complete-timeout-ms <ms>',
+      'How long to wait for an outcome to be recorded before reporting it as unconfirmed',
+      '10000',
+    )
+    .option(
       '--heartbeat-timeout-ms <ms>',
       'How long to wait for a renewal to be answered before reporting it as unconfirmed',
       '10000',

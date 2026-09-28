@@ -3,6 +3,22 @@
 ## Unreleased
 
 ### Changed
+- **A completion the runtime never answers is reported as unconfirmed rather than as a
+  request that never arrived.** The completion was the last unbounded request in the worker's
+  loop: nothing is lost while it hangs, because the item keeps its lease, but the worker stops
+  polling, so one unanswered completion was enough to stop every later item from being claimed
+  at all. It is now bounded by `--complete-timeout-ms` (default `10000`, minimum `1`), which
+  changes no control flow - the delivery already has its own `catch` and its own type - but
+  does change the diagnosis, and that is the part that matters. `work_completion_undelivered`
+  with "the request did not reach the runtime" is true for a refused connection and **false
+  for a timeout**: a request that timed out may have arrived and been applied, so the row may
+  already say `applied` while only this worker does not know. An unanswered completion now
+  reports its own machine-readable `work_completion_unconfirmed` naming the bound it waited
+  and stating that the outcome may already have been recorded, which is what tells an operator
+  to look at the row rather than assume it is unrecorded. The completion is still never sent
+  twice: the first request may already have taken effect, and the queue refuses a late write
+  to an item it has moved on. With this, no request in the worker's loop is left unbounded.
+  Documented in `docs/api.md` and `docs/deployment.md`.
 - **The worker's claim can no longer stop it, in either direction.** The claim is the first
   request of every iteration and was the only one still issued once with no bound and no
   error handling. Unbounded, a claim the runtime never answered parked the worker for ever:

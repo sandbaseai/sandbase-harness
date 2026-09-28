@@ -391,6 +391,7 @@ describe('CLI program', () => {
       '--ack-timeout-ms',
       '--api-key',
       '--claim-timeout-ms',
+      '--complete-timeout-ms',
       '--environment-id',
       '--environment-key',
       '--heartbeat-ms',
@@ -412,6 +413,7 @@ describe('CLI program', () => {
       heartbeatMs: '20000',
       heartbeatTimeoutMs: '10000',
       claimTimeoutMs: '10000',
+      completeTimeoutMs: '10000',
       ackTimeoutMs: '10000',
     });
   });
