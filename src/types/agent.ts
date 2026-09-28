@@ -52,9 +52,12 @@ export interface AgentModelConfig {
    * resolves the provider model from `model` (the id string), so this field is
    * stored and projected, not executed.
    *
-   * Typed as a string rather than the level union to keep this module free of an
-   * import from `core/agent/model-object.ts`, which imports from here; the
-   * accepted set is enforced by `modelEffortSchema` on the way in.
+   * Typed as a plain string on purpose. `core/agent/model-object.ts` owns the
+   * accepted set (`MODEL_EFFORT_LEVELS`) and the schema that enforces it on the
+   * way in, and this module is the shared vocabulary the core imports from — so
+   * the field stays a string here rather than adding a type-only import back into
+   * the core layer. The cost is that a consumer reading this type does not see the
+   * five levels; the benefit is that `types/` keeps no dependency on `core/`.
    */
   effort?: string;
 }

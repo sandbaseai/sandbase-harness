@@ -211,6 +211,44 @@ describe('the model profile echoes the effort the definition carries', () => {
     expect(read.body.agent.model_config).toEqual({ id: 'gpt-4o', speed: 'standard', effort: 'high' });
   });
 
+  it('keeps the level when a definition written before the fix is updated', async () => {
+    const ctx = context();
+    const created = await request(ctx.app, 'POST', '/v1/agents', definition);
+
+    // Put the row back into the shape the previous version wrote, then change a
+    // field that has nothing to do with the model. The update reads the stored
+    // definition through the folding reader, so the level survives and is
+    // rewritten in the current spelling — a patch that silently dropped it would
+    // be the same loss this change exists to remove, one version later.
+    const stored = JSON.parse(
+      (ctx.db.prepare('SELECT definition FROM agents WHERE id = ?').get(created.body.id) as {
+        definition: string;
+      }).definition,
+    ) as Record<string, unknown>;
+    const { effort } = stored.model_config as { effort?: string };
+    delete (stored.model_config as { effort?: string }).effort;
+    stored.effort = effort;
+    ctx.db.prepare('UPDATE agents SET definition = ? WHERE id = ?')
+      .run(JSON.stringify(stored), created.body.id);
+
+    const updated = await request(ctx.app, 'POST', `/v1/agents/${created.body.id}`, {
+      description: 'Now with a description.',
+    });
+
+    expect(updated.res.status).toBe(200);
+    expect(updated.body.description).toBe('Now with a description.');
+    expect(updated.body.model_config).toEqual({ id: 'gpt-4o', speed: 'standard', effort: 'high' });
+
+    // The archived version carries the level inside the profile too, so a later
+    // session pinned to this version does not freeze the old shape.
+    const version = JSON.parse(
+      (ctx.db.prepare('SELECT definition FROM agent_versions WHERE agent_id = ? ORDER BY version DESC LIMIT 1')
+        .get(created.body.id) as { definition: string }).definition,
+    ) as Record<string, unknown>;
+    expect(version.model_config).toEqual({ id: 'gpt-4o', speed: 'standard', effort: 'high' });
+    expect(version).not.toHaveProperty('effort');
+  });
+
   it('still omits the profile when there is nothing to report', async () => {
     const ctx = context();
 
@@ -236,15 +274,62 @@ describe('the model profile echoes the effort the definition carries', () => {
     });
 
     // The canonical object form is a union of the object and the bare string, so a
-    // level outside the published set fails as a shape error at `model` — the same
-    // answer an unknown `speed` gets, and one that names the field in its message.
-    // What matters here is that nothing is stored: a level the runtime cannot
-    // validate must not become a definition it echoes back as accepted.
+    // level outside the published set fails as a shape error at `model`, the way an
+    // unknown `speed` does; the issue is reported at the union, not at
+    // `model.effort`. What matters here is that nothing is stored: a level the
+    // runtime cannot validate must not become a definition it echoes back as
+    // accepted.
     expect(attempt.res.status).toBe(400);
     expect(attempt.body.error.type).toBe('invalid_request_error');
     expect(attempt.body.error.details.length).toBeGreaterThan(0);
     const rows = ctx.db.prepare('SELECT id FROM agents').all();
     expect(rows).toEqual([]);
+  });
+
+  it('refuses an unknown level sent in the local spelling, naming that field', async () => {
+    const ctx = context();
+
+    // The spelling the response returns is a request shape too, and there the
+    // field is its own schema member, so this path can name it.
+    const attempt = await request(ctx.app, 'POST', '/v1/agents', {
+      name: 'Local spelling refusal',
+      model: 'gpt-4o',
+      system: 'Stay put.',
+      model_config: { id: 'gpt-4o', speed: 'standard', effort: 'maximum' },
+    });
+
+    expect(attempt.res.status).toBe(400);
+    expect(attempt.body.error.details).toContainEqual(
+      expect.objectContaining({ path: 'model_config.effort' }),
+    );
+    expect(ctx.db.prepare('SELECT id FROM agents').all()).toEqual([]);
+  });
+
+  it('reports the level on the session list as well as the session read', async () => {
+    const ctx = context();
+    const created = await request(ctx.app, 'POST', '/v1/agents', definition);
+    const session = await request(ctx.app, 'POST', '/v1/sessions', {
+      agent: { id: created.body.id, version: 1 },
+    });
+
+    const list = await request(ctx.app, 'GET', '/v1/sessions');
+    expect(list.res.status).toBe(200);
+    const listed = (list.body.data as Array<{ id: string; agent: { model_config?: unknown } }>)
+      .find((entry) => entry.id === session.body.id);
+    expect(listed?.agent.model_config).toEqual({ id: 'gpt-4o', speed: 'standard', effort: 'high' });
+  });
+
+  it('reports a non-default speed without inventing a level', async () => {
+    const ctx = context();
+
+    const created = await request(ctx.app, 'POST', '/v1/agents', {
+      name: 'Fast agent',
+      model: { id: 'gpt-4o', speed: 'fast' },
+      system: 'Stay put.',
+    });
+
+    expect(created.res.status).toBe(201);
+    expect(created.body.model_config).toEqual({ id: 'gpt-4o', speed: 'fast' });
   });
 });
 

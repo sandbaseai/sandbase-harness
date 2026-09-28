@@ -46,12 +46,15 @@ the model profile is `src/core/agent/model-object.ts`, and the routes are
   by field by `normalizeModelField`, and each field is either honoured or
   refused by name (see §4).
 - The stored model profile is returned on every read — the agent read, the
-  version read, and a session's frozen snapshot — as `model_config`
+  version listing, and a session's frozen snapshot — as `model_config`
   (`id`, `speed`, and `effort` when one was set). It is omitted for the ordinary
   case (the local `standard` speed and no `effort`), so a plain model id looks
   the same as it always did. `effort` is echoed and not executed: the provider
   model is resolved from the id string, so no request changes because of the
-  level, which is why §4 records it as accepted-but-no-effect.
+  level, which is why §4 records it as accepted-but-no-effect. When `model` is
+  the object form it is authoritative — the profile comes from that object, and a
+  `model_config` sent beside it is ignored rather than merged, which is the
+  precedence the update rule already relies on.
 - Toolsets (`builtin` / `custom` / `mcp` / `skill`) are validated against a Zod
   schema before an agent is persisted; a definition that fails validation is
   rejected instead of being stored partially.
@@ -106,8 +109,9 @@ field the runtime cannot honour instead of dropping it.
   later; it is echoed on every read — a field that is stored and never returned
   is the silent loss this profile exists to prevent — and it is recorded as
   having no effect today so no caller infers a quality change from it. An agent
-  override refuses it for the same reason the definition keeps it: an override is
-  a local extension, and a level set on a session would reach no request.
+  override refuses it for the same reason the definition keeps it: a level set on
+  a session would reach no request, so accepting one there would promise execution
+  the runtime has no path for.
 - The `multiagent` roster is a substantial protocol surface (threads,
   coordinator role, advisor role). Mapping a local delegation helper onto it
   would overstate coverage, and accepting the field would let a caller build on
@@ -126,9 +130,11 @@ field the runtime cannot honour instead of dropping it.
   profile and reported as accepted-but-no-effect, and `inference_geo` refused by
   name.
 - `tests/integration/agent-effort-echo.test.ts` — the two halves of
-  accepted-but-no-effect: an agent read, a version read, and a frozen session
-  snapshot all return the level, and a real turn for a definition carrying
-  `effort: "max"` sends a provider request without it.
+  accepted-but-no-effect: an agent read, the version listing, a session's frozen
+  snapshot, and the session list all return the level; an update that changes only
+  another field keeps it and repairs a definition still carrying it as a sibling;
+  and a real turn for a definition carrying `effort: "max"` sends a provider
+  request without it.
 - `tests/integration/agent-update-contract.test.ts` — the unified partial-update
   semantics, the unknown-field refusal, the roster refusal on the update path,
   and both spellings of the concurrency precondition including the published

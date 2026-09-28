@@ -29,8 +29,7 @@
  * deployment's own `reasoning_effort` model setting, which is operator-level and
  * applies to a model rather than to one session. The canonical definition keeps
  * the value the published request shape carries, and it is where the published
- * contract puts the field; an override is a local extension, so there is nothing
- * to preserve on that path.
+ * contract puts the field, so there is nothing to preserve on this path.
  */
 
 import { z } from 'zod';

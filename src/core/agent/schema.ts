@@ -137,8 +137,10 @@ export const agentModelConfigSchema = z.object({
   // The local `model_config` spelling is also a request shape, and the read
   // projection returns `effort` inside it. Accepting it here is what keeps a
   // value the caller can read back from being silently dropped when they send it
-  // again; a level outside the published set fails with the same code the
-  // canonical `model.effort` path uses.
+  // again. A level outside the published set is refused as a shape error at
+  // `model_config.effort`, which names the field: the canonical `model.effort`
+  // path cannot, because there the object and the bare string are one union and
+  // the issue is reported at `model`.
   effort: modelEffortSchema.optional(),
 });
 
@@ -327,8 +329,11 @@ export function validateAgentDefinition(input: unknown): ValidationResult {
  * `effort` lives *inside* the profile, beside the id and speed it belongs to.
  * An earlier version wrote it as a sibling of `model_config`, where nothing read
  * it: the value survived in the row but no read-back could reach it. Definitions
- * written then are still readable — `toApiAgent` honours that spelling as well —
- * but every write lands here.
+ * written then are still readable — `readAgentDefinitionFromRow` folds the sibling
+ * into the profile before validating, and `toApiAgent` honours that spelling as
+ * well — and an update through either path rewrites it in place. When `model` is
+ * the object form it is authoritative: the profile is derived from that object,
+ * and a `model_config` sent beside it is ignored rather than merged.
  */
 function normalizeModelConfig(profile: {
   id: string;

@@ -467,7 +467,7 @@ A custom tool is declared as an independent `tools[]` entry carrying `type: "cus
 | --- | --- | --- |
 | `id` | non-empty string | Required. |
 | `speed` | `standard` \| `fast` \| `extended` | Optional; defaults to `standard`. `extended` is a local extension, not a published value. |
-| `effort` | `low` \| `medium` \| `high` \| `xhigh` \| `max`, or `{ "type": <level> }` | Optional. Parsed, validated, stored in the agent's model profile, and returned by every read — the agent read, the version read, and a session's frozen snapshot. It does not change the provider request: the model is resolved from the id, so the level has no path into a request (accepted-but-no-effect). A deployment's own `reasoning_effort` model setting is what a provider sees, and it is operator-level rather than per agent. |
+| `effort` | `low` \| `medium` \| `high` \| `xhigh` \| `max`, or `{ "type": <level> }` | Optional. Parsed, validated, stored in the agent's model profile, and returned by every read — the agent read, the version listing, and a session's frozen snapshot. It does not change the provider request: the model is resolved from the id, so the level has no path into a request (accepted-but-no-effect). A deployment's own `reasoning_effort` model setting is what a provider that accepts one sees, and it is operator-level rather than per agent. |
 | `inference_geo` | `us` \| `global` | Refused with `unsupported_model_field`. A local runtime has no inference-geography control, so honouring the pin is not possible. |
 
 An unrecognized key is also refused with `unsupported_model_field`, and the error
@@ -479,7 +479,9 @@ A read returns the stored profile as `model_config` — `id`, `speed`, and
 `effort` when one was set. It is omitted for the ordinary case (the local
 `standard` speed and no `effort`), so an agent that never sent either looks the
 same as before; a definition that carries `effort` reports it on the agent read,
-on the version read, and inside a session's `agent` snapshot.
+on the version listing, and inside a session's `agent` snapshot. When `model` is
+sent as the object form it is authoritative: the profile is derived from that
+object, and a `model_config` sent beside it is ignored rather than merged.
 
 ## Sessions
 

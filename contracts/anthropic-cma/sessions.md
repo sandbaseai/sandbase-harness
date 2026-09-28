@@ -177,9 +177,11 @@ Session agent reference (`agent_with_overrides`):
     `unsupported_model_field`), the same ones the agent definition path
     publishes for that field.
 - A `model` override replaces the whole model object: the agent's own `effort`
-  is not inherited, and an `effort` inside the override is refused (see §4). The
-  resolved profile is what the session snapshot reports, so a session that
-  switches model reports the level belonging to the model it runs.
+  is not inherited, and an `effort` inside the override is refused (see §4). A
+  session that replaces only other fields reports the agent's profile, level
+  included; the one that switches model reports the replacement profile, which
+  carries no level — the agent's is not inherited, and no model-to-level mapping
+  exists to supply one.
 - A malformed reference is refused with `invalid_agent_ref` and an absent one
   with `agent_required`, so "malformed" and "missing" are distinguishable.
 - `POST /v1/runs` accepts only the two pinning forms: the override form is
