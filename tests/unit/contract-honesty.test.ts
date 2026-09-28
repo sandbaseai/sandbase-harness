@@ -30,6 +30,7 @@ import {
   parseReferencedPaths,
   parseStatusBlock,
   type ContractDocument,
+  type WiringRequirement,
 } from './support/contract-honesty';
 import { mountedRouteKeys, routeKey } from './support/route-table';
 
@@ -130,7 +131,7 @@ interface FixtureOptions {
   documents?: ContractDocument[];
   files?: Record<string, string>;
   routes?: string[];
-  wiring?: Record<string, { file: string; symbol: string }>;
+  wiring?: Record<string, WiringRequirement>;
 }
 
 function fixtureProblems(options: FixtureOptions = {}): string[] {
@@ -357,6 +358,60 @@ describe('contract honesty guard', () => {
     });
   });
 
+  it('fails when a recorded blocker is gone and the status has not moved', () => {
+    // The blocker is declared but its canary no longer pins anything, so the
+    // reason this capability was `partial` has been fixed.
+    expectProblem(/no recorded blocker remains; raise the status to "supported"/, {
+      entries: [{ ...DEMO_ENTRY, status: 'partial' }],
+      documents: [{ name: 'demo.md', text: DEMO_TEXT.replace('demo: supported', 'demo: partial') }],
+      wiring: {
+        demo: {
+          file: 'src/demo.ts',
+          symbol: 'demo',
+          blocker: { file: 'tests/unit/demo.test.ts', symbol: 'still refuses the canonical root', detail: 'the demo backend refuses it' },
+        },
+      },
+    });
+  });
+
+  it('accepts a wired capability whose recorded blocker is still pinned', () => {
+    const problems = fixtureProblems({
+      entries: [{ ...DEMO_ENTRY, status: 'partial' }],
+      documents: [{ name: 'demo.md', text: DEMO_TEXT.replace('demo: supported', 'demo: partial') }],
+      files: {
+        'src/demo.ts': 'export const demo = true;',
+        'tests/unit/demo.test.ts': "it('still refuses the canonical root', () => {});",
+        'contracts/anthropic-cma/demo.md': DEMO_TEXT.replace('demo: supported', 'demo: partial'),
+      },
+      wiring: {
+        demo: {
+          file: 'src/demo.ts',
+          symbol: 'demo',
+          blocker: { file: 'tests/unit/demo.test.ts', symbol: 'still refuses the canonical root', detail: 'the demo backend refuses it' },
+        },
+      },
+    });
+
+    expect(problems.join('\n')).toBe('');
+  });
+
+  it('fails when a capability is supported while its recorded blocker is still pinned', () => {
+    expectProblem(/is "supported" while the demo backend refuses it; tests\/unit\/demo\.test\.ts still pins it/, {
+      files: {
+        'src/demo.ts': 'export const demo = true;',
+        'tests/unit/demo.test.ts': "it('still refuses the canonical root', () => {});",
+        'contracts/anthropic-cma/demo.md': DEMO_TEXT,
+      },
+      wiring: {
+        demo: {
+          file: 'src/demo.ts',
+          symbol: 'demo',
+          blocker: { file: 'tests/unit/demo.test.ts', symbol: 'still refuses the canonical root', detail: 'the demo backend refuses it' },
+        },
+      },
+    });
+  });
+
   it('fails when wiring is recorded for a capability that does not exist', () => {
     expectProblem(/production wiring is recorded for unknown capability: ghost/, {
       wiring: { ghost: { file: 'src/demo.ts', symbol: 'demo' } },
@@ -443,6 +498,9 @@ describe('contract honesty guard', () => {
       'fails when a mounted route is not documented',
       'fails when a supported capability is not wired into any runtime composition',
       'fails when a capability becomes reachable but keeps its lower status',
+      'fails when a recorded blocker is gone and the status has not moved',
+      'accepts a wired capability whose recorded blocker is still pinned',
+      'fails when a capability is supported while its recorded blocker is still pinned',
       'fails when wiring is recorded for a capability that does not exist',
       'turns red when a real contract names a file that is one character off',
       'turns red when a documented route is given the wrong verb',
@@ -566,11 +624,15 @@ describe('documented capability decisions', () => {
     }
   });
 
-  it('does not report a capability as supported while its composition is unwired', () => {
-    for (const id of Object.keys(PRODUCTION_WIRING)) {
-      const wiring = PRODUCTION_WIRING[id];
-      const wired = (readRepoFile(wiring.file) ?? '').includes(wiring.symbol);
-      expect(entry(id).status === 'supported', `${id} wiring`).toBe(wired);
+  it('does not report a capability as supported while its composition or its blocker says otherwise', () => {
+    for (const [id, requirement] of Object.entries(PRODUCTION_WIRING)) {
+      const wired = (readRepoFile(requirement.file) ?? '').includes(requirement.symbol);
+      const blocker = requirement.blocker;
+      const blocked = blocker !== undefined
+        && (readRepoFile(blocker.file) ?? '').includes(blocker.symbol);
+      // Both halves of the claim: the runtime reaches the code, and nothing
+      // recorded still stops it.
+      expect(entry(id).status === 'supported', `${id} wiring`).toBe(wired && !blocked);
     }
   });
 });

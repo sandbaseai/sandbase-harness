@@ -586,6 +586,15 @@ Supported session resources:
 
 A `memory_store` resource defaults to `/mnt/memory/<slugged-store-name>` when `mount_path` is omitted. Mounted paths are whole-segment paths; traversal and duplicate mount paths are rejected, and a session may attach at most eight stores. The `read`, `write`, `edit`, `glob`, and `grep` tools address mounted content through `memory_records`; read-only mounts reject writes, and shell access is refused while any memory mount is attached because arbitrary shell changes cannot be persisted safely. Updates to existing mounted files require a `precondition_sha256` value so stale content cannot overwrite a newer version.
 
+A `file` and a `github_repository` resource are both materialized at provisioning,
+into the canonical roots the runtime reserves for them
+(`/mnt/session/uploads/...` and `/workspace/<repo>`). The shipped in-process
+sandbox backends confine file paths to their own workspace root and refuse those
+roots, so a session that attaches either resource is accepted and then fails at
+provisioning. See [Mounting a file into a session](#mounting-a-file-into-a-session)
+for the file case and `contracts/anthropic-cma/github-repository.md` for the
+repository case; both capabilities are recorded as `partial`.
+
 Only `user.*` events can be appended by clients:
 
 ```bash
@@ -1304,7 +1313,7 @@ the caller never has to know the sandbox layout:
 | `/data.csv` | `/mnt/session/uploads/data.csv` |
 | `/src/main.py` | `/mnt/session/uploads/src/main.py` |
 | omitted or blank | `/mnt/session/uploads/<file_id>` |
-| `/uploads/file.txt` | `/mnt/session/uploads/uploads/file.txt` |
+| `/uploads/file.txt` | `/mnt/session/uploads/file.txt` |
 
 The whole relative path is preserved, so a nested layout is not flattened to its
 basename. Validation runs on the logical path before the mapping, and a path that
@@ -1313,7 +1322,18 @@ or a NUL byte, or names the bare root is rejected with `invalid_request_error`.
 
 The historical `/uploads/` prefix is still accepted as a logical path, so an
 existing request keeps working; it simply no longer maps to the mount root
-itself.
+itself, which is why `/uploads/file.txt` and `/file.txt` both land at
+`/mnt/session/uploads/file.txt`.
+
+⚠️ The mapping is what the runtime attempts, and the write currently fails on the
+shipped in-process backends: `local` and `kubernetes` confine file paths to their
+own workspace root and reject the canonical `/mnt/session/uploads/...` target
+(`Path escapes sandbox workspace`), and `docker` rejects an absolute path
+outright. A session that attaches a file resource is therefore accepted and then
+fails at provisioning, which is why the capability is recorded as `partial` in
+`contracts/anthropic-cma/files.md`. A `self_hosted` worker is handed the path and
+decides for itself. Until a backend accepts the canonical roots, have the agent
+write into the workspace rather than relying on an attached file.
 
 ## Session Artifacts
 

@@ -107,8 +107,12 @@ Four more properties the same guard enforces, because prose alone does not:
   other section is a citation, not evidence, so a difference table cannot stand
   in for an implementation.
 - A capability the composition root must wire cannot be `supported` while
-  nothing wires it. This runs both ways: wiring the symbol without raising the
-  status fails too, so neither half can move alone.
+  nothing wires it, and cannot stay below `supported` once something wires it and
+  no recorded blocker remains. A wired capability whose remaining gap is outside
+  the composition root stays `partial` with that reason and the canary pinning it
+  recorded beside the wiring symbol: raising the status while the canary still
+  pins the gap fails, and so does leaving the status behind once the canary is
+  gone.
 - The `routes.md` table and the routes the server actually mounts must be equal
   as `method + path` pairs. A route documented with the wrong verb fails as
   loudly as a route that is missing, which a URL-keyed check cannot see.

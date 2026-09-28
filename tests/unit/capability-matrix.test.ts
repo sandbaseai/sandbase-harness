@@ -112,17 +112,19 @@ describe('capability matrix', () => {
     // the canonical agent/session surface, so they are exactly the entries a
     // matrix drifts away from. Pinning them keeps "covered by a contract file"
     // and "present in the matrix" the same fact.
-    // The materializer and the file mount are implemented and tested, but no
-    // runtime composition injects either, so a session that declares one is
+    // The materializer and the file mount are implemented and tested, and the
+    // composition root injects both, so a session that declares one reaches
+    // them. The remaining blocker is the backends: they refuse the canonical
+    // in-sandbox roots the provisioning pass writes to, so the session is still
     // accepted and then fails. `supported` here was the drift this work item
     // exists to remove: the helper worked and the capability was unreachable.
     expect(capabilityEntry('github-repository-materialization').status).toBe('partial');
     expect(capabilityEntry('github-repository-materialization').reason.toLowerCase())
-      .toContain('no runtime composition');
+      .toContain('canonical mount roots');
     expect(capabilityEntry('github-repository-identity-freeze').status).toBe('supported');
     expect(capabilityEntry('file-resources').status).toBe('partial');
     expect(capabilityEntry('file-resources').reason.toLowerCase())
-      .toContain('no runtime composition');
+      .toContain('canonical mount roots');
     // Webhooks and scheduled deployments *are* covered by the published
     // contract (delivery behaviour, deployment lifecycle), so they are not
     // extensions and cannot be claimed as plain `supported` while the delivery

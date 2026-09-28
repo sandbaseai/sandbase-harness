@@ -47,24 +47,55 @@ export const IMPLEMENTATION_STATUSES: readonly CapabilityStatus[] = [
 export const TESTED_STATUSES: readonly CapabilityStatus[] = ['supported', 'partial'];
 
 /**
- * Capabilities whose status is decided entirely by whether a started runtime can
- * reach them.
+ * A capability whose reachability is decided by the composition root.
  *
  * An implementation that exists but is never injected is not `supported`: a
  * caller cannot use it, and a test that constructs it by hand proves the helper
- * works rather than that the capability is reachable. The rule runs both ways —
- * wiring the symbol without raising the status fails too — so neither side can
- * move alone. Only capabilities whose sole remaining gap is the composition root
- * belong here.
+ * works rather than that the capability is reachable. Wiring the symbol is
+ * therefore the first half of the claim, and `blocker` is the second.
  */
-export const PRODUCTION_WIRING: Readonly<Record<string, { file: string; symbol: string }>> = {
+export interface WiringRequirement {
+  /** File that must reference the symbol for the capability to be reachable. */
+  file: string;
+  symbol: string;
+  /**
+   * The reason a wired capability is still `partial`, and the canary pinning it.
+   *
+   * These two capabilities are the case the wiring rule alone gets wrong. Both
+   * symbols are injected by the composition root now, so "wired" no longer
+   * implies "reachable": a session's resources are materialized through the
+   * selected sandbox backend, and the shipped backends confine every path to
+   * their own workspace root and refuse the canonical in-sandbox roots the
+   * lifecycle writes to. The runtime reaches the code and the code still cannot
+   * do the thing, which is exactly what `partial` means.
+   *
+   * Recording the blocker as a marker in the test that demonstrates it keeps the
+   * status honest in both directions. The canary fails first when a backend is
+   * fixed, and this guard fails if the status moves to `supported` while the
+   * canary still pins the gap — or if the canary is gone and the status has not
+   * moved.
+   */
+  blocker?: { file: string; symbol: string; detail: string };
+}
+
+export const PRODUCTION_WIRING: Readonly<Record<string, WiringRequirement>> = {
   'github-repository-materialization': {
     file: 'src/core/runtime/session-runtime.ts',
     symbol: 'githubMaterializer',
+    blocker: {
+      file: 'tests/integration/session-resource-wiring.test.ts',
+      symbol: 'still refuses the canonical repository mount root on the shipped providers',
+      detail: 'the shipped sandbox backends refuse the canonical /workspace mount root',
+    },
   },
   'file-resources': {
     file: 'src/core/runtime/session-runtime.ts',
     symbol: 'fileArtifactReader',
+    blocker: {
+      file: 'tests/integration/session-resource-wiring.test.ts',
+      symbol: 'still refuses the canonical file mount root on the shipped providers',
+      detail: 'the shipped sandbox backends refuse the canonical /mnt/session/uploads mount root',
+    },
   },
   'local-delegation-subagent': {
     file: 'src/core/session/delegation-service.ts',
@@ -86,7 +117,7 @@ export interface ContractHonestyInput {
   /** `routeKey()` values for the routes the server actually mounts. */
   mountedRouteKeys: ReadonlySet<string>;
   /** Overridable so a fixture can prove the wiring rule fires. */
-  wiring?: Readonly<Record<string, { file: string; symbol: string }>>;
+  wiring?: Readonly<Record<string, WiringRequirement>>;
 }
 
 export interface StatusBlock {
@@ -376,12 +407,17 @@ function splitRouteKey(key: string): [string, string] {
 }
 
 /**
- * A capability the composition root must wire to be `supported` — and one it
- * must not report as `supported` while it is unwired.
+ * A capability's status against the composition that decides it.
+ *
+ * Three states, one expected status each: unwired is anything but `supported`,
+ * wired with a live blocker is `partial`, and wired with no recorded blocker is
+ * `supported`. Letting any pair disagree is how a `partial` outlives the gap it
+ * described, or a `supported` is published for behaviour a caller still cannot
+ * reach.
  */
 function checkProductionWiring(
   entries: readonly CapabilityEntry[],
-  wiring: Readonly<Record<string, { file: string; symbol: string }>>,
+  wiring: Readonly<Record<string, WiringRequirement>>,
   read: (path: string) => string | undefined,
 ): string[] {
   const problems: string[] = [];
@@ -394,16 +430,27 @@ function checkProductionWiring(
     }
     const text = read(requirement.file);
     const wired = text !== undefined && text.includes(requirement.symbol);
-    const claimsSupported = entry.status === 'supported';
+    const blocker = requirement.blocker;
+    const blocked = blocker !== undefined
+      && (read(blocker.file) ?? '').includes(blocker.symbol);
 
-    if (claimsSupported && !wired) {
+    if (!wired) {
+      if (entry.status === 'supported') {
+        problems.push(
+          `${id} is "supported" but no runtime composition uses ${requirement.symbol} in ${requirement.file}`,
+        );
+      }
+      continue;
+    }
+
+    if (blocked && entry.status !== 'partial') {
       problems.push(
-        `${id} is "supported" but no runtime composition uses ${requirement.symbol} in ${requirement.file}`,
+        `${id} is "${entry.status}" while ${blocker.detail}; ${blocker.file} still pins it, so the status is not "partial"`,
       );
     }
-    if (!claimsSupported && wired) {
+    if (!blocked && entry.status !== 'supported') {
       problems.push(
-        `${id} is "${entry.status}" but ${requirement.file} now wires ${requirement.symbol}; raise the status to "supported"`,
+        `${id} is "${entry.status}" but ${requirement.file} wires ${requirement.symbol} and no recorded blocker remains; raise the status to "supported"`,
       );
     }
   }

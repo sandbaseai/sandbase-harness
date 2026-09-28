@@ -15,6 +15,7 @@ import {
   type MaterializeDeps,
   type MaterializeResult,
 } from '@/core/resources/github-materializer.js';
+import { repoSkillFilePath } from '@/core/resources/github-repository.js';
 
 /** Minimal warn sink so the lifecycle can report capability gaps. */
 export interface SandboxLifecycleLogger {
@@ -77,9 +78,12 @@ export class SandboxLifecycle {
    *
    * A repository's `.claude/skills` enters the agent's instruction boundary at
    * session start, so the names must be reachable by the context builder
-   * without re-listing the sandbox on every turn.
+   * without re-listing the sandbox on every turn. The mount path is kept beside
+   * them because a name alone cannot be read: the instructions live in the
+   * mounted tree, and the reader needs the path the skill was actually written
+   * to.
    */
-  private readonly repositorySkills = new Map<string, string[]>();
+  private readonly repositorySkills = new Map<string, Array<{ mountPath: string; skills: string[] }>>();
   /**
    * Backends whose lack of isolation has already been reported.
    *
@@ -203,13 +207,15 @@ export class SandboxLifecycle {
       throw new Error('GitHub repository session resources require a repository materializer');
     }
 
-    const skills = new Set<string>();
+    const mounts: Array<{ mountPath: string; skills: string[] }> = [];
     for (const resource of resources) {
       const result = await materializer(resource, sandbox);
       if (!result.ok) throw new Error(result.message);
-      for (const skill of result.skills) skills.add(skill);
+      if (result.skills.length > 0) {
+        mounts.push({ mountPath: result.mountPath, skills: [...result.skills] });
+      }
     }
-    if (skills.size > 0) this.repositorySkills.set(session.id, [...skills]);
+    if (mounts.length > 0) this.repositorySkills.set(session.id, mounts);
   }
 
   /**
@@ -219,7 +225,23 @@ export class SandboxLifecycle {
    * at which a repository actually exists to scan.
    */
   discoveredRepositorySkills(sessionId: string): string[] {
-    return this.repositorySkills.get(sessionId) ?? [];
+    const mounts = this.repositorySkills.get(sessionId) ?? [];
+    return [...new Set(mounts.flatMap((entry) => entry.skills))];
+  }
+
+  /**
+   * Read paths of the discovered repository skills, inside the sandbox.
+   *
+   * The context builder reads each `SKILL.md` through the sandbox it was
+   * written to, so what the prompt says is what the agent can see. A repository
+   * whose tree ships no skills contributes nothing rather than an empty path.
+   */
+  discoveredRepositorySkillFiles(sessionId: string): Array<{ name: string; path: string }> {
+    const mounts = this.repositorySkills.get(sessionId) ?? [];
+    return mounts.flatMap((entry) => entry.skills.map((name) => ({
+      name,
+      path: repoSkillFilePath(entry.mountPath, name),
+    })));
   }
 
   snapshotAfterTurn(session: Session, sandbox: SandboxInstance): void {

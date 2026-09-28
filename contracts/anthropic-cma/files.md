@@ -1,11 +1,12 @@
 # CMA Contract — files
 
 Contract area: `/v1/files` and file session resources.
-Status: `partial` — the Files API and the mount-path form are implemented, but a
-session's file resources are not mounted by any runtime composition. See §4.
+Status: `partial` — the Files API, the mount-path form, and the reader the
+provisioning pass calls are implemented, but the shipped sandbox backends refuse
+the canonical mount root, so an attached file still cannot be written. See §4.
 Source: `src/core/session/file-mount-path.ts`,
 `src/api/routes/session-resources.ts`, `src/core/session/session-resources.ts`,
-`src/api/routes/files.ts`.
+`src/core/runtime/session-runtime.ts`, `src/api/routes/files.ts`.
 
 <!-- capability-status
 file-resources: partial
@@ -57,21 +58,34 @@ Session file resources:
   differs from `memory_store` (creation-only) and `github_repository` (token
   rotation only).
 
-Mounting is the part that is not wired:
+Mounting is composed and still blocked by the backends:
 
 - `SandboxLifecycle.materializeFileResources` writes each attached file into the
-  sandbox by calling an injected `fileArtifactReader`, and throws
-  `File session resources require an artifact reader` when that dependency is
-  absent. Nothing in `src/` supplies it: `createRuntimeSessionServices` and
-  `DefaultSessionExecutor` pass no reader, and the only callers that do are
-  tests. A session created with a file resource therefore succeeds and then
-  fails on its first turn, rather than failing at creation with the dependency
-  named.
+  sandbox by calling an injected `fileArtifactReader`. The composition root
+  supplies one: `createRuntimeSessionServices` builds it from the database and
+  the artifact store
+  (`createFileArtifactReader` in `src/core/session/session-resources.ts`), and
+  `src/index.ts` passes the workspace data directory. The lookup is the one
+  resource admission performs — `role = 'file'`, not archived, backed by an
+  artifact that is on disk — so a resource the API accepted cannot fail here for
+  a different reason, and an archived upload or a session artifact cannot be
+  mounted through this path.
+- What still fails is the write itself. The bytes go to the canonical
+  `/mnt/session/uploads` root, and the shipped sandbox backends confine every
+  path to their own workspace root: `LocalSandboxProvider` (and Kubernetes for
+  the `/mnt/...` root) answer `Path escapes sandbox workspace`. A session created
+  with a file resource therefore succeeds and then fails at provisioning, rather
+  than failing at creation with a missing dependency named. The entry stays
+  `partial` for that reason, and
+  `tests/integration/session-resource-wiring.test.ts` pins the refusal so that
+  fixing a backend forces the status to move.
 
 ## 3. Alignment
 
 Aligned for: upload/list/read, the scoped listing, resource attachment, canonical
-mount path form, and independent resource identity.
+mount path form, independent resource identity, and the reader the provisioning
+pass calls — an attached file is read back from the Files API's own row and
+artifact.
 
 ## 4. Differences
 
@@ -82,7 +96,7 @@ mount path form, and independent resource identity.
 | Mount root | SandBase mounts under its own sandbox root layout. The published contract specifies a logical path, not a host directory. |
 | What a scoped listing contains | `scope_id` selects files whose recorded session is that session. A file created directly through `POST /v1/files` records no session, so it appears in the unscoped listing and in **no** scoped one — it is not attributed to a session that did not create it. The published contract describes session outputs; it does not state where a session-less upload should appear, so the choice is to leave it unattributed rather than guess an owner. |
 | The listing excludes `role = 'artifact'` | Rows written with `role = 'artifact'` are outside this listing in both scoped and unscoped form. That predates the scope parameter and is unchanged by it; recorded here because a caller reasoning about "every file for this session" should know the listing is not the whole table. |
-| Mounting is not composed | The mount path is derived and validated, but no runtime composition injects the artifact reader the provisioning pass needs, so an attached file is not written into the sandbox and the first turn fails. Recorded as `partial` rather than `supported` until the composition root supplies the reader. |
+| The shipped backends refuse the mount root | The mount path is derived and validated, and the reader is wired, but the write lands on `/mnt/session/uploads`, which the shipped providers reject as outside their workspace root. Recorded as `partial` rather than `supported` until a backend accepts the canonical roots. |
 
 ## 5. Reason for the difference
 
@@ -93,10 +107,12 @@ mount path form, and independent resource identity.
   and later removed is a fact worth retaining, and a hard delete would erase
   the evidence that it was ever mounted.
 - The reader is injected rather than imported so the lifecycle stays free of
-  host storage concerns, and a test can attach a fixture file. That choice is
-  what makes the missing production wiring a configuration gap instead of a
-  compile error, which is why the entry is `partial` and not `supported`: the
-  code path exists, but a caller cannot reach it from a started runtime.
+  host storage concerns, and a test can attach a fixture file. The composition
+  root is where the host-facing default belongs, because that is the only layer
+  holding the workspace directory, the database, and the artifact store at once.
+  It is wired there now rather than in the lifecycle, and the entry stays
+  `partial` only because the mount still cannot be written on the shipped
+  backends.
 
 ## 6. Corresponding tests
 
@@ -111,7 +127,18 @@ mount path form, and independent resource identity.
   `/mnt/session/uploads`, a legacy pre-canonical row, the write happening after a
   snapshot restore and exactly once per bound sandbox, and a traversal path
   cleaning up the failed provision. The reader is injected by the test, which is
-  precisely the dependency a runtime composition does not supply.
+  the way a unit-level case drives one dependency at a time.
+- `tests/integration/session-resource-wiring.test.ts` — the same pass through the
+  composition root instead of a hand-built lifecycle: an uploaded file's bytes
+  reach the sandbox at `/mnt/session/uploads/notes/input.txt` for a session
+  created by `POST /v1/sessions` and by `POST /v1/runs`, a resource whose row is
+  gone is reported as `File not found` by the default reader, and the shipped
+  backends' refusal of the canonical root is pinned so that fixing one forces the
+  status to move.
+- `tests/unit/file-artifact-reader.test.ts` — the default reader's row
+  semantics: the bytes the Files API stored, an archived file, a row whose
+  artifact is gone, and a session artifact, each answered as the resource
+  admission check would answer it.
 - `tests/integration/files-scope-id.test.ts` — the scoped listing: one session's
   files are returned and another's are not (asserted in both directions, so the
   case cannot pass by the filter always selecting the same session), an unknown
@@ -122,8 +149,11 @@ mount path form, and independent resource identity.
 
 ## 7. Status
 
-`partial` — file upload/list/read, mount path derivation, resource identity, and
-the running-session resource lifecycle are implemented and covered by tests,
-while mounting an attached file into a session's sandbox is not reachable from a
-started runtime. The mount-path entry is `supported` on its own, because path
-derivation and validation are complete and tested.
+`partial` — file upload/list/read, mount path derivation, resource identity, the
+running-session resource lifecycle, and the reader the provisioning pass calls
+are implemented and covered by tests. It is not `supported` because the write
+itself is refused: the bytes go to the canonical `/mnt/session/uploads` root and
+the shipped sandbox backends confine every path to their own workspace root, so a
+session that attaches a file is accepted and then fails at provisioning. The
+mount-path entry is `supported` on its own, because path derivation and
+validation are complete and tested.

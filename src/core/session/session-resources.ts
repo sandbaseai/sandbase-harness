@@ -27,10 +27,37 @@
  */
 
 import type { Database } from '@/core/db/database.js';
+import type { ArtifactStore } from '@/core/storage/artifact-store.js';
+import type { FileArtifactReader } from './sandbox-lifecycle.js';
 import { nanoid } from 'nanoid';
 
 /** Canonical resource-instance ID prefix. */
 export const SESSION_RESOURCE_ID_PREFIX = 'sesrsc_';
+
+/**
+ * Read the bytes of an attached file resource.
+ *
+ * The composition root hands this to `SandboxLifecycle` so a session's file
+ * resources can be written into the sandbox. The lookup is the one resource
+ * admission performs — `role = 'file'`, not archived, backed by an artifact
+ * that is actually on disk — so the reader can neither fail a resource the API
+ * accepted nor become a way to mount a session artifact or an archived upload
+ * that admission refuses.
+ */
+export function createFileArtifactReader(
+  db: Database,
+  artifactStore: ArtifactStore,
+): FileArtifactReader {
+  return (fileId: string) => {
+    const row = db.prepare(
+      "SELECT storage_path FROM files WHERE id = ? AND role = 'file' AND archived_at IS NULL",
+    ).get(fileId) as { storage_path?: string } | undefined;
+    if (!row?.storage_path || !artifactStore.exists(row.storage_path)) {
+      throw new Error(`File not found: ${fileId}`);
+    }
+    return artifactStore.readFile(row.storage_path);
+  };
+}
 
 export type SessionResourceType = 'file' | 'github_repository' | 'memory_store';
 

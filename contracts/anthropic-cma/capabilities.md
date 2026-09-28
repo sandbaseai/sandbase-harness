@@ -71,7 +71,12 @@ under this directory, and the real mount graph to the same facts:
   `unavailable` must name an existing source file there, and a `supported` entry
   must name an existing test in §6;
 - a capability the composition root has to wire cannot be `supported` while
-  nothing wires it — and cannot stay below `supported` once something does;
+  nothing wires it, and cannot stay below `supported` once something does and no
+  recorded blocker remains. When a wired capability is still `partial` for a
+  reason outside the composition root — the shipped sandbox backends refusing the
+  canonical mount roots, for the two session-resource entries — the reason and
+  the canary that pins it are recorded beside the wiring symbol, and the guard
+  fails if the status moves to `supported` while that canary still pins the gap;
 - the routes listed in `routes.md` and the routes the server mounts are the same
   set of `method + path` pairs.
 

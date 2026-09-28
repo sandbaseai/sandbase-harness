@@ -24,13 +24,18 @@ import type { McpServerStatus } from '@/core/mcp/mcp-manager.js';
 import { EventLogger } from './event-logger.js';
 import { parkedCalls } from './parked-calls.js';
 import { ContextCompactor } from './context-compactor.js';
-import type { Skill } from '@/core/skills/loader.js';
+import { parseSkill, type Skill } from '@/core/skills/loader.js';
 import type { MemoryProvider } from '@/core/memory/memory-provider.js';
 import type { MemoryMountAdapter } from '@/core/memory/mount-adapter.js';
 import { resolveMemoryBindings } from '@/core/memory/bindings.js';
 import type { SnapshotManager } from './snapshot-manager.js';
 import { collectSessionOutputs, type SessionOutputFile } from './session-outputs.js';
-import { SandboxLifecycle, type SandboxLifecycleLogger } from './sandbox-lifecycle.js';
+import {
+  SandboxLifecycle,
+  type FileArtifactReader,
+  type GithubRepositoryMaterializer,
+  type SandboxLifecycleLogger,
+} from './sandbox-lifecycle.js';
 import { ContextBuilder } from './context-builder.js';
 import { DelegationService } from './delegation-service.js';
 import { ToolResolver, type SandboxCredentials } from './tool-resolver.js';
@@ -99,6 +104,23 @@ export interface ExecutorDeps {
   /** Optional sink for sandbox capability-gap warnings. */
   logger?: SandboxLifecycleLogger;
   /**
+   * Read an attached file resource's bytes, so provisioning can mount it.
+   *
+   * Optional: an embedder that never attaches a file resource passes nothing,
+   * and a session that *does* attach one fails loudly at provisioning rather
+   * than starting without the file the caller declared. The production
+   * composition supplies it.
+   */
+  fileArtifactReader?: FileArtifactReader;
+  /**
+   * Mount a `github_repository` resource into a session's sandbox.
+   *
+   * Optional on the same terms as {@link fileArtifactReader}: absent means a
+   * session with a repository resource fails at provisioning with the gap
+   * named, instead of starting against a tree the caller did not ask for.
+   */
+  githubMaterializer?: GithubRepositoryMaterializer;
+  /**
    * Resolve a session's vault credentials for a turn.
    *
    * Optional: a runtime with no vault store passes nothing, and a session with no
@@ -124,7 +146,19 @@ export class DefaultSessionExecutor implements SessionExecutor {
   private readonly toolResolver: ToolResolver;
 
   constructor(private readonly deps: ExecutorDeps) {
-    this.sandboxLifecycle = new SandboxLifecycle(deps);
+    // Named rather than spread: these are the two dependencies that decide
+    // whether a session's declared resources can be materialized at all, and a
+    // field silently dropped here would turn a wired runtime back into one that
+    // refuses at provisioning.
+    this.sandboxLifecycle = new SandboxLifecycle({
+      sandboxProvider: deps.sandboxProvider,
+      sandboxRegistry: deps.sandboxRegistry,
+      resolveEnvironmentConfig: deps.resolveEnvironmentConfig,
+      snapshots: deps.snapshots,
+      fileArtifactReader: deps.fileArtifactReader,
+      githubMaterializer: deps.githubMaterializer,
+      logger: deps.logger,
+    });
     this.contextBuilder = new ContextBuilder({
       eventLogger: deps.eventLogger,
       compactor: deps.compactor,
@@ -259,12 +293,17 @@ export class DefaultSessionExecutor implements SessionExecutor {
     const broadcast = options?.broadcast ?? (() => {});
 
     // 4. Build context: compaction, Event_Log projection, skills, and memory.
+    // A repository mounted for this session ships its own `.claude/skills`; the
+    // instructions are read out of the sandbox they were written to, so the
+    // prompt and the tree the agent can see cannot disagree.
+    const repositorySkills = await this.loadRepositorySkills(session, sandbox);
     const { systemPrompt, messages } = await this.contextBuilder.build(
       session,
       agent,
       event,
       model,
       broadcast,
+      { repositorySkills },
     );
 
     // 5. Build tools: built-in sandbox tools, MCP tools, delegation tools, and
@@ -361,8 +400,46 @@ export class DefaultSessionExecutor implements SessionExecutor {
     }
   }
 
-  private skillDirsFor(agent: AgentDefinition): string[] {
-    const root = this.deps.skillsDir;
+  /**
+   * Read the skills a mounted repository ships, out of the sandbox.
+   *
+   * The names were discovered when the repository was materialized; the
+   * instructions live in `SKILL.md` inside the mounted tree, so they are read
+   * back through the same sandbox. A skill that was discovered but cannot be
+   * read fails the turn: the repository is part of the instruction boundary the
+   * caller declared, and starting without it would run the session against a
+   * different contract. A file that is readable but carries no usable
+   * frontmatter is reported and skipped, because that is a property of the
+   * repository's own content rather than of the runtime.
+   */
+  private async loadRepositorySkills(session: Session, sandbox: SandboxInstance): Promise<Skill[]> {
+    const files = this.sandboxLifecycle.discoveredRepositorySkillFiles(session.id);
+    if (files.length === 0) return [];
+
+    const skills: Skill[] = [];
+    for (const file of files) {
+      let content: string;
+      try {
+        content = await sandbox.readFile(file.path);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        throw new Error(`Repository skill ${file.name} could not be read: ${reason}`);
+      }
+      const skill = parseSkill(content, file.name, file.path);
+      if (!skill) {
+        this.deps.logger?.warn('repository skill skipped: no usable frontmatter', {
+          session: session.id,
+          skill: file.name,
+          path: file.path,
+        });
+        continue;
+      }
+      skills.push(skill);
+    }
+    return skills;
+  }
+
+  private skillDirsFor(agent: AgentDefinition): string[] {    const root = this.deps.skillsDir;
     if (!root) return [];
     const resolvedRoot = resolve(root);
     const byId = new Map((this.deps.skills ?? []).map((skill) => [skill.id, skill]));

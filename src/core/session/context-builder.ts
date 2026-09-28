@@ -33,6 +33,18 @@ export interface BuiltContext {
   messages: ReturnType<typeof eventsToMessages>;
 }
 
+export interface ContextBuildOptions {
+  /**
+   * Skills discovered inside a repository mounted for this session, already
+   * read out of that sandbox.
+   *
+   * Deliberately not filtered by the agent's `skills` list: attaching the
+   * repository is what puts its skills in the instruction boundary, so gating
+   * them on a per-agent assignment would drop half of what the caller declared.
+   */
+  repositorySkills?: Skill[];
+}
+
 export class ContextBuilder {
   constructor(private readonly deps: ContextBuilderDeps) {}
 
@@ -42,17 +54,14 @@ export class ContextBuilder {
     event: UserEvent,
     model: unknown | undefined,
     broadcast: (event: SessionEvent) => void,
+    options?: ContextBuildOptions,
   ): Promise<BuiltContext> {
     await this.compactIfNeeded(session, model, broadcast);
 
     const events = this.deps.eventLogger.getEvents(session.id);
     const messages = eventsToMessages(events);
 
-    let systemPrompt = composeSystemPrompt(
-      agent.system,
-      getAgentSkillIds(agent),
-      this.deps.skills ?? [],
-    );
+    let systemPrompt = this.composeSystemPrompt(agent, options?.repositorySkills);
     if (this.deps.memory && session.contextId) {
       systemPrompt = await this.injectMemory(systemPrompt, session.contextId, event);
     }
@@ -97,11 +106,19 @@ export class ContextBuilder {
     }
   }
 
-  composeSystemPrompt(agent: AgentDefinition): string {
+  composeSystemPrompt(agent: AgentDefinition, repositorySkills?: Skill[]): string {
+    const assigned = getAgentSkillIds(agent);
+    const discovered = repositorySkills ?? [];
+    if (discovered.length === 0) {
+      return composeSystemPrompt(agent.system, assigned, this.deps.skills ?? []);
+    }
+    // One call rather than a second appended block: the rendering is the
+    // existing `# Available Skills` section, and two of them would read as two
+    // separate capability lists for what is one instruction boundary.
     return composeSystemPrompt(
       agent.system,
-      getAgentSkillIds(agent),
-      this.deps.skills ?? [],
+      [...assigned, ...discovered.map((skill) => skill.name)],
+      [...(this.deps.skills ?? []), ...discovered],
     );
   }
 

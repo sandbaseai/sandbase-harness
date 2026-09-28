@@ -118,6 +118,10 @@ async function startServer(opts: StartServerOptions) {
     sandboxProvider,
     sandboxRegistry,
     runtimeComposition,
+    // The same workspace directory the API routes encrypt a resource's
+    // authorization token against, so the default repository materializer can
+    // decrypt it, and the directory its clone cache belongs under.
+    dataDir,
     strategy: loopEngine.strategy,
     loopEngine: loopEngine.provider,
     resolveStrategy: (provider) => {

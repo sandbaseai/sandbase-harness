@@ -1,3 +1,4 @@
+import { join } from 'node:path';
 import type { Database } from '../db/database.js';
 import { runtimeCapabilityRegistry } from '../capabilities/registry.js';
 import { loadAgentDefinitionById } from '../agent/store.js';
@@ -19,7 +20,9 @@ import type { SandboxProviderRegistry } from '@/sandbox/registry.js';
 import type { AgentDefinition } from '@/types/agent.js';
 import type { AgentStrategy } from '@/types/strategy.js';
 import type { SessionLoopEngine } from '@/types/session.js';
-import type { SandboxLifecycleLogger } from '../session/sandbox-lifecycle.js';
+import type { SandboxLifecycleLogger, FileArtifactReader, GithubRepositoryMaterializer } from '../session/sandbox-lifecycle.js';
+import { createFileArtifactReader } from '../session/session-resources.js';
+import { createGithubMaterializer } from '../resources/github-runtime.js';
 import type { RuntimeComposition } from './composition.js';
 import type { CredentialInjectionBundle, CredentialInjectionTarget } from '@/core/credentials/injection.js';
 
@@ -75,6 +78,21 @@ export interface RuntimeSessionServicesOptions {
   resolveRubricFile?: (fileId: string) => string | undefined;
   /** Optional sink for sandbox capability-gap warnings. */
   logger?: SandboxLifecycleLogger;
+  /**
+   * Workspace data directory.
+   *
+   * Required for the default repository materializer: the clone cache lives
+   * under it, and a resource's authorization token is encrypted with key
+   * material derived from it, so the materializer has to be given the same
+   * directory the API routes encrypted with. Without it no default materializer
+   * is built, and a session that attaches a repository keeps failing loudly at
+   * provisioning instead of starting against a tree it could not read.
+   */
+  dataDir?: string;
+  /** Override the default repository materializer (tests, embedders). */
+  githubMaterializer?: GithubRepositoryMaterializer;
+  /** Override the default reader for attached file resources (tests, embedders). */
+  fileArtifactReader?: FileArtifactReader;
 }
 
 export interface RuntimeSessionServices {
@@ -95,6 +113,26 @@ export function createRuntimeSessionServices(options: RuntimeSessionServicesOpti
   const eventLogger = sessionManager.getEventLogger();
   const snapshots = new SnapshotManager(options.db, options.artifactStore.path('snapshots'));
   const memoryRecords = options.memoryRecords ?? new SqliteMemoryRecordsProvider(options.db);
+
+  // The two dependencies `SandboxLifecycle` needs to materialize a session's
+  // declared resources. Both are defaulted here, in the composition root, which
+  // is the only layer that holds the workspace directory, the database, and the
+  // artifact store at once. An embedder that supplies neither still runs; a
+  // session that attaches such a resource then fails at provisioning with the
+  // missing dependency named, which is the behaviour this wiring replaces for
+  // the started runtime.
+  const fileArtifactReader = options.fileArtifactReader
+    ?? createFileArtifactReader(options.db, options.artifactStore);
+  const githubMaterializer = options.githubMaterializer
+    ?? (options.dataDir
+      ? createGithubMaterializer({
+          cacheRoot: join(options.dataDir, 'cache'),
+          // The token was encrypted against this directory by the session
+          // resource routes; handing the materializer anything else would make
+          // every authorized clone fail to decrypt.
+          dataDir: options.dataDir,
+        })
+      : undefined);
 
   const executor = new DefaultSessionExecutor({
     agents: options.agents,
@@ -125,6 +163,13 @@ export function createRuntimeSessionServices(options: RuntimeSessionServicesOpti
     // no vault.
     resolveCredentialInjections: options.resolveCredentialInjections,
     logger: options.logger,
+    // Session resources are materialized at provisioning, which is the first
+    // point a sandbox exists. Both dependencies are passed explicitly: the
+    // executor hands them to `SandboxLifecycle`, and dropping either one here
+    // would put the runtime back to refusing a session whose resources the
+    // caller declared and the API accepted.
+    fileArtifactReader,
+    githubMaterializer,
     sessionOutputSink: (sessionId, files) => {
       recordSessionOutputs({
         db: options.db,

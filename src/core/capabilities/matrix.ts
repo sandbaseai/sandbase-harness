@@ -292,7 +292,7 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
     area: 'github-repository',
     id: 'github-repository-materialization',
     status: 'partial',
-    reason: 'The materializer itself is implemented and covered by unit and host-level tests, but no runtime composition supplies it: SandboxLifecycle refuses to provision a session that attaches a github_repository resource unless a `githubMaterializer` dependency is injected, and neither `createRuntimeSessionServices` nor the executor passes one, so the session is accepted and then fails on its first turn instead of cloning. The skills a repository ships never reach the context builder either, because `discoveredRepositorySkills` has no caller. Not `supported` until the composition root wires the materializer and the discovered-skill path.',
+    reason: 'The composition root injects the materializer and the discovered-skill path reaches the context builder: `createRuntimeSessionServices` builds a `createGithubMaterializer` default and the executor reads each discovered SKILL.md out of the sandbox. What still blocks a mounted repository is the backends: the clone is copied through the sandbox at the canonical `/workspace/<repo>` root, and the shipped providers confine every path to their own workspace root and refuse it, so a session that attaches a repository is accepted and then fails at provisioning. Not `supported` until a backend accepts the canonical mount roots.',
     contract: 'contracts/anthropic-cma/github-repository.md',
   },
   {
@@ -306,7 +306,7 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
     area: 'files',
     id: 'file-resources',
     status: 'partial',
-    reason: 'Upload, list, read, resource identity, and canonical mount-path derivation are implemented and tested, but mounting is not: SandboxLifecycle refuses to provision a session that attaches a file resource unless a `fileArtifactReader` dependency is injected, and no runtime composition supplies one, so a session created with file resources is accepted and then fails on its first turn. Not `supported` until the composition root wires the reader.',
+    reason: 'Upload, list, read, resource identity, and canonical mount-path derivation are implemented and tested, and the composition root now injects a reader built from the database and the artifact store, so an attached file is read back at provisioning. What still blocks the mount is the backends: the bytes are written to the canonical `/mnt/session/uploads` root, and the shipped providers confine every path to their own workspace root and refuse it, so a session created with file resources is accepted and then fails at provisioning. Not `supported` until a backend accepts the canonical mount roots.',
     contract: 'contracts/anthropic-cma/files.md',
   },
   {
