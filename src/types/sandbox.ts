@@ -139,8 +139,15 @@ export interface SandboxInstance {
   execute(command: string, options?: ExecOptions): Promise<ExecResult>;
 
   /**
-   * Write a file (relative to the sandbox root, or at a canonical in-sandbox
-   * path such as `/workspace/...` or `/mnt/session/...`).
+   * Write a file, named relative to the sandbox root or by a canonical
+   * in-sandbox path such as `/workspace/...` or `/mnt/session/...`.
+   *
+   * Each backend honours that spelling to the extent its own confinement allows,
+   * so a canonical path is not portable: the local backend maps the canonical
+   * roots into its sandbox directory, docker refuses every absolute path,
+   * kubernetes accepts a path under its `/workspace` and refuses the upload root,
+   * and a self-hosted worker decides for itself. The relative spelling is the one
+   * every backend accepts.
    */
   writeFile(path: string, content: string | Buffer): Promise<void>;
 
@@ -154,7 +161,10 @@ export interface SandboxInstance {
    * holding `/mnt/session/outputs/report.md` answers `listFiles` for that
    * directory with `mnt/session/outputs/report.md` — a path this interface's
    * `readFile` accepts back. Callers must not assume bare child names: the
-   * shipped providers all answer with root-relative paths.
+   * in-process providers answer with root-relative paths. A `self_hosted` worker
+   * answers with whatever spelling its operator implemented, and reading an entry
+   * as root-relative first, then as a name under the directory, is what the
+   * session-output collector does to handle both.
    */
   listFiles(path: string): Promise<string[]>;
 

@@ -326,9 +326,10 @@ curl -X POST http://127.0.0.1:3000/v1/sessions \
 ```
 
 The logical `mount_path` is mapped under the runtime's own mount root, so that
-file is readable inside the session at `/mnt/session/uploads/notes.txt`. On the
-default `local` backend each session gets a directory under the workspace data
-directory, so the same bytes are at
+file is readable inside the session at `/mnt/session/uploads/notes.txt` (a command
+the agent runs names the same file by its sandbox-relative spelling,
+`mnt/session/uploads/notes.txt`). On the default `local` backend each session gets
+a directory under the workspace data directory, so the same bytes are at
 `<data-dir>/sandbox/<session_id>/mnt/session/uploads/notes.txt`. The container
 backends still refuse that root, so a file resource on `docker` or `kubernetes`
 is accepted and then fails at provisioning; see

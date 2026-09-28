@@ -52,12 +52,12 @@ export interface SessionOutputFile {
  * deliverables, and a single unreadable file must not fail the turn that just
  * completed. A missing directory or listing error yields an empty result.
  *
- * An entry is read in the spelling its provider uses. The shipped providers
+ * An entry is read in the spelling its provider uses. The in-process providers
  * answer with paths relative to the sandbox root
- * (`mnt/session/outputs/report.md`), which is already the whole answer; a
- * provider that answers with a name relative to the directory it was asked
- * about is handled by descending into it, because a name is only known to be a
- * file once reading it succeeds.
+ * (`mnt/session/outputs/report.md`), which is already the whole answer; a provider
+ * that answers with a name relative to the directory it was asked about — a
+ * `self_hosted` worker may — is handled by descending into it, because a name is
+ * only known to be a file once reading it succeeds.
  *
  * Known limitation: the sandbox read interface yields text, so a binary
  * deliverable (`.zip`, image) is stored as its decoded text rather than its

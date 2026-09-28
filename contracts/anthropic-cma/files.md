@@ -75,10 +75,13 @@ Mounting is composed and blocked by the container backends:
   maps that root into its sandbox directory, so on a local session the bytes are
   written where the resource says they are and read back through the same path
   (`LocalSandboxProvider`; see `tests/integration/local-canonical-roots.test.ts`).
-  The container backends do not: `docker` refuses an absolute path at all and
-  Kubernetes refuses anything outside `/workspace`, so a session on one of those
-  is accepted and then fails at provisioning. The entry stays `partial` for that
-  reason, and because the agent is not told the mount path it was given;
+  The same mapping covers an `execute` working directory; a command string is not
+  rewritten, so inside a command the file is named by its sandbox-relative
+  spelling and the agent has to be told that spelling. The container backends do
+  not map anything: `docker` refuses an absolute path at all and Kubernetes
+  refuses anything outside `/workspace`, so a session on one of those is accepted
+  and then fails at provisioning. The entry stays `partial` for that reason, and
+  because the agent is not told the mount path it was given;
   `tests/integration/session-resource-wiring.test.ts` pins the container refusal
   so that fixing one forces the status to move.
 

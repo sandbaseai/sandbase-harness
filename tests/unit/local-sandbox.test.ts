@@ -284,9 +284,28 @@ describe('Local Sandbox Provider', () => {
 
       const result = await sandbox.execute('node -p "process.cwd()"', { cwd: '/workspace/project' });
       expect(result.exitCode, result.stderr).toBe(0);
+      // The working directory is *placed* inside the sandbox, but the command runs
+      // as an ordinary host subprocess, so what it reports is the host path of the
+      // mapped directory. That is why a command names files by their
+      // sandbox-relative spelling — the case below — and why the canonical
+      // spelling is for the file tools rather than for a command line.
       expect(resolve(result.stdout.trim())).toBe(
         join(tmpDir, 'sandbox', 'sess_canonical_cwd', 'workspace', 'project'),
       );
+    });
+
+    it('reads the same file from a command by its sandbox-relative spelling', async () => {
+      const sandbox = await sandboxFor('sess_canonical_command_read');
+      await sandbox.writeFile('/mnt/session/uploads/notes.txt', 'attached bytes');
+
+      // The mapping is not applied to a command string, so the file is named the
+      // way the shell sees it: relative to the working directory, which is the
+      // sandbox directory by default.
+      const result = await sandbox.execute(
+        'node -p "require(\'fs\').readFileSync(\'mnt/session/uploads/notes.txt\',\'utf8\')"',
+      );
+      expect(result.exitCode, result.stderr).toBe(0);
+      expect(result.stdout).toContain('attached bytes');
     });
 
     it('refuses absolute paths outside the canonical roots', async () => {

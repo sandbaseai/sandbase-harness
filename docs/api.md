@@ -590,10 +590,12 @@ A `file` and a `github_repository` resource are both materialized at provisionin
 into the canonical roots the runtime reserves for them
 (`/mnt/session/uploads/...` and `/workspace/<repo>`). The `local` backend maps
 those roots into the session's sandbox directory, so on a local session the
-resource is written where the resource says it is. The container backends confine
-file paths to their own workspace root and refuse those roots, so a session on one
-of them is accepted and then fails at provisioning, and the mount path is not yet
-part of the agent's instructions. See
+resource is written where the resource says it is. The container backends have no
+such mapping: `docker` refuses every absolute path, so both resources fail there;
+`kubernetes` resolves an absolute path against its own `/workspace`, which accepts
+a repository mount and refuses the upload root, so a file resource fails there. In
+either case the session is accepted and then fails at provisioning, and the mount
+path is not yet part of the agent's instructions. See
 [Mounting a file into a session](#mounting-a-file-into-a-session) for the file
 case and `contracts/anthropic-cma/github-repository.md` for the repository case;
 both capabilities are recorded as `partial`.
@@ -1331,6 +1333,10 @@ itself, which is why `/uploads/file.txt` and `/file.txt` both land at
 On the `local` backend the bytes are written at that sandbox path and read back
 from it, so `LocalSandboxProvider` recognizes the canonical `/mnt/session/...`
 and `/workspace/...` roots by mapping them into the session's sandbox directory.
+A command string is not rewritten: the shell resolves an absolute path against
+the host filesystem, so inside a command the same file is named by its
+sandbox-relative spelling (`mnt/session/uploads/file.txt`), and a tool that
+reaches the sandbox through the runtime's file API can use the canonical path.
 The container backends still do not: `docker` rejects an absolute path outright
 and `kubernetes` rejects anything outside `/workspace`, so a session that attaches
 a file resource on one of those is accepted and then fails at provisioning
@@ -1338,7 +1344,11 @@ a file resource on one of those is accepted and then fails at provisioning
 decides for itself. The capability is recorded as `partial` in
 `contracts/anthropic-cma/files.md` for both reasons — the container refusal, and
 the mount path not being named in the agent's instructions yet. On `local`, the
-mount is readable; give the agent the path explicitly until it is announced.
+mount is readable through the file tools and through an `execute` working
+directory; until the path is announced in the system prompt, tell the agent the
+spelling that matches how it will reach the file: the canonical
+`/mnt/session/uploads/file.txt` for a file tool, and the sandbox-relative
+`mnt/session/uploads/file.txt` for a shell command.
 
 ## Session Artifacts
 

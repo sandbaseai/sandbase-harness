@@ -20,9 +20,9 @@
  * is a promise that the bytes are there, so the backend has to reach them at
  * exactly that spelling.
  *
- * The sandbox directory stands for the sandbox's own filesystem root, and a
- * canonical path maps into it by dropping the leading separator:
- * `/workspace/<repo>` is `<sandbox>/workspace/<repo>` and
+ * For this provider's file operations the sandbox directory stands for the
+ * sandbox's own filesystem root, and a canonical path maps into it by dropping the
+ * leading separator: `/workspace/<repo>` is `<sandbox>/workspace/<repo>` and
  * `/mnt/session/uploads/x` is `<sandbox>/mnt/session/uploads/x`. The mapped path
  * then goes through the same resolution and confinement as a relative input, so
  * a canonical root is a second spelling for a path inside the sandbox rather
@@ -35,6 +35,23 @@
  * `uploads` or `outputs` would be written into the directory the runtime reads
  * uploaded files from, publishes session outputs from, and spills oversized tool
  * output into. Keeping the roots apart keeps the mapping injective.
+ *
+ * The mapping covers `readFile`, `writeFile`, `listFiles`, and an `execute`
+ * working directory. It does not cover a command string and cannot: a command runs
+ * as an ordinary host subprocess, so the shell resolves an absolute path against
+ * the host filesystem, where `/mnt/session` and `/workspace` are not this
+ * session's directories. A command therefore names the same file by its
+ * sandbox-relative spelling (`mnt/session/uploads/x`, relative to the working
+ * directory the command starts in), and the agent has to be told that spelling —
+ * a context-builder concern, not a rewrite of the command line that this provider
+ * is in no position to perform.
+ *
+ * Known limitation of the confinement, pre-existing and unchanged here: the
+ * realpath check on a write returns early when the target does not exist, so a
+ * dangling symlink as the final component is not detected and the write follows
+ * it. A symlink whose target exists is caught. Resolving the link itself before
+ * that early return is a separate change; it is recorded here because this file
+ * owns the check.
  *
  * Reference: OMA local-subprocess.ts
  */
@@ -94,7 +111,7 @@ function shellInvocation(command: string): { file: string; args: string[] } {
  * A backend maps each root into its own sandbox interior; the local backend
  * maps them as the sandbox directory's own top-level entries (see the file
  * header). Anything else absolute stays a refusal, so this list is the whole
- * set of absolute paths a session can name.
+ * set of absolute paths a session's file operations can name.
  */
 export const CANONICAL_SANDBOX_ROOTS = ['/workspace', '/mnt/session'] as const;
 

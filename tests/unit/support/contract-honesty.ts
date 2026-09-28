@@ -66,10 +66,11 @@ export interface WiringRequirement {
    * implies "reachable": a session's resources are materialized through the
    * selected sandbox backend. The local backend reaches the canonical in-sandbox
    * roots the lifecycle writes to, so a session there does materialize what it
-   * declared; the container backends still refuse those roots, and the published
-   * contract asks for more than a writable mount (the agent has to be told where
-   * it landed). The runtime reaches the code and part of the claim is still
-   * unhonoured, which is exactly what `partial` means.
+   * declared; docker still refuses them (kubernetes accepts the repository root
+   * and refuses the upload root), and the published contract asks for more than a
+   * writable mount (the agent has to be told where it landed). The runtime reaches
+   * the code and part of the claim is still unhonoured, which is exactly what
+   * `partial` means.
    *
    * Recording the blocker as a marker in the test that demonstrates it keeps the
    * status honest in both directions. The canary fails first when a backend is
@@ -86,7 +87,7 @@ export const PRODUCTION_WIRING: Readonly<Record<string, WiringRequirement>> = {
     symbol: 'githubMaterializer',
     blocker: {
       file: 'tests/integration/session-resource-wiring.test.ts',
-      symbol: 'still refuses the canonical repository mount root on the container backends',
+      symbol: 'still refuses the canonical repository mount root on docker, and kubernetes still accepts it',
       detail: 'the docker sandbox backend refuses the canonical /workspace mount root',
     },
   },
