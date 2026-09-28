@@ -131,7 +131,7 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
     area: 'agents',
     id: 'model-object-profile',
     status: 'partial',
-    reason: 'String and object model forms parse field by field. `effort` is accepted and carried into the stored definition but does not change the provider request and is not projected back on read; `inference_geo` is refused by name with `unsupported_model_field` because this runtime has no inference-geography control; and a canonical `multiagent` roster is refused by name rather than executed.',
+    reason: 'String and object model forms parse field by field. `effort` is accepted, stored, and returned by the read projection (the agent read, the version read, and the session snapshot), but it does not change the provider request — recorded as accepted-but-no-effect rather than as executed, because the provider model is resolved from the id, so the level has no path into a request (a deployment\'s own `reasoning_effort` model setting is operator-level and separate); `inference_geo` is refused by name with `unsupported_model_field` because this runtime has no inference-geography control; and a canonical `multiagent` roster is refused by name rather than executed.',
     contract: 'contracts/anthropic-cma/agents.md',
   },
   {

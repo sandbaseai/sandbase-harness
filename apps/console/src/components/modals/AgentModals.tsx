@@ -2,6 +2,7 @@ import { ChevronDown, FileText } from 'lucide-react';
 import { type FormEvent, useMemo, useState } from 'react';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { postJson, putJson } from '../../api';
+import { sendsModelConfig } from '../../lib/agentModelConfig';
 import { validateAgentDraft } from '../../lib/agentVersionDiff';
 import { CodeEditor } from '../CodeEditor';
 import { Modal } from '../Modal';
@@ -181,7 +182,7 @@ type AgentDraft = {
   name: string;
   description?: string;
   model: string;
-  model_config?: { speed: string };
+  model_config?: { id?: string; speed: string; effort?: string };
   system: string;
   mcp_servers?: Array<Record<string, unknown>>;
   tools?: AgentToolset[];
@@ -252,7 +253,7 @@ function agentDefinitionObject(agent: AgentDraft): AgentDraft {
     name: agent.name,
     ...(agent.description ? { description: agent.description } : {}),
     model: agent.model,
-    ...(agent.model_config && agent.model_config.speed !== 'standard' ? { model_config: agent.model_config } : {}),
+    ...(sendsModelConfig(agent.model_config) ? { model_config: agent.model_config } : {}),
     system: agent.system,
     mcp_servers: agent.mcp_servers ?? [],
     tools: agent.tools ?? [{ type: 'agent_toolset_20260401' }],

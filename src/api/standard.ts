@@ -193,7 +193,10 @@ export interface ApiAgent {
   system: string;
   model: string;
   model_config?: {
+    id?: string;
     speed: 'fast' | 'standard' | 'extended';
+    /** Canonical effort level, echoed from the definition. No request body carries it. */
+    effort?: string;
   };
   tools: AgentToolset[];
   mcp_servers: ApiMcpServer[];
@@ -388,6 +391,34 @@ function toApiToolsets(toolsets: AgentToolset[]): AgentToolset[] {
   });
 }
 
+/**
+ * The model profile as the read projection returns it.
+ *
+ * `effort` is echoed because the definition retains it: a value that is stored but
+ * never returned is the silent loss the model profile exists to prevent, and the
+ * published response shape is documented as echoing the profile it was given. The
+ * field carries no execution behind it — the provider model is resolved from the
+ * id — which is why the matrix records `effort` as accepted-but-no-effect rather
+ * than as executed.
+ *
+ * `model_config` is still omitted for the ordinary case (the local `standard`
+ * speed and no effort), so this projection is unchanged for every agent that never
+ * sent either. Definitions written before `effort` moved inside `model_config`
+ * kept it beside the config, and are honoured here rather than losing the value on
+ * their first read after the change.
+ */
+function apiModelConfig(agent: AgentDefinition): ApiAgent['model_config'] | undefined {
+  const config = agent.model_config;
+  if (!config) return undefined;
+  const effort = config.effort ?? (agent as { effort?: string }).effort;
+  if (config.speed === 'standard' && !effort) return undefined;
+  return {
+    id: config.id,
+    speed: config.speed,
+    ...(effort ? { effort } : {}),
+  };
+}
+
 export function toApiAgent(
   agent: AgentDefinition,
   dates?: {
@@ -399,6 +430,7 @@ export function toApiAgent(
     version?: number;
   },
 ): ApiAgent {
+  const modelConfig = apiModelConfig(agent);
   return {
     id: dates?.id ?? agentId(agent.name),
     type: 'agent',
@@ -406,7 +438,7 @@ export function toApiAgent(
     description: agent.description ?? '',
     system: agent.system,
     model: agent.model,
-    ...(agent.model_config && agent.model_config.speed !== 'standard' ? { model_config: agent.model_config } : {}),
+    ...(modelConfig ? { model_config: modelConfig } : {}),
     tools: toApiToolsets(agent.tools ?? []),
     mcp_servers: toApiMcpServers(agent.mcp_servers ?? []),
     skills: agent.skills ?? [],

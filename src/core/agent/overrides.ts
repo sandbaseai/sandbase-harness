@@ -23,9 +23,14 @@
  *
  * A `model` override replaces the whole model object, so the agent's own
  * `effort` is not inherited. An `effort` inside the override is refused rather
- * than accepted and ignored: this runtime executes no reasoning-effort control,
- * and a session's frozen definition is projected without an `effort` field, so
- * accepting one would be a claim with nothing observable behind it.
+ * than accepted and ignored, for the same reason it is retained on a definition:
+ * the provider model is resolved from the agent's model id, so a level set on a
+ * session has no path into a request. What a provider does see is the
+ * deployment's own `reasoning_effort` model setting, which is operator-level and
+ * applies to a model rather than to one session. The canonical definition keeps
+ * the value the published request shape carries, and it is where the published
+ * contract puts the field; an override is a local extension, so there is nothing
+ * to preserve on that path.
  */
 
 import { z } from 'zod';
@@ -119,7 +124,7 @@ export function parseAgentOverrides(value: Record<string, unknown>): ParsedOverr
       if (profile.value.effort) {
         return fail(
           'model.effort',
-          'model.effort cannot be set by an agent override: a session snapshot is projected without an effort field, so the level would have no effect. Set it on the agent definition instead.',
+          'model.effort cannot be set by an agent override: the provider model is resolved from the agent\'s model id, so a level set here would reach no request. The agent definition is where the field is retained and returned; set it there instead.',
         );
       }
       overrides.model = {

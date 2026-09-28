@@ -37,7 +37,7 @@
         "name": "model",
         "type": "string | object",
         "required": true,
-        "description": "Model id string, or object with id and speed."
+        "description": "Model id string, or object with id, speed, and effort. `effort` is stored in the model profile and returned by every read (the agent, its versions, and a session snapshot); it does not change the provider request."
       },
       {
         "name": "system",
@@ -130,7 +130,7 @@
       {
         "name": "model",
         "type": "string | object",
-        "description": "Model configuration."
+        "description": "Model configuration: id, speed, and effort. `effort` is stored and returned on read, and does not change the provider request."
       },
       {
         "name": "system",
@@ -192,7 +192,7 @@
       {
         "name": "model",
         "type": "string | object",
-        "description": "Model configuration."
+        "description": "Model configuration: id, speed, and effort. `effort` is stored and returned on read, and does not change the provider request."
       },
       {
         "name": "system",

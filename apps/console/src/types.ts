@@ -25,7 +25,11 @@ export type Agent = {
   description: string;
   system: string;
   model: string;
-  model_config?: { speed: string };
+  /**
+   * The stored model profile. `effort` is echoed by the API read but does not
+   * reach a provider request; see `lib/agentModelConfig.ts` for the save rule.
+   */
+  model_config?: { id?: string; speed: string; effort?: string };
   tools: AgentToolset[];
   skills: SkillRef[];
   mcp_servers: Array<Record<string, unknown>>;
@@ -272,7 +276,7 @@ export type Template = {
   agent: {
     name: string;
     model: string;
-    model_config?: { speed: string };
+    model_config?: { id?: string; speed: string; effort?: string };
     description?: string;
     system: string;
     mcp_servers?: Array<Record<string, unknown>>;

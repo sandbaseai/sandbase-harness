@@ -467,13 +467,19 @@ A custom tool is declared as an independent `tools[]` entry carrying `type: "cus
 | --- | --- | --- |
 | `id` | non-empty string | Required. |
 | `speed` | `standard` \| `fast` \| `extended` | Optional; defaults to `standard`. `extended` is a local extension, not a published value. |
-| `effort` | `low` \| `medium` \| `high` \| `xhigh` \| `max`, or `{ "type": <level> }` | Optional. Parsed, validated, and carried through to the stored agent; nothing yet varies model behaviour by it. |
+| `effort` | `low` \| `medium` \| `high` \| `xhigh` \| `max`, or `{ "type": <level> }` | Optional. Parsed, validated, stored in the agent's model profile, and returned by every read — the agent read, the version read, and a session's frozen snapshot. It does not change the provider request: the model is resolved from the id, so the level has no path into a request (accepted-but-no-effect). A deployment's own `reasoning_effort` model setting is what a provider sees, and it is operator-level rather than per agent. |
 | `inference_geo` | `us` \| `global` | Refused with `unsupported_model_field`. A local runtime has no inference-geography control, so honouring the pin is not possible. |
 
 An unrecognized key is also refused with `unsupported_model_field`, and the error
 lists every known field so the request can be corrected. A malformed `speed`
 or `effort` is refused with its own stable code and the accepted value set
 rather than being silently defaulted.
+
+A read returns the stored profile as `model_config` — `id`, `speed`, and
+`effort` when one was set. It is omitted for the ordinary case (the local
+`standard` speed and no `effort`), so an agent that never sent either looks the
+same as before; a definition that carries `effort` reports it on the agent read,
+on the version read, and inside a session's `agent` snapshot.
 
 ## Sessions
 
@@ -1121,8 +1127,10 @@ to list every tool the session should have.
 A malformed `model` reports the model profile's own codes — `invalid_model`,
 `invalid_model_speed`, `unsupported_model_field` — the same ones an agent
 definition reports for that field. `model.effort` is refused with
-`invalid_agent_override_field`: the local runtime executes no effort control and
-a session snapshot is projected without the field.
+`invalid_agent_override_field`: the provider model is resolved from the agent's
+model id, so a level set on a session would reach no request. The agent
+definition is where the level is retained and echoed — set it there and every
+session that runs the agent, snapshot included, reports it.
 
 The override modifies nothing: it does not touch the agent and does not create a
 version. The session stores the resolved configuration as its own snapshot, and

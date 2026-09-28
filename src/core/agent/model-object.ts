@@ -175,7 +175,17 @@ export function describeModelFieldProfile(): ModelFieldDisposition[] {
   return [
     { field: 'id', status: 'supported' },
     { field: 'speed', status: 'supported', local: 'standard | fast | extended' },
-    { field: 'effort', status: 'supported' },
+    {
+      field: 'effort',
+      // Accepted, stored, and echoed on read, but not executed: the provider model
+      // is resolved from the id, so the level has no path into a request. A
+      // deployment's own `reasoning_effort` model setting is what a provider sees,
+      // and that is operator-level rather than per agent. `supported` would claim
+      // the level takes effect somewhere.
+      status: 'partial',
+      reason:
+        'Accepted, validated, stored, and returned by the read projection, but it does not change the provider request (accepted-but-no-effect).',
+    },
     {
       field: 'inference_geo',
       status: 'unavailable',

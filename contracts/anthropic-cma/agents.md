@@ -45,6 +45,13 @@ the model profile is `src/core/agent/model-object.ts`, and the routes are
 - `model` normalizes to a string for execution. The object form is parsed field
   by field by `normalizeModelField`, and each field is either honoured or
   refused by name (see §4).
+- The stored model profile is returned on every read — the agent read, the
+  version read, and a session's frozen snapshot — as `model_config`
+  (`id`, `speed`, and `effort` when one was set). It is omitted for the ordinary
+  case (the local `standard` speed and no `effort`), so a plain model id looks
+  the same as it always did. `effort` is echoed and not executed: the provider
+  model is resolved from the id string, so no request changes because of the
+  level, which is why §4 records it as accepted-but-no-effect.
 - Toolsets (`builtin` / `custom` / `mcp` / `skill`) are validated against a Zod
   schema before an agent is persisted; a definition that fails validation is
   rejected instead of being stored partially.
@@ -81,7 +88,7 @@ field the runtime cannot honour instead of dropping it.
 | Difference | Detail |
 | --- | --- |
 | `model.speed` | Accepted and stored as the local config spelling; `fast` / `standard` / `extended` are local vocabulary. |
-| `model.effort` | Parsed, validated, and carried into the stored definition, but it does not change the provider request, and the API read projection does not return it. Recorded as accepted-but-no-effect rather than as executed. |
+| `model.effort` | Parsed, validated, stored in the model profile, and returned by every read projection (agent, version, and session snapshot). It does not change the provider request: the model is resolved from the id, so the level has no path into a request. A deployment may set `reasoning_effort` in its own model settings, and that is operator-level — it applies to the model, not to an agent or a session. Recorded as accepted-but-no-effect rather than as executed. A level outside the published set is refused rather than stored. |
 | `model.inference_geo` | Refused by name with `unsupported_model_field` when a well-formed pin is sent: this runtime has no inference-geography control, so accepting it would promise a pin it cannot hold. An unknown value is `invalid_inference_geo` first. |
 | `multiagent` roster | Refused by name on create and update (capability `multiagent-roster`) because no thread, coordinator, or advisor surface exists. The published roster is not implemented. See [`threads.md`](./threads.md). |
 | Local delegation extension | `delegations` plus `enable_general_subagent` is a local one-level parent/child mechanism with its own tool names (`delegate_to_<name>`, `general_subagent`). The published contract defines neither field, and this is not presented as the canonical roster. |
@@ -96,8 +103,11 @@ field the runtime cannot honour instead of dropping it.
   act on.
 - `effort` is retained rather than refused because the canonical request shape
   carries it and the value is worth preserving for a provider that can use it
-  later; it is recorded as having no effect today so no caller infers a quality
-  change from it.
+  later; it is echoed on every read — a field that is stored and never returned
+  is the silent loss this profile exists to prevent — and it is recorded as
+  having no effect today so no caller infers a quality change from it. An agent
+  override refuses it for the same reason the definition keeps it: an override is
+  a local extension, and a level set on a session would reach no request.
 - The `multiagent` roster is a substantial protocol surface (threads,
   coordinator role, advisor role). Mapping a local delegation helper onto it
   would overstate coverage, and accepting the field would let a caller build on
@@ -112,8 +122,13 @@ field the runtime cannot honour instead of dropping it.
 - `tests/integration/api.test.ts` — agent create/list/read/version behaviour and
   toolset rejection cases.
 - `tests/unit/agent-model-object.test.ts` — the model object profile: each
-  field's acceptance or refusal, including `effort` carried through validation
-  and `inference_geo` refused by name.
+  field's acceptance or refusal, `effort` carried through validation into the
+  profile and reported as accepted-but-no-effect, and `inference_geo` refused by
+  name.
+- `tests/integration/agent-effort-echo.test.ts` — the two halves of
+  accepted-but-no-effect: an agent read, a version read, and a frozen session
+  snapshot all return the level, and a real turn for a definition carrying
+  `effort: "max"` sends a provider request without it.
 - `tests/integration/agent-update-contract.test.ts` — the unified partial-update
   semantics, the unknown-field refusal, the roster refusal on the update path,
   and both spellings of the concurrency precondition including the published
@@ -126,7 +141,8 @@ field the runtime cannot honour instead of dropping it.
 ## 7. Status
 
 `supported` for agent CRUD and toolset validation. `partial` overall, because
-the model object profile is understood but partly unexecuted: `effort` has no
-effect and `inference_geo` is refused rather than honoured. The canonical
+the model object profile is understood but partly unexecuted: `effort` is
+accepted and returned on read but has no effect on the provider request, and
+`inference_geo` is refused rather than honoured. The canonical
 `multiagent` roster is `unavailable` and refused by name; the local delegation
 extension is `supported` and is recorded as an extension, never as the roster.

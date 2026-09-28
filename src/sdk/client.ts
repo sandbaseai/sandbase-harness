@@ -44,7 +44,12 @@ export interface AgentSummary {
   description: string;
   system: string;
   model: string;
-  model_config?: { speed: string };
+  /**
+   * The stored model profile. `effort` is echoed here — on the agent read, the
+   * version read, and a session's agent snapshot — but no provider request
+   * carries it, so it does not change what the agent runs.
+   */
+  model_config?: { id?: string; speed: string; effort?: string };
   tools: Array<Record<string, unknown>>;
   mcp_servers: Array<Record<string, unknown>>;
   skills: Array<Record<string, unknown>>;

@@ -177,7 +177,9 @@ Session agent reference (`agent_with_overrides`):
     `unsupported_model_field`), the same ones the agent definition path
     publishes for that field.
 - A `model` override replaces the whole model object: the agent's own `effort`
-  is not inherited, and an `effort` inside the override is refused (see §4).
+  is not inherited, and an `effort` inside the override is refused (see §4). The
+  resolved profile is what the session snapshot reports, so a session that
+  switches model reports the level belonging to the model it runs.
 - A malformed reference is refused with `invalid_agent_ref` and an absent one
   with `agent_required`, so "malformed" and "missing" are distinguishable.
 - `POST /v1/runs` accepts only the two pinning forms: the override form is
@@ -241,7 +243,7 @@ reference forms, and the tri-state override rule.
 | Session delete is logical | The published delete permanently removes the session's record, events and sandbox, and refuses a `running` session until it has been interrupted to `idle`. `DELETE /v1/sessions/{id}` here stops a running turn itself, releases the sandbox, appends `session.deleted`, and **keeps** the session row and its event log; the response is `{id, deleted: true}`, which reports the delete and does not claim the record was physically removed. |
 | Extension endpoints | Session inspection and control endpoints under `/v1/x` are local additions and are excluded from CMA admission. |
 | Override refusal codes | `agent_model_required` is the published code for a cleared `model`. `agent_tools_cleared_with_skills`, `agent_mcp_server_not_found`, `invalid_agent_override_field`, `invalid_agent_overrides`, `invalid_agent_ref` and `agent_required` are SandBase spellings for the same conditions, published so a client can distinguish them without parsing prose. |
-| `model.effort` in an override | Refused with `invalid_agent_override_field` rather than accepted and ignored. A definition may carry `effort` for read-back; a session snapshot is projected without an effort field, and no local provider executes one. |
+| `model.effort` in an override | Refused with `invalid_agent_override_field` rather than accepted and ignored. A definition retains `effort` and the read projection returns it — including a session's frozen snapshot, which reports the profile it resolved — but the provider model is resolved from the agent's model id, so a level set on a session would reach no request. Only a deployment's own `reasoning_effort` model setting reaches a provider, and that is operator-level. The refusal names the definition as where to set it. |
 | MCP cross-check scope | The published exception covers clearing `mcp_servers`. Locally the same check runs on the resolved definition, so a `tools` override that binds an `mcp_toolset` to an undeclared server is refused with `agent_mcp_server_not_found` instead of persisting a toolset that silently does nothing. |
 | Outcome grader is provider-backed | Grading runs through a model provider. With none configured the evaluation closes as `failed` and the session records `outcome_evaluator_unavailable` with `retry_status: not_retryable` rather than reporting a verdict the runtime cannot produce. |
 | No grader composed | `user.define_outcome` is refused at admission with `outcome_grader_unavailable` on both ingress paths, rather than accepted as an outcome the runtime can never evaluate. |

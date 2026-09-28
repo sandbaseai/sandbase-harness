@@ -150,6 +150,15 @@ describe('describeModelFieldProfile', () => {
     expect(geo.reason).toBeTruthy();
   });
 
+  it('records effort as accepted-but-no-effect rather than as executed', () => {
+    // The distinction the matrix and the contract have to agree on: the value is
+    // accepted and echoed, and no provider request changes because of it.
+    const effort = describeModelFieldProfile().find((entry) => entry.field === 'effort');
+    expect(effort?.status).toBe('partial');
+    if (effort?.status !== 'partial') throw new Error(`expected partial, got ${effort?.status}`);
+    expect(effort.reason).toContain('accepted-but-no-effect');
+  });
+
   it('records the local speed extension as a local value, not a canonical one', () => {
     const speed = describeModelFieldProfile().find((entry) => entry.field === 'speed');
     expect(speed?.status).toBe('supported');
@@ -171,7 +180,20 @@ describe('model object profile is wired into the agent definition validator', ()
     const result = validateAgentDefinition(definition({ id: 'claude-opus-5', effort: 'high' }));
     expect(result.valid).toBe(true);
     expect(result.data?.model).toBe('claude-opus-5');
-    expect((result.data as { effort?: string } | undefined)?.effort).toBe('high');
+    // Inside the model profile it belongs to, which is the shape the read
+    // projection returns; a sibling of `model_config` was stored but unreadable.
+    expect(result.data?.model_config).toEqual({ id: 'claude-opus-5', speed: 'standard', effort: 'high' });
+  });
+
+  it('accepts the local `model_config` spelling of effort instead of dropping it', () => {
+    const result = validateAgentDefinition({
+      name: 'Model Agent',
+      model: 'claude-opus-5',
+      system: 'You are terse.',
+      model_config: { id: 'claude-opus-5', speed: 'fast', effort: 'low' },
+    });
+    expect(result.valid).toBe(true);
+    expect(result.data?.model_config).toEqual({ id: 'claude-opus-5', speed: 'fast', effort: 'low' });
   });
 
   it('refuses a well-formed inference_geo pin by name', () => {
