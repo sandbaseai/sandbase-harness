@@ -93,11 +93,14 @@ git worktree add .worktrees/<feature-name> -b feat/<feature-name> origin/main
 
 Clean up as part of the merge, not later:
 
-- Delete the topic branch on the remote that hosts it. `gh pr merge --squash
-  --delete-branch` does this at merge time, including for a branch on a fork
-  you own; the repository's automatic head-branch deletion covers only
-  branches in the repository itself. The pull request keeps the commits and
-  the diff, and the branch can be restored from it if it is needed again.
+- Delete the topic branch on the remote that hosts it. For a branch in this
+  repository, `gh pr merge --squash --delete-branch` does it at merge time.
+  For a branch on a fork, neither that flag nor the repository's automatic
+  head-branch deletion removes it (`gh` skips cross-repository branches, see
+  [cli/cli#2860](https://github.com/cli/cli/issues/2860)), so delete it
+  yourself: `git push <fork-remote> --delete <branch>`. The pull request keeps
+  the commits and the diff, and the branch can be restored from it if it is
+  needed again.
 - Remove the worktree and the local branch:
   `git worktree remove .worktrees/<feature-name>`, then
   `git branch -D <branch>`. `-D` is required because a squash merge does not
