@@ -95,7 +95,11 @@ describe('Environment worker keys (documented routes)', () => {
     expect(body.data[0].sessionId).toBe('sess_a');
 
     // `limit` narrows the page; an unusable value falls back to the queue default.
-    expect((await get('/v1/environments/env_a/work-items?limit=1')).body.data).toHaveLength(1);
+    // `counts` describes the environment's whole queue, not the returned window,
+    // so a one-item page still reports both queued items.
+    const narrowed = (await get('/v1/environments/env_a/work-items?limit=1')).body;
+    expect(narrowed.data).toHaveLength(1);
+    expect(narrowed.counts).toEqual({ queued: 2 });
     expect((await get('/v1/environments/env_a/work-items?limit=nonsense')).body.data).toHaveLength(2);
 
     // An unknown environment and an archived one are both refused, as the

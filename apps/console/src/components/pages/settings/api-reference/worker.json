@@ -250,7 +250,7 @@
       {
         "name": "counts",
         "type": "object",
-        "description": "Work item counts per status for this environment."
+        "description": "Work item counts per status for this environment's whole queue, not only the items returned in `data`."
       }
     ]
   }

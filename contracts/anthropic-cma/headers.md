@@ -58,7 +58,7 @@ request that omits them entirely, as described in §4.
 
 | Difference | Detail |
 | --- | --- |
-| Header-free local path | A request carrying none of the three compatibility headers is treated as a local caller and is not admission-checked. The published contract has no header-free path. |
+| Header-free local path | A request carrying none of the three compatibility headers is treated as a local caller and is not admission-checked. The published contract has no header-free path. This is a deliberate **local-first extension** and the reason `compatibility-header-admission` stays `partial`; a request that carries any compatibility header is still admitted by the published beta and version rules. |
 | Error code naming | SandBase returns its own stable `code` values for each admission failure. The published contract documents the header requirement, not SandBase's code strings. |
 | Admission trigger | SandBase engages admission on the presence of `x-api-key` alone, without requiring a beta header first. The published contract does not define this intermediate state. |
 

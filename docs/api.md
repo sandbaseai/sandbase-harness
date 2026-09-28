@@ -1426,7 +1426,7 @@ the returned `env_...` id when creating sessions or updating an environment.
 | `GET` | `/v1/environments/{environment_id}/worker-keys` | List self-hosted worker keys without raw secrets. |
 | `POST` | `/v1/environments/{environment_id}/worker-keys` | Generate a worker key. The raw key is returned once. |
 | `POST` | `/v1/environments/{environment_id}/worker-keys/{key_id}/revoke` | Revoke a worker key. |
-| `GET` | `/v1/environments/{environment_id}/work-items` | Inspect recent self-hosted queue items and status counts. |
+| `GET` | `/v1/environments/{environment_id}/work-items` | Inspect recent self-hosted queue items (windowed by `limit`, no continuation) and per-status `counts` for the environment's whole queue. |
 
 Create:
 

@@ -238,6 +238,7 @@ reference forms, and the tri-state override rule.
 | Session budget | Owned by [`budget.md`](./budget.md), which is `partial`. `/v1/sessions` accepts a `budget` at creation and echoes it back, and rejects a malformed one before the session is persisted; pricing and the ceiling rules are that contract's subject, not this one's. |
 | Creation response | `initial_events` is not echoed back. The published contract does not state whether the creation response echoes it. |
 | `cleanup_pending` | SandBase exposes this as a distinct status for local sandbox teardown. |
+| Session delete is logical | The published delete permanently removes the session's record, events and sandbox, and refuses a `running` session until it has been interrupted to `idle`. `DELETE /v1/sessions/{id}` here stops a running turn itself, releases the sandbox, appends `session.deleted`, and **keeps** the session row and its event log; the response is `{id, deleted: true}`, which reports the delete and does not claim the record was physically removed. |
 | Extension endpoints | Session inspection and control endpoints under `/v1/x` are local additions and are excluded from CMA admission. |
 | Override refusal codes | `agent_model_required` is the published code for a cleared `model`. `agent_tools_cleared_with_skills`, `agent_mcp_server_not_found`, `invalid_agent_override_field`, `invalid_agent_overrides`, `invalid_agent_ref` and `agent_required` are SandBase spellings for the same conditions, published so a client can distinguish them without parsing prose. |
 | `model.effort` in an override | Refused with `invalid_agent_override_field` rather than accepted and ignored. A definition may carry `effort` for read-back; a session snapshot is projected without an effort field, and no local provider executes one. |
@@ -258,6 +259,10 @@ reference forms, and the tri-state override rule.
   session state; the event stream is the authoritative record.
 - `cleanup_pending` exists because local sandbox teardown is asynchronous and a
   caller needs to know teardown is still in progress.
+- Delete is logical because the event log is append-only by project rule: a
+  physical delete would remove events a resumable stream or an audit may still
+  read. Stopping a running session instead of refusing it keeps delete usable
+  as the single cleanup call a local operator makes.
 - An override that cannot be honoured is refused rather than repaired: a session
   that quietly ran the base agent after a caller asked for a different one is the
   failure the override exists to prevent, and the same reasoning makes an
@@ -273,6 +278,9 @@ reference forms, and the tri-state override rule.
   admission, and rejection of an unknown loop engine.
 - `tests/unit/session-resource-instances.test.ts` — resource attach, list,
   delete, and the memory-store at-creation rule.
+- `tests/integration/session-delete-log-position.test.ts` — the logical delete:
+  the retained log is the pre-delete log, in order, followed by exactly one
+  `session.deleted` marker.
 - `tests/unit/agent-overrides.test.ts` — override parsing and resolution: the
   tri-state rule per field, the refusal codes, the cross-check on the resolved
   definition, and that the base definition is never mutated.

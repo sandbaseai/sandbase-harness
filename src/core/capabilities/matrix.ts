@@ -89,7 +89,7 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
     area: 'headers',
     id: 'compatibility-header-admission',
     status: 'partial',
-    reason: 'Version, beta, and mutual-exclusion rules are enforced; a request with no compatibility header is accepted as a local caller, which the published contract does not define.',
+    reason: 'Version, beta, and mutual-exclusion rules are enforced for any request that carries a compatibility header. A request with no compatibility header is accepted as a local caller, which the published contract does not define; this header-free path is a deliberate local-first extension for a self-hosted single-tenant runtime, recorded as such in the headers contract §4, and it is why this entry stays partial.',
     contract: 'contracts/anthropic-cma/headers.md',
   },
   {
