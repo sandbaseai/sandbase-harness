@@ -31,7 +31,7 @@ export interface WorkItem {
   sessionId: string;
   kind: WorkItemKind;
   payload: Record<string, unknown>;
-  status: 'pending' | 'claimed' | 'done' | 'failed';
+  status: 'pending' | 'claimed' | 'done' | 'failed' | 'unknown';
   result?: unknown;
   claimedBy?: string | null;
   createdAt?: string;
@@ -49,6 +49,14 @@ export interface WorkItem {
    * live - the point at which "somebody took it" becomes "somebody has committed to
    * running it". Null means held but never started; a reclaim by a new holder clears
    * it, because acceptance belongs to the holder that asked for it.
+   *
+   * **This is the line the replay rule is drawn on**, and it is not the same line
+   * `abandonedAt` sits on - the two are on opposite sides of it and must not be confused.
+   * Before an acceptance, nothing ran, so lapsed work is free to be handed out again.
+   * After one, the holder committed to running the item, so its effect may already have
+   * happened and re-offering it would replay that effect silently. A lapsed **accepted**
+   * claim therefore blocks the reclaim arm of the claim predicate and the item moves to
+   * `unknown` instead.
    */
   acceptedAt?: string | null;
   /**
@@ -249,8 +257,29 @@ export class WorkQueue {
     // an executor killed before ack to leave the work in the queue (line 61 acceptance). A
     // marker in this predicate would delete that work instead of re-offering it, and a
     // bounded wait that gave up is exactly the common path that reaches this state.
+    //
+    // `accepted_at IS NULL` **is** here, on the claimed arm only, and it is the same rule
+    // read from the other side rather than a return of the fence above. Those two markers
+    // look alike and mean opposite things: `abandoned_at` records that a wait gave up
+    // **before** any executor committed to the item, so nothing ran and the item must be
+    // re-offered; `accepted_at` records that an executor committed to running it, so the
+    // effect may already have happened and re-offering it would replay that effect. Line 72
+    // states both halves in one sentence - an unaccepted intent stays reclaimable, and an
+    // accepted one whose outcome is unknown must not be replayed silently. The pending arm
+    // is untouched, so work nobody ever held keeps behaving exactly as it did.
+    //
+    // **This clause is defence, and it is not independently testable - measured, not assumed.**
+    // The sweep below runs first in the same transaction and moves every accepted lapsed row
+    // out of `claimed`, so by the time this predicate is evaluated there is no such row left
+    // for it to exclude; a probe that deletes this clause changes no test outcome, and that
+    // measurement is recorded rather than hidden. It is kept because the two statements do
+    // **not** share a clock: SQLite fixes `now` per statement, so a row whose lease lapses
+    // between the sweep and the select would be invisible to the former and, without this
+    // clause, admissible to the latter - a replay reachable only through a window no
+    // deterministic test can open. Recording is the mechanism; this predicate is what makes
+    // the exclusion independent of statement order.
     const rowClaimable = (prefix: string): string =>
-      `(${prefix}stopped_at IS NULL AND (${prefix}status = 'pending' OR (${prefix}status = 'claimed' AND ${prefix}claimed_at IS NOT NULL AND ${prefix}claimed_at <= datetime('now', ?))))`;
+      `(${prefix}stopped_at IS NULL AND (${prefix}status = 'pending' OR (${prefix}status = 'claimed' AND ${prefix}accepted_at IS NULL AND ${prefix}claimed_at IS NOT NULL AND ${prefix}claimed_at <= datetime('now', ?))))`;
     // The session's condition, as a correlated subquery so one fragment serves the
     // scoped and unscoped selections and the guarded update alike. `IS NULL` keeps work
     // for an unknown session id claimable: an id with no row is a caller's mistake
@@ -260,6 +289,34 @@ export class WorkQueue {
         OR (SELECT ss.status FROM sessions ss WHERE ss.id = ${prefix}session_id) NOT IN (${TERMINAL_SESSION_STATUS_SQL}))`;
     const claimable = (prefix: string): string => `(${rowClaimable(prefix)} AND ${sessionLive(prefix)})`;
     return this.db.transaction(() => {
+      // Before selecting anything, record the items whose accepted claim has lapsed. They are
+      // already excluded from selection by the predicate above, but exclusion alone leaves
+      // them sitting in `claimed` - a status that claims somebody is still running them -
+      // and the whole point of line 72 is that this outcome must be **visible as unknown**
+      // rather than silently either replayed or hidden.
+      //
+      // The sweep is deliberate about what it does not touch. `stopped_at IS NULL` keeps the
+      // session's stop as the item's stated cause, because a stop is a decision and this is
+      // an absence of information. `accepted_at IS NOT NULL` keeps it to the post-ack case:
+      // an unaccepted lapsed claim is still work that never started, and it keeps its
+      // reclaimability, which is the property the previous change restored.
+      //
+      // It is intentionally not scoped to this caller's session or environment. Whether an
+      // item was started and never reported is a fact about the item, not about who happened
+      // to ask next, so leaving another environment's rows unrecorded until someone claims
+      // there would make the queue's own state depend on polling order.
+      //
+      // A live holder is unaffected: renewal moves `claimed_at` forward, so a worker that is
+      // still running and still heartbeating is never inside this window. A worker whose lease
+      // genuinely lapsed is told the same thing it would have been told by a reclaim - the
+      // claim is gone - and the difference is that its item is no longer handed to anyone else.
+      this.db
+        .prepare(
+          `UPDATE work_items SET status = 'unknown'
+           WHERE status = 'claimed' AND accepted_at IS NOT NULL AND stopped_at IS NULL
+             AND claimed_at IS NOT NULL AND claimed_at <= datetime('now', ?)`,
+        )
+        .run(leaseModifier);
       let candidate: { id: string } | undefined;
       if (sessionId) {
         candidate = this.db.prepare(
@@ -293,8 +350,9 @@ export class WorkQueue {
       // the predicate and this worker loses the race.
       // `accepted_at` is cleared in the same statement: acceptance is a statement about a
       // particular holder's lease, so a reclaim by a different worker must not inherit it.
-      // A row that arrives here was either never claimed or had its lease run out, and in
-      // both cases nothing has committed to running it under this claim yet.
+      // A row that arrives here was either never claimed or had its lease run out **without
+      // an acceptance** - the predicate above admits nothing else - and in both cases nothing
+      // has committed to running it under this claim yet.
       // `abandoned_at` is cleared too, and for the same reason as `accepted_at`: both are
       // statements about a previous holder's attempt, and a reclaim is a new attempt. It is
       // pure observability - nothing reads it as a fence - so the only requirement is that
@@ -309,6 +367,17 @@ export class WorkQueue {
     });
   }
 
+  /**
+   * Record a result for an item this worker holds, or refuse and say why.
+   *
+   * Guarded on the row still being `claimed` by this worker, so a completion cannot land on
+   * work that has moved on. An item that lapsed **after** its holder accepted is now
+   * `unknown`, and a late completion from that holder is refused here like any other stale
+   * claim. That is the behaviour the frozen spec asks for rather than a side effect: line 58
+   * requires a late completion to be answered with a lost lease rather than accepted, because
+   * the queue has already recorded that it does not know the outcome, and a result arriving
+   * later cannot un-tell the queue that the effect was uncertain when it was handed on.
+   */
   complete(id: string, workerId: string, result: unknown, failed = false): WorkCompletionResult {
     const update = this.db
       .prepare("UPDATE work_items SET status = ?, result = ?, completed_at = datetime('now') WHERE id = ? AND status = 'claimed' AND claimed_by = ?")
@@ -544,6 +613,16 @@ export class WorkQueue {
    *    all, and including claimed work that no executor ever accepted. Absence proves
    *    nothing about whether the work ran, and of the two ways to be wrong, replaying an
    *    effect that already happened is the expensive one.
+   *
+   * An accepted item whose lease lapsed is now `unknown` rather than `claimed`, and it still
+   * classifies the same way - by arm 3, which is where it already landed. That is the point:
+   * the code the caller is given does not change, the **behaviour behind it** does. The item
+   * is no longer handed to a second worker, so `work_outcome_unknown` stops being a warning
+   * about a replay that was about to happen anyway and becomes a description of what the
+   * queue actually did. `unknown` is also the terminal state a later recovery path reads: the
+   * spec hands "accepted but the effect is unknown" to crash recovery rather than resolving it
+   * here, because deciding whether an effect may be retried depends on the tool, which this
+   * layer does not know.
    *
    * **A claimed row that was never accepted is now recorded, but not reclassified.** The
    * accept step makes it knowable that nothing ran - accepting is the last thing a worker

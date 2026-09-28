@@ -193,6 +193,80 @@ describe('WorkQueue', () => {
     expect(queue.complete(id, 'w2', { exitCode: 0, stdout: 'ran on the second worker' })).toBe('completed');
   });
 
+  it('does not replay an accepted item whose lease lapsed, and still re-offers one that was never accepted', async () => {
+    // The frozen spec draws one line and states both sides of it, so this case asserts both
+    // sides together - a change that satisfied either half by breaking the other would fail
+    // here rather than pass as an improvement.
+    //
+    // After an acceptance the holder committed to running the item, so its effect may already
+    // have happened and handing it to a second worker would replay that effect silently
+    // ("已 accepted 但效果未知必须进入 `unknown`，不得静默重放"). Before an acceptance nothing
+    // ran, so lapsed work is free to be handed out and must stay claimable ("执行者在 ack 之前
+    // 被杀 → 工作仍然可取（留在队列里）").
+    //
+    // The two markers involved look alike and mean opposite things: `abandoned_at` sits on the
+    // pre-ack side and must never fence, `accepted_at` sits on the post-ack side and must.
+    //
+    // --- the post-ack side: accepted, lapsed, not replayed ---
+    const started = queue.enqueue('sess_started', 'exec', { command: 'may already have run' });
+    expect(queue.claim('w1', 'sess_started')!.id).toBe(started);
+    expect(queue.accept(started, 'w1')).toBe('accepted');
+    // A second worker cannot take it while the lease is live, which was already true.
+    expect(queue.claim('w9', 'sess_started')).toBeNull();
+
+    backdateClaim(db, started, 24 * 60);
+    // The reclaim is now refused, so the effect cannot happen a second time.
+    expect(queue.claim('w2', 'sess_started')).toBeNull();
+    // And the item is recorded as what it is: a start whose outcome is not known. This is the
+    // status the spec names, and the state a later recovery path reads - exclusion alone would
+    // have left it claiming that somebody is still running it.
+    const unknown = queue.get(started)!;
+    expect(unknown.status).toBe('unknown');
+    expect(unknown.acceptedAt).toBeTruthy();
+    expect(unknown.result).toBeUndefined();
+    // The holder cannot retroactively settle it either: the queue has already recorded that
+    // the outcome was unknown when it stopped handing the item on, and a late result cannot
+    // un-record that.
+    expect(queue.complete(started, 'w1', { exitCode: 0, stdout: 'finished late' })).toBe('not_claimed_by_worker');
+
+    // A bounded wait reports the same code it always did for this case - it is the behaviour
+    // behind the code that changed, not the code - and it no longer describes a replay that
+    // was about to happen anyway.
+    await expect(queue.await(started, { timeoutMs: 60, pollMs: 10 }))
+      .rejects.toMatchObject({ code: 'work_outcome_unknown' });
+    // Still not replayed, after that wait too.
+    expect(queue.claim('w3', 'sess_started')).toBeNull();
+    expect(queue.get(started)!.status).toBe('unknown');
+
+    // --- the pre-ack side: claimed, lapsed, nobody accepted, still reclaimable ---
+    const neverStarted = queue.enqueue('sess_unstarted', 'exec', { command: 'never began' });
+    expect(queue.claim('w4', 'sess_unstarted')!.id).toBe(neverStarted);
+    backdateClaim(db, neverStarted, 24 * 60);
+    // The same lapse, one step earlier, must behave the opposite way: taken over, run, and
+    // completed by the second worker.
+    expect(queue.claim('w5', 'sess_unstarted')!.id).toBe(neverStarted);
+    expect(queue.get(neverStarted)!.status).toBe('claimed');
+    expect(queue.accept(neverStarted, 'w5')).toBe('accepted');
+    expect(queue.complete(neverStarted, 'w5', { exitCode: 0, stdout: 'ran on the second worker' })).toBe('completed');
+    expect(queue.get(neverStarted)!.status).toBe('done');
+
+    // --- and the states that must not be swept into `unknown` ---
+    // Pending work was never held, so there is no start to be uncertain about.
+    const queued = queue.enqueue('sess_queued', 'exec', { command: 'waiting' });
+    expect(queue.claim('w6', 'sess_queued')!.id).toBe(queued);
+    expect(queue.get(queued)!.status).toBe('claimed');
+    // A stop stays the item's stated cause rather than being recorded as an unknown outcome:
+    // a stop is a decision, and this is an absence of information.
+    const stopped = queue.enqueue('sess_over', 'exec', { command: 'unwanted' });
+    expect(queue.claim('w7', 'sess_over')!.id).toBe(stopped);
+    expect(queue.accept(stopped, 'w7')).toBe('accepted');
+    backdateClaim(db, stopped, 24 * 60);
+    expect(queue.stop('sess_over')).toBe(1);
+    expect(queue.claim('w8', 'sess_over')).toBeNull();
+    expect(queue.get(stopped)!.status).toBe('claimed');
+    expect(queue.get(stopped)!.stoppedAt).toBeTruthy();
+  });
+
   it('records a give-up only for claimed work nobody accepted', async () => {
     // The record is one guarded write. `accepted_at IS NULL` is the condition that matters:
     // the holder may accept between the wait reading the row and writing it, and work that
@@ -572,20 +646,45 @@ describe('WorkQueue', () => {
     expect(queue.get(id)!.acceptedAt).toBeNull();
   });
 
-  it('clears acceptance when the item is reclaimed by a new holder', () => {
-    // Acceptance is a statement about one holder's lease, so it must not survive that
-    // holder losing the item. A row that reads `accepted` while belonging to a worker that
-    // never asked would tell the queue an effect was committed to that nobody committed to.
+  it('never lets acceptance survive to a different holder', () => {
+    // Acceptance is a statement about one holder's lease, so it must never read as belonging
+    // to a worker that never asked - that would tell the queue an effect was committed to
+    // that nobody committed to.
+    //
+    // **This case previously asserted that outcome by way of a reclaim, and that assertion
+    // encoded the defect.** It claimed an item, accepted it, let the lease lapse, and
+    // required the item to be handed to a second worker with `accepted_at` cleared - which is
+    // precisely the silent replay the frozen spec forbids ("已 accepted 但效果未知必须进入
+    // `unknown`，不得静默重放"). The invariant it was reaching for is real; the route it took
+    // to test it was the bug. An accepted item cannot change holders at all now, so the
+    // honest statement is the stronger one: the reclaim is refused, the acceptance stays with
+    // the worker that made it, and the item is recorded as an unknown outcome instead.
     const id = queue.enqueue('sess_reclaim', 'exec', { command: 'mine, then yours' });
     expect(queue.claim('w1')!.id).toBe(id);
     expect(queue.accept(id, 'w1')).toBe('accepted');
     expect(queue.get(id)!.acceptedAt).toBeTruthy();
 
     backdateClaim(db, id, 24 * 60);
-    expect(queue.claim('w2')!.id).toBe(id);
-    expect(queue.get(id)!.claimedBy).toBe('w2');
-    expect(queue.get(id)!.acceptedAt).toBeNull();
-    expect(queue.accept(id, 'w2')).toBe('accepted');
+    // Refused: no second holder, so there is no row that could read as someone else's.
+    expect(queue.claim('w2')).toBeNull();
+    const row = queue.get(id)!;
+    expect(row.status).toBe('unknown');
+    expect(row.claimedBy).toBe('w1');
+    // The acceptance is still w1's own statement about w1's attempt, and w1 still cannot
+    // settle it - the queue has recorded the outcome as unknown and that record stands.
+    expect(row.acceptedAt).toBeTruthy();
+    expect(queue.complete(id, 'w1', { exitCode: 0 })).toBe('not_claimed_by_worker');
+
+    // The clearing path itself is still exercised, on the only row that can reach it: work
+    // that was claimed and **not** accepted. The acceptance is null before and after, which
+    // is what "never inherits an acceptance" means once an accepted row can no longer move.
+    const unstarted = queue.enqueue('sess_reclaim', 'exec', { command: 'nobody committed' });
+    expect(queue.claim('w3')!.id).toBe(unstarted);
+    backdateClaim(db, unstarted, 24 * 60);
+    expect(queue.claim('w4')!.id).toBe(unstarted);
+    expect(queue.get(unstarted)!.claimedBy).toBe('w4');
+    expect(queue.get(unstarted)!.acceptedAt).toBeNull();
+    expect(queue.accept(unstarted, 'w4')).toBe('accepted');
   });
 });
 

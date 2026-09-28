@@ -3,6 +3,24 @@
 ## Unreleased
 
 ### Changed
+- A self-hosted work item whose holder accepted it is no longer replayed when its lease lapses.
+  The claim predicate treated any lapsed claim as reclaimable, with no test for `accepted_at`,
+  so a worker that accepted an item, started running it, and then died had that item handed to
+  a second worker as soon as the 60s lease passed - and the tool ran a second time on the
+  operator's machine, with the first effect not undone by being forgotten. Acceptance is now
+  the line, and the queue treats the two sides of it differently rather than reporting them
+  differently. A lapsed claim with **no** accepted ack is still handed to the next worker,
+  because nothing ran; that reclaimability is the property the previous change restored and it
+  is asserted in the same test so neither half can be satisfied by breaking the other. A lapsed
+  claim that **was** accepted moves to the new status `unknown` instead: it is not claimable, a
+  late completion from the old holder is refused, and the record says a start happened whose
+  outcome is not known. A bounded wait on it still reports `work_outcome_unknown`, which is what
+  it already did - the change is that the code now describes what the queue did rather than a
+  replay that was about to happen anyway. `unknown` is deliberately a handoff rather than a
+  resolution, because deciding whether an effect may be retried depends on the tool, which this
+  layer does not know. A live holder is unaffected: renewing the claim keeps its item out of the
+  lapse window, and a stopped item keeps the stop as its stated cause rather than being recorded
+  as an unknown outcome.
 - The self-hosted worker no longer hangs forever when the runtime never confirms its claim.
   `managed-agents worker poll` confirms each claimed item with `POST /v1/x/worker/accept`
   before running it, and that request had no bound: a runtime that accepted the connection

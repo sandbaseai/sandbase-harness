@@ -1552,7 +1552,23 @@ worker and executes it rather than losing it, and a caller told to resubmit woul
 run alongside the copy the queue is about to hand out. Giving up on such an item is
 recorded on the row, which distinguishes an attempt abandoned before starting from
 one that died mid-command, but the record refuses nothing - the queue still re-offers
-the work. `work_lease_lost` means the session ended and stopped the
+the work.
+
+Acceptance is the line between those two answers, and the queue treats the two sides
+differently rather than reporting them differently. An item whose lease lapses
+**without** an accepted ack is handed to the next worker, because nothing ran. An item
+whose lease lapses **after** the holder accepted it is never handed out again: the
+holder committed to running it, so the effect may already have happened, and
+re-offering it would duplicate that effect on the operator's machine. Such an item
+moves to status `unknown`, which is the queue's own record that a start happened and
+its outcome is not known - it is not claimable, and a late completion from the old
+holder is refused rather than accepted, because the queue cannot un-record that the
+outcome was uncertain. `unknown` is a terminal status here and a handoff rather than a
+resolution: deciding whether an effect may be retried depends on the tool, so this
+layer records the uncertainty instead of guessing at it. A live holder is unaffected,
+since renewing its claim keeps its item out of the window.
+
+`work_lease_lost` means the session ended and stopped the
 work, so no result is wanted at all. A stop is reported ahead of the item's state,
 because an item the session stopped while nobody held it is still `pending`, and reporting that
 as "submit it again" would send work back to a session that has ended. A result
