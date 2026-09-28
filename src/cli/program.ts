@@ -361,6 +361,11 @@ export function createCliProgram({ version, startServer }: CliProgramOptions): C
     .option('-w, --workdir <dir>', 'Directory work items are executed inside', '.')
     .option('--once', 'Claim and run at most one item, then exit', false)
     .option('--interval-ms <ms>', 'Delay between polls when the queue is empty', '1000')
+    .option(
+      '--claim-timeout-ms <ms>',
+      'How long to wait for a claim to be answered before polling again',
+      '10000',
+    )
     .option('--heartbeat-ms <ms>', 'Renew the claim on this interval while an item runs', '20000')
     .option(
       '--heartbeat-timeout-ms <ms>',

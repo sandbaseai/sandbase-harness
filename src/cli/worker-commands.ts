@@ -5,7 +5,7 @@
  * `--workdir`, and reports each result to `POST /v1/x/worker/complete`. The server
  * never runs them — this process does.
  *
- * Eight invariants this file has to hold, none of which it held before:
+ * Nine invariants this file has to hold, none of which it held before:
  *
  * 1. `complete` carries the same `worker_id` that `claim` sent. The route requires
  *    it (`src/api/routes/worker.ts:44`) and matches the row on it
@@ -54,6 +54,16 @@
  *    write. With a bound the failure is reported as `work_heartbeat_unconfirmed` and the item
  *    **keeps running**, because a timeout is still only a suspicion - `work_lease_lost` remains
  *    the one renewal answer that aborts an item.
+ * 9. The **claim cannot stop the worker**, in either direction. It is the first request of
+ *    every iteration and the only one that was still issued once with no handling, so an
+ *    unanswered claim was a silent total stall - no item, no report, no retry, and no message,
+ *    because there is no timer here and nothing to notice but an idle process - while a claim
+ *    that *failed* was caught by nothing at all and rejected the whole command, so a runtime
+ *    that blinked killed every worker pointed at it. The bound (`work_claim_unconfirmed`) and
+ *    the `catch` are one behaviour, not two: an item is run only when the claim produced one,
+ *    and a claim that produced none - refused, failed, or never answered - leaves the worker
+ *    polling. A bound without the `catch` would have traded the stall for a crash, because the
+ *    timeout it raises would have taken the same uncaught path.
  */
 
 import { execFile } from 'node:child_process';
@@ -91,6 +101,27 @@ const MIN_ACK_TIMEOUT_MS = 1;
 const DEFAULT_ACK_TIMEOUT_MS = 10_000;
 
 /**
+ * How long the worker waits for the claim itself to be answered.
+ *
+ * This is the bound on the *first* request of every iteration, and it is the one whose
+ * absence was least visible: unlike the renewal, which is issued from a timer and therefore
+ * piles up one silent request per tick, the claim is issued once from the loop. An
+ * unanswered claim was a **silent total stall** - no timeout, no second request, no growing
+ * pile, and nothing to notice but an idle process that never polls again.
+ *
+ * The same value rule as the acknowledgement bound, and for the same reason: well below the
+ * 60s lease window, so an expired bound leaves the claim's row still this worker's own. That
+ * matters more here, because a claim whose *response* was lost may still have created the
+ * row. Walking away is safe rather than lossless - the item is stranded until the window
+ * lapses - and it is safe precisely because the row's `accepted_at` is still null, so it
+ * stays `queued` and the sweep re-hands it. Abandoning the claim is the "unaccepted intent
+ * stays reclaimable" property, not a leak.
+ */
+const MIN_CLAIM_TIMEOUT_MS = 1;
+
+const DEFAULT_CLAIM_TIMEOUT_MS = 10_000;
+
+/**
  * How long the worker waits for a renewal of its claim to be answered.
  *
  * Half the default `--heartbeat-ms`, so a renewal that is not going to be answered stops
@@ -121,6 +152,7 @@ export type WorkerPollOptions = {
   intervalMs?: string;
   heartbeatMs?: string;
   heartbeatTimeoutMs?: string;
+  claimTimeoutMs?: string;
   ackTimeoutMs?: string;
 };
 
@@ -136,6 +168,7 @@ export type ResolvedWorkerPollOptions = {
   intervalMs: number;
   heartbeatMs: number;
   heartbeatTimeoutMs: number;
+  claimTimeoutMs: number;
   ackTimeoutMs: number;
 };
 
@@ -175,6 +208,13 @@ export function resolveWorkerPollOptions(opts: WorkerPollOptions): ResolvedWorke
     );
   }
 
+  const claimTimeoutMs = Number(opts.claimTimeoutMs ?? DEFAULT_CLAIM_TIMEOUT_MS);
+  if (!Number.isFinite(claimTimeoutMs) || claimTimeoutMs < MIN_CLAIM_TIMEOUT_MS) {
+    throw new Error(
+      `Invalid --claim-timeout-ms value "${opts.claimTimeoutMs}". Expected a number of at least ${MIN_CLAIM_TIMEOUT_MS}.`,
+    );
+  }
+
   const ackTimeoutMs = Number(opts.ackTimeoutMs ?? DEFAULT_ACK_TIMEOUT_MS);
   if (!Number.isFinite(ackTimeoutMs) || ackTimeoutMs < MIN_ACK_TIMEOUT_MS) {
     throw new Error(
@@ -193,6 +233,7 @@ export function resolveWorkerPollOptions(opts: WorkerPollOptions): ResolvedWorke
     intervalMs,
     heartbeatMs,
     heartbeatTimeoutMs,
+    claimTimeoutMs,
     ackTimeoutMs,
   };
 }
@@ -209,7 +250,26 @@ export async function workerPollCommand(opts: WorkerPollOptions) {
   const config = resolveWorkerPollOptions(opts);
   console.log(`Polling self-hosted work as ${config.workerId} in ${config.root}`);
   for (;;) {
-    const item = await claimWorkItem(config);
+    // The claim is the one step that can stop the worker on its own, and until this was
+    // wrapped it did - in both directions at once. Unbounded, an unanswered claim parked the
+    // process for ever: no item, no report, no second request, and no message, because there
+    // is no timer here to keep trying and nothing to notice but an idle process. Uncaught, a
+    // claim that *failed* was worse: the error escaped the loop and rejected this command, so
+    // a runtime that blinked killed every worker pointed at it.
+    //
+    // The two are one behaviour, which is why they are fixed together - **an item is run only
+    // when the claim produced one, and a claim that produced none leaves the worker polling.**
+    // A bound alone would have been a regression: the timeout it raises would have taken the
+    // same uncaught path and turned a stall into a crash.
+    let item: WorkerItem | null;
+    try {
+      item = await claimWorkItem(config);
+    } catch (error) {
+      console.warn(`could not claim work: ${error instanceof Error ? error.message : String(error)}`);
+      if (config.once) return;
+      await sleep(config.intervalMs);
+      continue;
+    }
     if (item) {
       // The claim is confirmed immediately before the item runs, because the lease window
       // can pass between the two and an item whose window passed is claimable again. A
@@ -438,6 +498,43 @@ export class WorkHeartbeatUnconfirmedError extends Error {
 }
 
 /**
+ * The claim was not answered inside the bound, so this iteration produced no item.
+ *
+ * A claim that fails and a claim that says nothing differ in one way that matters to an
+ * operator: the first says the runtime is not there, the second that it is there and is not
+ * serving this queue. Both leave the worker polling - that is the behaviour, and it is the
+ * only sensible one, because the alternative is a process that either parks for ever or
+ * exits on a blip.
+ *
+ * **The limit of that safety is worth stating where it is decided rather than only in docs.**
+ * A claim whose response was lost may still have created the row on the server, and this
+ * worker will never see the item it just caused. That is safe but not lossless: the item is
+ * stranded until its lease lapses. It is not lost, because the row's `accepted_at` is still
+ * null - it stays `queued` and the sweep re-hands it, which is the "unaccepted intent stays
+ * reclaimable" property from the frozen worker-protocol spec doing exactly its job. Trying to
+ * undo the claim instead would need a release route that does not exist and a race against
+ * the sweep that this side cannot win.
+ *
+ * Like the other worker-local codes, this is a class property rather than an exported `_CODE`
+ * constant, so it stays out of `tests/fixtures/error-codes.json`: nothing on the wire emits
+ * it. The code is repeated inside the message because the warning line is the only channel a
+ * supervisor sees.
+ */
+export class WorkClaimUnconfirmedError extends Error {
+  readonly code = 'work_claim_unconfirmed';
+  readonly timeoutMs: number;
+
+  constructor(timeoutMs: number) {
+    super(
+      `claim unconfirmed: work_claim_unconfirmed - no answer within ${timeoutMs}ms, ` +
+        'so this iteration produced no item; the worker polls again',
+    );
+    this.name = 'WorkClaimUnconfirmedError';
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+/**
  * The claim was never confirmed because no answer arrived inside the bound.
  *
  * Deliberately a **different type** from `WorkAcceptRefusedError`, and the reason is
@@ -573,15 +670,30 @@ export async function executeWorkItem(item: WorkerItem, root: string, signal?: A
 }
 
 async function claimWorkItem(opts: ResolvedWorkerPollOptions): Promise<WorkerItem | null> {
-  const res = await fetch(`http://localhost:${opts.port}/v1/x/worker/claim`, {
-    method: 'POST',
-    headers: jsonHeaders(opts),
-    body: JSON.stringify({
-      worker_id: opts.workerId,
-      environment_id: opts.environmentId,
-      environment_key: opts.environmentKey ?? process.env.MANAGED_AGENTS_ENVIRONMENT_KEY,
-    }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`http://localhost:${opts.port}/v1/x/worker/claim`, {
+      method: 'POST',
+      headers: jsonHeaders(opts),
+      body: JSON.stringify({
+        worker_id: opts.workerId,
+        environment_id: opts.environmentId,
+        environment_key: opts.environmentKey ?? process.env.MANAGED_AGENTS_ENVIRONMENT_KEY,
+      }),
+      // The first request of every iteration used to be the one that could park the worker
+      // for ever: issued once from the loop, so there was not even a pile of silent retries
+      // to notice.
+      signal: AbortSignal.timeout(opts.claimTimeoutMs),
+    });
+  } catch (error) {
+    // A bound that expires is named as its own thing, because "the runtime did not answer"
+    // and "the runtime is not there" are different faults: the first means it is up and not
+    // serving this queue, the second that the port is closed. Both leave the worker polling.
+    if (error instanceof Error && error.name === 'TimeoutError') {
+      throw new WorkClaimUnconfirmedError(opts.claimTimeoutMs);
+    }
+    throw error;
+  }
   if (res.status === 204) return null;
   if (!res.ok) throw new Error(`worker claim failed: ${res.status} ${await res.text()}`);
   return res.json() as Promise<WorkerItem>;

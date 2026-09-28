@@ -3,6 +3,23 @@
 ## Unreleased
 
 ### Changed
+- **The worker's claim can no longer stop it, in either direction.** The claim is the first
+  request of every iteration and was the only one still issued once with no bound and no
+  error handling. Unbounded, a claim the runtime never answered parked the worker for ever:
+  no item, no report, no retry, and no message, because unlike a renewal there is no timer
+  keeping it alive - just an idle process that never polls again. Uncaught, a claim that
+  *failed* was worse: the error escaped the poll loop and terminated the worker, so a runtime
+  that blinked was enough to kill every worker pointed at it. Both are now one behaviour - an
+  item is run only when the claim produced one, and a claim that produced none, whether
+  refused, failed or never answered, is logged and the worker polls again after
+  `--interval-ms`. The new `--claim-timeout-ms` (default `10000`, minimum `1`) bounds the
+  request, and an expired bound is reported as the machine-readable `work_claim_unconfirmed`
+  with the bound it waited. A permanently wrong credential now reports at a steady rate
+  instead of exiting, which is a deliberate change from a fast crash to a slow loop.
+  Documented, including the honest limit: a claim whose response was lost may still have
+  created the row, so that item is stranded until its lease lapses - not lost, because its
+  `accepted_at` is still null, so it stays `queued` and the sweep re-hands it. Documented in
+  `docs/api.md` and `docs/deployment.md`.
 - **A work-item renewal the runtime never answers is now an observable failure instead of
   a silent pile-up.** The worker renews its claim on an interval, and that renewal had no
   bound and no `AbortSignal`. Because it is issued from a timer, a runtime that accepted

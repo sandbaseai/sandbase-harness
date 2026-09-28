@@ -428,12 +428,21 @@ describe('worker poll CLI', () => {
   it('keeps polling after a completion it could not deliver', async () => {
     // "Does not terminate the worker" has to mean the loop kept going, not merely that the
     // call returned - with `--once` a return is also what an early exit looks like. The loop
-    // is therefore allowed to run, and the second claim is made to fail with a sentinel: the
-    // sentinel reaching the test is the proof that the refused completion did not stop it.
+    // is therefore allowed to run and the **second claim** is counted: reaching it is the
+    // proof that the refused completion did not stop it.
+    //
+    // The stopping condition is the loop's own sleep *after* that second claim, so the count
+    // is real and the command still settles. It used to be a sentinel thrown from the second
+    // claim, which no longer works and must not: since the claim step was bounded and wrapped,
+    // a claim error is caught and retried like any other, so a sentinel thrown there is
+    // swallowed and the test polls for ever. Throwing from the timer instead also proves the
+    // loop got all the way back to sleeping - and it is the same technique the claim tests
+    // use, so there is one way to stop this loop, not two.
     const { queue, port, workdir } = await startRuntime();
     const id = queue.enqueue('sess_worker', 'read', { path: 'greeting.txt' });
     writeFileSync(join(workdir, 'greeting.txt'), 'ran fine', 'utf8');
 
+    const intervalMarker = 1235;
     const realFetch = globalThis.fetch;
     let claims = 0;
     const completionBodies: Array<Record<string, unknown>> = [];
@@ -441,7 +450,8 @@ describe('worker poll CLI', () => {
       const url = String(input);
       if (url.endsWith('/v1/x/worker/claim')) {
         claims += 1;
-        if (claims >= 2) return Promise.reject(new Error('SENTINEL_LOOP_CONTINUED'));
+        // Empty from the second claim on, so the loop has nothing to do but poll and sleep.
+        if (claims >= 2) return Promise.resolve(new Response(null, { status: 204 }));
         return realFetch(input as Parameters<typeof realFetch>[0], init as Parameters<typeof realFetch>[1]);
       }
       if (url.endsWith('/v1/x/worker/complete')) {
@@ -454,22 +464,37 @@ describe('worker poll CLI', () => {
       return realFetch(input as Parameters<typeof realFetch>[0], init as Parameters<typeof realFetch>[1]);
     }) as typeof realFetch);
 
+    const realSetTimeout = globalThis.setTimeout;
+    let sleeps = 0;
+    const sentinel = new Error('SENTINEL_LOOP_CONTINUED');
+    const timers = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => {
+      if (Number(ms) === intervalMarker) {
+        sleeps += 1;
+        if (sleeps >= 2) throw sentinel;
+      }
+      return realSetTimeout(fn as never, ms as never);
+    }) as typeof realSetTimeout);
+
     const warnings: string[] = [];
     const warn = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warnings.push(args.join(' ')); });
     let rejection: unknown;
     try {
       await withCapturedLog(() =>
-        workerPollCommand({ port: String(port), workdir, intervalMs: '250', workerId: 'worker_test' }));
+        workerPollCommand({
+          port: String(port), workdir, intervalMs: String(intervalMarker), workerId: 'worker_test',
+        }));
     } catch (error) {
       rejection = error;
     } finally {
       warn.mockRestore();
+      timers.mockRestore();
       spy.mockRestore();
     }
 
     // The loop reached a second claim, which it could only do by surviving the refusal.
     expect(claims).toBe(2);
-    expect(String((rejection as Error | undefined)?.message)).toContain('SENTINEL_LOOP_CONTINUED');
+    expect(rejection).toBe(sentinel);
+    expect(sleeps).toBeGreaterThanOrEqual(2);
     // And it did not answer the refusal by trying again: one attempt, still not a failure.
     expect(completionBodies).toHaveLength(1);
     expect(completionBodies[0].failed).toBeUndefined();
@@ -759,6 +784,133 @@ describe('worker poll CLI', () => {
     // Reaching here in a fraction of the thirty seconds is the kill rather than the command
     // finishing or timing out on its own.
     expect(Date.now() - started).toBeLessThan(10_000);
+  });
+
+  it('polls again after a claim the runtime never answers', async () => {
+    // The claim is the first thing the loop does and the only request in it with no bound
+    // and no error handling. Because it is issued once from the loop rather than from a
+    // timer, an unanswered claim is a *silent total stall*: no timeout, no second request,
+    // no pile to notice - the worker simply sits there until someone restarts it.
+    const { port, workdir } = await startRuntime();
+
+    let claims = 0;
+    let sawSignal: AbortSignal | undefined;
+    const realFetch = globalThis.fetch;
+    const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(((input: unknown, init?: unknown) => {
+      const url = String(input);
+      if (!url.endsWith('/v1/x/worker/claim')) {
+        return realFetch(input as Parameters<typeof realFetch>[0], init as Parameters<typeof realFetch>[1]);
+      }
+      claims += 1;
+      if (claims > 1) {
+        // The queue is empty from here on, so the loop is left doing nothing but polling -
+        // and that is the point: reaching a second claim at all is the proof.
+        return Promise.resolve(new Response(null, { status: 204 }));
+      }
+      const signal = (init as { signal?: AbortSignal } | undefined)?.signal;
+      sawSignal = signal;
+      // A hanging server, modelled literally: nothing settles on its own and it rejects
+      // only when the signal it was given aborts, so a missing bound cannot pass by
+      // rejecting by itself.
+      return new Promise((_resolve, reject) => {
+        if (!signal) return;
+        signal.addEventListener('abort', () => {
+          const abort = new Error('The operation was aborted due to timeout');
+          abort.name = 'TimeoutError';
+          reject(abort);
+        });
+      });
+    }) as typeof realFetch);
+
+    // The loop would poll for ever by design, so the second sleep is the stopping condition:
+    // throwing from the timer's executor rejects `sleep`, which escapes the loop and settles
+    // the command. Intercepting only the configured interval keeps the abort timer and
+    // Vitest's own timers out of it, and the value is deliberately unusual.
+    const intervalMarker = 1234;
+    const realSetTimeout = globalThis.setTimeout;
+    let sleeps = 0;
+    const sentinel = new Error('SENTINEL_LOOP_CONTINUED');
+    const timers = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number) => {
+      if (Number(ms) === intervalMarker) {
+        sleeps += 1;
+        if (sleeps >= 2) throw sentinel;
+      }
+      return realSetTimeout(fn as never, ms as never);
+    }) as typeof realSetTimeout);
+
+    const warnings: string[] = [];
+    const warn = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warnings.push(args.join(' ')); });
+    let failure: unknown;
+    try {
+      await workerPollCommand({
+        port: String(port), workdir, workerId: 'worker_test',
+        intervalMs: String(intervalMarker), claimTimeoutMs: '7',
+      });
+    } catch (error) {
+      failure = error;
+    } finally {
+      warn.mockRestore();
+      timers.mockRestore();
+      spy.mockRestore();
+    }
+
+    // A bound was applied, and it is the configured option.
+    expect(sawSignal).toBeInstanceOf(AbortSignal);
+    // The loop reached a **second** claim, which is the behaviour: a claim that produced
+    // nothing leaves the worker polling instead of parked.
+    expect(claims).toBeGreaterThanOrEqual(2);
+    // The stall is now a logged failure naming the code and the bound it waited.
+    expect(warnings.join('\n')).toContain('could not claim work');
+    expect(warnings.join('\n')).toContain('work_claim_unconfirmed');
+    expect(warnings.join('\n')).toContain('7ms');
+    // The sentinel is how we know the loop got past the failure and back to sleeping: it
+    // came from the second interval timer, which is only reached after a second claim.
+    expect(failure).toBe(sentinel);
+    expect(sleeps).toBeGreaterThanOrEqual(2);
+  });
+
+  it('does not end the worker when the claim itself fails', async () => {
+    // Nothing sits between `claimWorkItem` and the command, so anything the request throws
+    // used to escape the loop and terminate the process. A runtime that blinks was therefore
+    // enough to kill every worker pointed at it - the opposite of what a poll loop with a
+    // configurable interval is for.
+    const refusals = ['ECONNREFUSED 127.0.0.1:3000', 'fetch failed'];
+    for (const message of refusals) {
+      const realFetch = globalThis.fetch;
+      const spy = vi.spyOn(globalThis, 'fetch').mockImplementation((() => {
+        const error = new Error(message);
+        error.name = 'TypeError';
+        return Promise.reject(error);
+      }) as typeof realFetch);
+      const warnings: string[] = [];
+      const warn = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warnings.push(args.join(' ')); });
+      let failure: unknown;
+      try {
+        // `--once` is the one configuration where the loop is allowed to stop by itself, so
+        // it is the only way to assert "it did not exit" without abandoning a pending promise.
+        await workerPollCommand({ port: '9', workdir: '.', once: true, workerId: 'worker_test' });
+      } catch (error) {
+        failure = error;
+      } finally {
+        warn.mockRestore();
+        spy.mockRestore();
+      }
+      // It resolved. Before this change the same call rejected with the transport error.
+      expect(failure).toBeUndefined();
+      expect(warnings.join('\n')).toContain('could not claim work');
+      expect(warnings.join('\n')).toContain(message);
+    }
+  });
+
+  it('refuses an unusable claim bound at startup', () => {
+    for (const bad of ['abc', '', 'NaN', '-1', '0']) {
+      expect(() => resolveWorkerPollOptions({ port: '3000', workdir: '.', claimTimeoutMs: bad }))
+        .toThrow(/claim-timeout-ms/);
+    }
+    // The default is comfortably above a localhost round trip and well under the lease window,
+    // so an expired bound leaves the claim's row still the worker's own while it walks away.
+    expect(resolveWorkerPollOptions({ port: '3000', workdir: '.' }).claimTimeoutMs).toBe(10_000);
+    expect(resolveWorkerPollOptions({ port: '3000', workdir: '.', claimTimeoutMs: '25' }).claimTimeoutMs).toBe(25);
   });
 
   it('refuses an unusable --interval-ms instead of polling with no delay', () => {

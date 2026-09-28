@@ -390,6 +390,7 @@ describe('CLI program', () => {
     expect(poll!.options.map((option) => option.long).sort()).toEqual([
       '--ack-timeout-ms',
       '--api-key',
+      '--claim-timeout-ms',
       '--environment-id',
       '--environment-key',
       '--heartbeat-ms',
@@ -410,6 +411,7 @@ describe('CLI program', () => {
       once: false,
       heartbeatMs: '20000',
       heartbeatTimeoutMs: '10000',
+      claimTimeoutMs: '10000',
       ackTimeoutMs: '10000',
     });
   });

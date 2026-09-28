@@ -249,6 +249,7 @@ being left claimed. Useful flags:
 | --- | --- |
 | `--once` | Claim and run at most one item, then exit. |
 | `--interval-ms <ms>` | Delay between polls when the queue is empty (default `1000`, minimum `250`). |
+| `--claim-timeout-ms <ms>` | How long to wait for a claim to be answered before polling again (default `10000`, minimum `1`). |
 | `--heartbeat-ms <ms>` | Renew the claim on this interval while an item runs (default `20000`, minimum `25`). |
 | `--heartbeat-timeout-ms <ms>` | How long to wait for a renewal to be answered before reporting it as unconfirmed (default `10000`, minimum `1`). |
 | `--ack-timeout-ms <ms>` | How long to wait for the runtime to confirm a claim before giving up on the item (default `10000`, minimum `1`). |
@@ -261,6 +262,26 @@ every `--heartbeat-ms`, and stops renewing when the item finishes. A failed rene
 is logged and the command keeps running: the server refuses a completion from a worker
 that no longer holds the claim, and stopping a command halfway on a suspicion that the
 claim lapsed would leave a half-applied side effect.
+
+The claim itself is bounded by `--claim-timeout-ms`, and it is the one request whose
+absence was least visible: it is issued once per iteration rather than from a timer, so
+an unanswered claim was a silent total stall - no item, no report, no retry, and no
+message, just a process that never polls again. A claim that **failed** was worse still,
+because nothing caught it and the error terminated the whole worker, so a runtime that
+blinked was enough to kill every worker pointed at it. Both are now one behaviour: an
+item is run only when the claim produced one, and a claim that produced none - refused,
+failed, or never answered - is logged (`work_claim_unconfirmed` names the bound when one
+expires) and the worker polls again on `--interval-ms`. A permanently wrong credential
+therefore reports at a steady rate rather than exiting, which is a deliberate change from
+a fast crash to a slow loop.
+
+Walking away from a claim is safe but **not lossless**, and the difference is worth
+knowing. A claim whose response was lost may still have created the row on the server, so
+that item is stranded until its lease lapses - this worker will never see the item it just
+caused. It is not lost, because the row's `accepted_at` is still null, so it stays `queued`
+and the sweep re-hands it after the window. That is the "unaccepted intent stays
+reclaimable" property doing its job, and it is why abandoning a claim is the right move
+rather than trying to release a row whose claim this side cannot prove it holds.
 
 Each renewal is also individually bounded by `--heartbeat-timeout-ms`, and here the
 bound matters more than it looks. The renewal is issued from a timer, so a runtime that
@@ -302,7 +323,8 @@ replayed. A command that genuinely failed is still reported as failed with its o
 and if that report is refused the row is left unrecorded rather than being given a
 failure the worker could not substantiate.
 
-An unusable `--port`, `--interval-ms`, `--heartbeat-ms`, `--heartbeat-timeout-ms` or
+An unusable `--port`, `--interval-ms`, `--claim-timeout-ms`, `--heartbeat-ms`,
+`--heartbeat-timeout-ms` or
 `--ack-timeout-ms` stops the
 worker at startup with a message naming the option, which matters for a long-running
 process on someone else's machine: a `--interval-ms` that does not parse would otherwise

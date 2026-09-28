@@ -1516,7 +1516,20 @@ Pass `--once` to claim and run at most one item and exit, which is also what mak
 the command usable from a test or a cron job; without it the worker polls until it
 is stopped. `--interval-ms` sets the delay between polls when the queue is empty
 and `--worker-id` sets the identity reported on both the claim and the completion
-(default `worker_<pid>`). While an item runs the worker renews its own claim every
+(default `worker_<pid>`). The claim is bounded by `--claim-timeout-ms` (default
+`10000`), and it is the request whose absence of a bound was least visible: it is
+issued once per iteration rather than from a timer, so a claim the runtime never
+answered was a silent total stall - no item, no report, no retry, and no message.
+A claim that **failed** was worse, because nothing caught it and the error ended the
+worker, so a runtime that blinked killed every worker pointed at it. Both are now one
+behaviour: an item is run only when the claim produced one, and a claim that produced
+none - refused, failed, or never answered, the last as the machine-readable
+`work_claim_unconfirmed` naming its bound - is logged and the worker polls again after
+`--interval-ms`. One limit is worth stating: a claim whose response was lost may still
+have created the row, so that item is stranded until its lease lapses. It is not lost -
+its `accepted_at` is still null, so it stays `queued` and the sweep re-hands it, which is
+the "unaccepted intent stays reclaimable" rule doing its job. While an item runs the
+worker renews its own claim every
 `--heartbeat-ms` (default `20000`), because the claim carries a lease window and a
 long item would otherwise be reclaimed and handed to a second worker while the first
 was still running it. A renewal refused with `work_lease_lost` - the session that
@@ -1547,7 +1560,8 @@ differently on purpose - a refusal names the status the runtime returned, while 
 expired bound fails with the machine-readable `work_accept_unconfirmed` and the
 bound it waited - since a runtime that refused and a runtime that went quiet need
 different diagnoses. In both cases the worker warns, runs nothing, reports nothing,
-and keeps polling. An unusable `--port`, `--interval-ms`, `--heartbeat-ms`,
+and keeps polling. An unusable `--port`, `--interval-ms`, `--claim-timeout-ms`,
+`--heartbeat-ms`,
 `--heartbeat-timeout-ms` or
 `--ack-timeout-ms` stops the worker at startup with a message naming the option: an
 unparseable interval would otherwise become a poll loop with no delay at all.
