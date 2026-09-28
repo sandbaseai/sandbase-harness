@@ -1043,6 +1043,41 @@ const M047_WORK_ITEM_ABANDON = `
 ALTER TABLE work_items ADD COLUMN abandoned_at TEXT;
 `;
 
+/**
+ * Rename the work-item status values to the vocabulary the frozen worker-protocol spec
+ * fixes: `queued -> accepted -> applied`, plus `failed` and `unknown`.
+ *
+ * The old words are kept only as this mapping. `claimed` is the one that has to go: it was
+ * written the moment a worker took an item and left there while the item ran, so the status
+ * column could not say whether anyone had committed to running it without also reading
+ * `accepted_at` - the conflation the spec names ("`claimed` 不得同时表示"有人接手"和"效果已发生"").
+ * Splitting it needs `accepted_at`, which is why this cannot be an earlier migration.
+ *
+ * `claimed` without an acceptance maps to `queued` rather than to a status of its own,
+ * because it **is** the queued state: the holder has a lease on running the item, not
+ * ownership of it, and once that lease lapses the item is offered again - which is the
+ * behaviour the reclaim predicate already had. `claimed` with an acceptance maps to
+ * `accepted`, which is the state that may already have produced an effect.
+ *
+ * The mapping is total and idempotent by construction: every value it produces falls into
+ * the `ELSE`, so re-running it rewrites nothing, and a row already carrying a new value is
+ * left alone. `failed` and `unknown` keep their names, since they were never the problem.
+ *
+ * Running on a fresh workspace is a no-op for the same reason - there are no rows - and the
+ * `status` column default of `'pending'` from migration 003 is left in place rather than
+ * changed, because a landed migration is immutable. Inserts name `'queued'` explicitly
+ * instead, so the stale default is never reached.
+ */
+const M048_WORK_ITEM_STATUS_VOCABULARY = `
+UPDATE work_items SET status = CASE
+  WHEN status = 'pending' THEN 'queued'
+  WHEN status = 'claimed' AND accepted_at IS NOT NULL THEN 'accepted'
+  WHEN status = 'claimed' THEN 'queued'
+  WHEN status = 'done' THEN 'applied'
+  ELSE status
+END;
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: '001_initial', sql: M001_INITIAL },
   { version: 2, name: '002_memory', sql: M002_MEMORY },
@@ -1091,4 +1126,5 @@ export const MIGRATIONS: Migration[] = [
   { version: 45, name: '045_work_item_stop', sql: M045_WORK_ITEM_STOP },
   { version: 46, name: '046_work_item_accept', sql: M046_WORK_ITEM_ACCEPT },
   { version: 47, name: '047_work_item_abandon', sql: M047_WORK_ITEM_ABANDON },
+  { version: 48, name: '048_work_item_status_vocabulary', sql: M048_WORK_ITEM_STATUS_VOCABULARY },
 ];

@@ -3,7 +3,7 @@
  *
  * `WorkQueue.claim(workerId, sessionId?, environmentId?)` has three branches, and
  * `self-hosted-provider.ts:58-63` states why the claim is safe: "a single atomic
- * conditional UPDATE guarded by `status='pending'` so two concurrent workers can
+ * conditional UPDATE guarded by `status='queued'` so two concurrent workers can
  * never claim the same item (H2). Only the worker whose UPDATE actually flips the
  * row wins."
  *
@@ -14,7 +14,7 @@
  * one carrying the join on `s.environment_id`:
  *
  *     SELECT wi.id FROM work_items wi JOIN sessions s ON s.id = wi.session_id
- *     WHERE wi.status = 'pending' AND wi.session_id = ? AND s.environment_id = ?
+ *     WHERE wi.status = 'queued' AND wi.session_id = ? AND s.environment_id = ?
  *
  * That is the security-relevant intersection. A worker holding one environment's key
  * must not be handed work that belongs to another environment's session merely by
@@ -61,14 +61,14 @@ describe('Work queue claim scoped to a session and an environment', () => {
     // The worker holds env_a's scope and names a session that belongs to env_b.
     expect(queue.claim('w1', 'sess_b', 'env_a')).toBeNull();
     // Refusing has to mean the item is still there, not that it was consumed.
-    expect(statusOf(item)).toBe('pending');
+    expect(statusOf(item)).toBe('queued');
 
     // The positive control: the same item is claimable by its own environment and
     // session, so the refusal above cannot have been an empty queue in disguise.
     const claimed = queue.claim('w2', 'sess_b', 'env_b');
     expect(claimed?.id).toBe(item);
-    expect(claimed?.status).toBe('claimed');
-    expect(statusOf(item)).toBe('claimed');
+    expect(claimed?.status).toBe('queued');
+    expect(statusOf(item)).toBe('queued');
   });
 
   it('keeps a same-environment session claimable, and an unknown session inert', () => {
@@ -77,7 +77,7 @@ describe('Work queue claim scoped to a session and an environment', () => {
     // The matching scope works, which is what makes the refusal above a decision
     // about the environment rather than about session scoping in general.
     expect(queue.claim('w1', 'sess_a', 'env_a')?.id).toBe(forA);
-    expect(statusOf(forA)).toBe('claimed');
+    expect(statusOf(forA)).toBe('queued');
 
     // A session that does not exist in this environment hands over nothing.
     queue.enqueue('sess_a', 'read', { path: 'a2' });

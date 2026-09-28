@@ -112,7 +112,7 @@ describe('WorkQueue', () => {
     // a log line and a code answer different questions.
     await expect(queue.await(unclaimed, { timeoutMs: 60, pollMs: 10 })).rejects.toThrow(/timed out/);
 
-    // Claimed, **accepted**, and never reported. The item is still `claimed` afterwards on
+    // Claimed, **accepted**, and never reported. The item is still `accepted` afterwards on
     // purpose - the work is alive for whoever holds it - and the reason says only that this
     // caller no longer knows the outcome, which is why it must not be replayed blindly.
     // Acceptance is what makes it unknown rather than safe: it is the executor's own
@@ -122,7 +122,7 @@ describe('WorkQueue', () => {
     expect(queue.accept(unknown, 'w1')).toBe('accepted');
     await expect(queue.await(unknown, { timeoutMs: 60, pollMs: 10 }))
       .rejects.toMatchObject({ code: 'work_outcome_unknown' });
-    expect(queue.get(unknown)!.status).toBe('claimed');
+    expect(queue.get(unknown)!.status).toBe('accepted');
     expect(queue.get(unknown)!.abandonedAt).toBeNull();
 
     // Claimed and **not** accepted - the same code, deliberately, even though it is now
@@ -165,7 +165,7 @@ describe('WorkQueue', () => {
     const row = queue.get(id)!;
     expect(row.abandonedAt).toBeTruthy();
     expect(row.stoppedAt).toBeNull();
-    expect(row.status).toBe('claimed');
+    expect(row.status).toBe('queued');
 
     // Recorded where a reader can actually see it. The value of the marker is that it is
     // readable, so it has to reach the listing an operator looks at, not only the row this
@@ -245,16 +245,16 @@ describe('WorkQueue', () => {
     // The same lapse, one step earlier, must behave the opposite way: taken over, run, and
     // completed by the second worker.
     expect(queue.claim('w5', 'sess_unstarted')!.id).toBe(neverStarted);
-    expect(queue.get(neverStarted)!.status).toBe('claimed');
+    expect(queue.get(neverStarted)!.status).toBe('queued');
     expect(queue.accept(neverStarted, 'w5')).toBe('accepted');
     expect(queue.complete(neverStarted, 'w5', { exitCode: 0, stdout: 'ran on the second worker' })).toBe('completed');
-    expect(queue.get(neverStarted)!.status).toBe('done');
+    expect(queue.get(neverStarted)!.status).toBe('applied');
 
     // --- and the states that must not be swept into `unknown` ---
     // Pending work was never held, so there is no start to be uncertain about.
     const queued = queue.enqueue('sess_queued', 'exec', { command: 'waiting' });
     expect(queue.claim('w6', 'sess_queued')!.id).toBe(queued);
-    expect(queue.get(queued)!.status).toBe('claimed');
+    expect(queue.get(queued)!.status).toBe('queued');
     // A stop stays the item's stated cause rather than being recorded as an unknown outcome:
     // a stop is a decision, and this is an absence of information.
     const stopped = queue.enqueue('sess_over', 'exec', { command: 'unwanted' });
@@ -263,8 +263,70 @@ describe('WorkQueue', () => {
     backdateClaim(db, stopped, 24 * 60);
     expect(queue.stop('sess_over')).toBe(1);
     expect(queue.claim('w8', 'sess_over')).toBeNull();
-    expect(queue.get(stopped)!.status).toBe('claimed');
+    expect(queue.get(stopped)!.status).toBe('accepted');
     expect(queue.get(stopped)!.stoppedAt).toBeTruthy();
+  });
+
+  it('reports only the frozen status vocabulary, and never a word it replaced', async () => {
+    // The frozen worker-protocol spec fixes the chain as `queued -> accepted -> applied`, plus
+    // `failed` / `unknown`, and allows the old words to survive **only** as the migration's
+    // compatibility mapping. This case pins that as a property rather than as a dozen separate
+    // assertions, so the set itself is what is frozen and a sixth status cannot appear quietly.
+    const FROZEN = ['queued', 'accepted', 'applied', 'failed', 'unknown'];
+
+    // Each status reached through the public queue API, one item per transition, so the
+    // assertion below is about states the queue really produces rather than values written
+    // into the table by the test.
+    const staysQueued = queue.enqueue('s_queued', 'exec', { command: 'untouched' });
+    expect(queue.get(staysQueued)!.status).toBe('queued');
+
+    const held = queue.enqueue('s_held', 'exec', { command: 'held' });
+    expect(queue.claim('w1', 's_held')!.id).toBe(held);
+    // The transition that the rename is about: a lease does **not** move the status, because
+    // taking a lease is not a commitment to run the item.
+    expect(queue.get(held)!.status).toBe('queued');
+    expect(queue.get(held)!.claimedBy).toBe('w1');
+
+    expect(queue.accept(held, 'w1')).toBe('accepted');
+    expect(queue.get(held)!.status).toBe('accepted');
+    // And re-accepting is idempotent for the holder, which is why `accepted` is admitted by
+    // the accept predicate: a retry over a flaky link must not be told it lost its own claim.
+    expect(queue.accept(held, 'w1')).toBe('accepted');
+    // `held` is left `accepted` on purpose so the final scan sees that state too; the
+    // completion transition is exercised on its own item below.
+
+    const completing = queue.enqueue('s_applied', 'exec', { command: 'succeeds' });
+    expect(queue.claim('w5', 's_applied')!.id).toBe(completing);
+    expect(queue.accept(completing, 'w5')).toBe('accepted');
+    expect(queue.complete(completing, 'w5', { exitCode: 0 })).toBe('completed');
+    expect(queue.get(completing)!.status).toBe('applied');
+
+    const failing = queue.enqueue('s_failed', 'exec', { command: 'fails' });
+    expect(queue.claim('w2', 's_failed')!.id).toBe(failing);
+    expect(queue.complete(failing, 'w2', { exitCode: 1 }, true)).toBe('completed');
+    expect(queue.get(failing)!.status).toBe('failed');
+
+    const lost = queue.enqueue('s_lost', 'exec', { command: 'unknown outcome' });
+    expect(queue.claim('w3', 's_lost')!.id).toBe(lost);
+    expect(queue.accept(lost, 'w3')).toBe('accepted');
+    backdateClaim(db, lost, 24 * 60);
+    expect(queue.claim('w4', 's_lost')).toBeNull();
+    expect(queue.get(lost)!.status).toBe('unknown');
+
+    // Every status the queue is holding is one of the five, and the counts are keyed by the
+    // same vocabulary the API hands out - a caller reading `counts` must not have to know that
+    // some rows are still described by the words this change replaced.
+    const rows = db.prepare('SELECT DISTINCT status FROM work_items').all() as Array<{ status: string }>;
+    expect(rows.map((row) => row.status).sort()).toEqual([...FROZEN].sort());
+    expect(Object.keys(queue.stats()).sort()).toEqual([...FROZEN].sort());
+
+    // And the replaced words are gone from the data, not merely unused by new writes. This is
+    // the assertion that would fail if the migration's mapping were incomplete or if a write
+    // path still named an old value.
+    const old = db.prepare(
+      "SELECT COUNT(*) AS c FROM work_items WHERE status IN ('pending', 'claimed', 'done')",
+    ).get() as { c: number };
+    expect(old.c).toBe(0);
   });
 
   it('records a give-up only for claimed work nobody accepted', async () => {
@@ -287,7 +349,7 @@ describe('WorkQueue', () => {
     // up on, and `pending` already answers the caller honestly.
     const pending = queue.enqueue('sess_queued', 'exec', { command: 'waiting' });
     expect(queue.get(pending)!.abandonedAt).toBeNull();
-    expect(queue.get(pending)!.status).toBe('pending');
+    expect(queue.get(pending)!.status).toBe('queued');
   });
 
   it('classifies a stopped item by the stop, not by the state it was in', async () => {
@@ -296,7 +358,7 @@ describe('WorkQueue', () => {
     // retry is safe - and tell a caller to resubmit work for a session that has ended.
     // The marker is the cause; `pending` is only where the item happened to be.
     const id = queue.enqueue('sess_never_claimed', 'exec', { command: 'too late' });
-    expect(queue.get(id)!.status).toBe('pending');
+    expect(queue.get(id)!.status).toBe('queued');
     expect(queue.stop('sess_never_claimed')).toBe(1);
 
     await expect(queue.await(id, { timeoutMs: 60, pollMs: 10 }))
@@ -347,7 +409,7 @@ describe('WorkQueue', () => {
     const reclaimed = leased.claim('w2');
     expect(reclaimed?.id).toBe(id);
     expect(reclaimed?.claimedBy).toBe('w2');
-    expect(reclaimed?.status).toBe('claimed');
+    expect(reclaimed?.status).toBe('queued');
 
     // And the superseded owner cannot land its result on the item it lost: the
     // claimed_by fence refuses it, so a worker that comes back to life cannot
@@ -381,9 +443,9 @@ describe('WorkQueue', () => {
     expect(queue.stop('sess_stop')).toBe(2);
     // Marked, and still `pending` / `claimed`: recording either as done or failed would
     // invent an outcome for work that simply stopped being wanted.
-    expect(queue.get(unclaimed)!.status).toBe('pending');
+    expect(queue.get(unclaimed)!.status).toBe('queued');
     expect(queue.get(unclaimed)!.stoppedAt).toBeTruthy();
-    expect(queue.get(held)!.status).toBe('claimed');
+    expect(queue.get(held)!.status).toBe('queued');
     expect(queue.get(held)!.stoppedAt).toBeTruthy();
     // Another session's queue is untouched.
     expect(queue.get(elsewhere)!.stoppedAt).toBeNull();
@@ -421,7 +483,7 @@ describe('WorkQueue', () => {
     // Recorded, and still `pending`: the intent is kept and marked as unwanted rather than
     // invented as done or failed, exactly as `stop()` treats the rows it marks.
     expect(queue.get(late)!.stoppedAt).toBeTruthy();
-    expect(queue.get(late)!.status).toBe('pending');
+    expect(queue.get(late)!.status).toBe('queued');
     expect(queue.claim('w1', 'sess_ended')).toBeNull();
     // The session's decision already covers it, so there is nothing left for a second stop
     // to mark - otherwise the guarantee would depend on someone remembering to call it.
@@ -620,7 +682,7 @@ describe('WorkQueue', () => {
     // still unclaimed by anyone else, so the refusal below cannot be a foreign-holder
     // answer wearing a lease-refusal's clothes.
     expect(queue.get(id)!.claimedBy).toBe('w1');
-    expect(queue.get(id)!.status).toBe('claimed');
+    expect(queue.get(id)!.status).toBe('queued');
 
     expect(queue.accept(id, 'w1')).toBe('work_lease_lost');
     expect(queue.get(id)!.acceptedAt).toBeNull();
@@ -641,7 +703,7 @@ describe('WorkQueue', () => {
 
     expect(queue.accept(id, 'w1')).toBe('work_lease_lost');
     // A refusal is not a completion: nothing ran, so nothing may be recorded as having run.
-    expect(queue.get(id)!.status).toBe('claimed');
+    expect(queue.get(id)!.status).toBe('queued');
     expect(queue.get(id)!.completedAt).toBeNull();
     expect(queue.get(id)!.acceptedAt).toBeNull();
   });
@@ -740,7 +802,7 @@ describe('SelfHostedSandboxProvider', () => {
     expect(queue.get(queued)!.stoppedAt).toBeTruthy();
     // Marked, not completed: the item was never handed out, and the record says so
     // rather than pretending the work happened or that it was thrown away.
-    expect(queue.get(queued)!.status).toBe('pending');
+    expect(queue.get(queued)!.status).toBe('queued');
   });
 });
 
@@ -814,7 +876,7 @@ describe('Worker HTTP endpoints', () => {
     const refused = await post('/accept', { id: stopped, worker_id: 'w3' });
     expect(refused.status).toBe(409);
     expect((await refused.json()).error.code).toBe('work_lease_lost');
-    expect(queue.get(stopped)!.status).toBe('claimed');
+    expect(queue.get(stopped)!.status).toBe('queued');
 
     expect((await post('/accept', { id: 'work_missing', worker_id: 'w1' })).status).toBe(404);
     expect((await post('/accept', { id, worker_id: '' })).status).toBe(400);
@@ -828,7 +890,7 @@ describe('Worker HTTP endpoints', () => {
       body: JSON.stringify({ id, worker_id: 'w1', result: 'file contents' }),
     });
     expect(res.status).toBe(200);
-    expect(queue.get(id)!.status).toBe('done');
+    expect(queue.get(id)!.status).toBe('applied');
   });
 
   it('rejects completion by a worker that did not claim the item', async () => {
@@ -839,7 +901,7 @@ describe('Worker HTTP endpoints', () => {
       body: JSON.stringify({ id, worker_id: 'w2', result: 'forged result' }),
     });
     expect(res.status).toBe(409);
-    expect(queue.get(id)!.status).toBe('claimed');
+    expect(queue.get(id)!.status).toBe('queued');
   });
 
   it('requires worker_id when completing an item', async () => {
@@ -880,7 +942,7 @@ describe('Worker HTTP endpoints', () => {
     expect(body.error.type).toBe('not_found');
     expect(body.error.message).toBe('work item not found');
     // And the refusal changed nothing: the real item is still w1's to complete.
-    expect(queue.get(id)!.status).toBe('claimed');
+    expect(queue.get(id)!.status).toBe('queued');
     expect(queue.get(id)!.claimedBy).toBe('w1');
   });
 

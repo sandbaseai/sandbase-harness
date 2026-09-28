@@ -1570,10 +1570,61 @@ since renewing its claim keeps its item out of the window.
 
 `work_lease_lost` means the session ended and stopped the
 work, so no result is wanted at all. A stop is reported ahead of the item's state,
-because an item the session stopped while nobody held it is still `pending`, and reporting that
+because an item the session stopped while nobody held it is still `queued`, and reporting that
 as "submit it again" would send work back to a session that has ended. A result
 reported before the deadline still resolves the wait, stopped work included: the
 marker says the result is not wanted, not that the effect did not happen.
+
+#### Work-item status
+
+An item is in exactly one of five states, and the chain is about **commitment** rather
+than about who is holding the row. That distinction is the reason the vocabulary is
+worded this way: a status column cannot be read correctly if the same word has to mean
+both "somebody took it" and "the effect may already have happened".
+
+```
+                 claim (lease only)          accept
+   [enqueue] ──────────┐                        │
+       │               ▼                        ▼
+       └──────────► queued ─────────────────► accepted ─────────► applied
+                      ▲  │                      │  │
+      reclaim after   │  │ wait gives up        │  │ complete(failed)
+      lease lapses    │  │ (nothing ran)        │  ▼
+      (nothing ran)   └──┘                      │ failed
+                                               │ lease lapses
+                                               ▼
+                                            unknown
+```
+
+| Status | Means | Claimable again? |
+| --- | --- | --- |
+| `queued` | Nobody has committed to running it. Covers both an item nobody has touched and one a worker holds a lease on but has not accepted. | Yes - immediately if never claimed, otherwise once the lease lapses. |
+| `accepted` | A worker confirmed the claim and committed to running it, so the effect may already have happened. | No. If the lease lapses the item becomes `unknown` instead. |
+| `applied` | The effect happened. | No - terminal. |
+| `failed` | It was attempted and did not succeed. | No - terminal. |
+| `unknown` | It was accepted and the outcome is not known either way. | No - terminal, and never replayed. |
+
+The transitions, stated so they can be checked against the code:
+
+- **enqueue** creates `queued`;
+- **claim** takes a lease and leaves the row `queued` - taking a lease is not a change of
+  commitment, so nothing about the status moves;
+- **accept** is the only transition into `accepted`, and it re-checks the lease window at
+  that moment, so a claim whose window passed in the gap between claiming and starting is
+  refused rather than accepted;
+- **complete** moves `queued` or `accepted` to `applied`, or to `failed` when the result is
+  a failure;
+- a **stop** records `stopped_at` and does not move the status: it is a decision about the
+  work, not a statement about the effect;
+- the only transition into `unknown` is an accepted item whose lease lapsed without a
+  result;
+- `queued` is the only status a claim can take, so `accepted` is never handed to a second
+  worker.
+
+Workspaces created before this vocabulary was fixed are renamed once, on migration: the
+old `pending` and unaccepted `claimed` both become `queued`, an accepted `claimed`
+becomes `accepted`, and `done` becomes `applied`. `failed` and `unknown` keep their names.
+The old words are never written again.
 
 ### Self-hosted worker keys
 

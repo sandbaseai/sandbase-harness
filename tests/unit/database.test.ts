@@ -182,9 +182,12 @@ describe('Database migrations', () => {
 
     upgraded.runMigrations();
     expect(columnsOf(upgraded, 'work_items')).toContain('stopped_at');
+    // The status reads `queued`, not the `'pending'` the insert fell back on: that row was
+    // written by a build whose vocabulary predates 048, and the upgrade renames it. Nothing
+    // claimed the row, so `queued` - not held, not committed - is what it always meant.
     expect(
       upgraded.prepare('SELECT status, stopped_at FROM work_items WHERE id = ?').get('work_u'),
-    ).toEqual({ status: 'pending', stopped_at: null });
+    ).toEqual({ status: 'queued', stopped_at: null });
     upgraded.close();
   });
 
@@ -202,6 +205,11 @@ describe('Database migrations', () => {
     // accept step for it to have been accepted by, so inventing a timestamp would claim a
     // commitment nobody made - and the queue would then treat a worker that died before
     // starting the item as one that may already have run it.
+    //
+    // Because that back-fill landed before the vocabulary change, migration 048 then maps the
+    // row's `claimed` to `queued` for exactly the same reason: the two columns agree, and both
+    // say "held, not committed". A row that had been accepted would have been mapped to
+    // `accepted` instead - the case the next test pins.
     const upgradedPath = join(tmpDir, 'upgraded-accept.db');
     const upgraded = new Database(upgradedPath);
     upgraded.runMigrations(MIGRATIONS.filter((migration) => migration.version <= 45));
@@ -215,7 +223,7 @@ describe('Database migrations', () => {
     expect(columnsOf(upgraded, 'work_items')).toContain('accepted_at');
     expect(
       upgraded.prepare('SELECT status, claimed_by, accepted_at FROM work_items WHERE id = ?').get('work_a'),
-    ).toEqual({ status: 'claimed', claimed_by: 'w1', accepted_at: null });
+    ).toEqual({ status: 'queued', claimed_by: 'w1', accepted_at: null });
     upgraded.close();
   });
 
@@ -244,7 +252,68 @@ describe('Database migrations', () => {
     expect(columnsOf(upgraded, 'work_items')).toContain('abandoned_at');
     expect(
       upgraded.prepare('SELECT status, abandoned_at FROM work_items WHERE id = ?').get('work_b'),
-    ).toEqual({ status: 'claimed', abandoned_at: null });
+    ).toEqual({ status: 'queued', abandoned_at: null });
+    upgraded.close();
+  });
+
+  it('renames the work-item status vocabulary on migration, completely and only once', () => {
+    // The frozen worker-protocol spec fixes this chain - `queued -> accepted -> applied`, plus
+    // `failed` and `unknown` - and requires the old words to survive only as a compatibility
+    // mapping. The mapping has one genuinely interesting case: `claimed` has to be split by
+    // whether the row was accepted, because that is the difference between work that never
+    // started and work whose effect may already have happened.
+    const fresh = new Database(join(tmpDir, 'fresh-vocabulary.db'));
+    fresh.runMigrations();
+    expect(fresh.prepare('SELECT name FROM _migrations WHERE version = 48').get()).toEqual({
+      name: '048_work_item_status_vocabulary',
+    });
+    // A fresh workspace reaches the end with no rows at all, so the rename has nothing to do
+    // and must not fail for that.
+    expect(fresh.prepare('SELECT COUNT(*) AS c FROM work_items').get()).toEqual({ c: 0 });
+    fresh.close();
+
+    // One row per old value, all written by the earlier build. `work_c2` is the accepted one
+    // and `work_c1` the unaccepted one - the pair that separates the mapping.
+    const upgradedPath = join(tmpDir, 'upgraded-vocabulary.db');
+    const upgraded = new Database(upgradedPath);
+    upgraded.runMigrations(MIGRATIONS.filter((migration) => migration.version <= 47));
+    upgraded.exec(`
+      INSERT INTO work_items (id, session_id, kind, payload, status, accepted_at) VALUES
+        ('work_p',  's', 'exec', '{}', 'pending', NULL),
+        ('work_c1', 's', 'exec', '{}', 'claimed', NULL),
+        ('work_c2', 's', 'exec', '{}', 'claimed', datetime('now')),
+        ('work_d',  's', 'exec', '{}', 'done',    datetime('now')),
+        ('work_f',  's', 'exec', '{}', 'failed',  datetime('now'))
+    `);
+
+    upgraded.runMigrations();
+    const mapped = Object.fromEntries(
+      (upgraded.prepare('SELECT id, status FROM work_items').all() as Array<{ id: string; status: string }>)
+        .map((row) => [row.id, row.status]),
+    );
+    expect(mapped).toEqual({
+      work_p: 'queued',
+      work_c1: 'queued',
+      work_c2: 'accepted',
+      work_d: 'applied',
+      work_f: 'failed',
+    });
+
+    // The rename is total in the other direction as well: no row is left carrying a word the
+    // new vocabulary does not contain, which is what a reader filtering on `status` relies on.
+    const surviving = upgraded.prepare(
+      "SELECT DISTINCT status FROM work_items WHERE status NOT IN ('queued','accepted','applied','failed','unknown')",
+    ).all();
+    expect(surviving).toEqual([]);
+
+    // And it is idempotent rather than merely repeatable: running the whole set again rewrites
+    // nothing, because every value the mapping produces is already in the new vocabulary.
+    upgraded.runMigrations();
+    const again = Object.fromEntries(
+      (upgraded.prepare('SELECT id, status FROM work_items').all() as Array<{ id: string; status: string }>)
+        .map((row) => [row.id, row.status]),
+    );
+    expect(again).toEqual(mapped);
     upgraded.close();
   });
 

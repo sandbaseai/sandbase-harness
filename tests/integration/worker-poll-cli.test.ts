@@ -90,7 +90,7 @@ describe('worker poll CLI', () => {
     writeFileSync(join(workdir, 'greeting.txt'), 'hello from the worker', 'utf8');
 
     const id = queue.enqueue('sess_worker', 'read', { path: 'greeting.txt' });
-    expect(queue.get(id)!.status).toBe('pending');
+    expect(queue.get(id)!.status).toBe('queued');
 
     const lines = await withCapturedLog(() =>
       workerPollCommand({ port: String(port), workdir, once: true, workerId: 'worker_test' }));
@@ -99,7 +99,7 @@ describe('worker poll CLI', () => {
     // completion rather than that the command returned without throwing. Without
     // `worker_id` on `complete` the row stays `claimed` and the command throws.
     const item = queue.get(id)!;
-    expect(item.status).toBe('done');
+    expect(item.status).toBe('applied');
     expect(item.claimedBy).toBe('worker_test');
     expect(item.result).toBe('hello from the worker');
     expect(lines.join('\n')).toContain(`completed ${id}`);
@@ -188,7 +188,7 @@ describe('worker poll CLI', () => {
 
     // The item was claimed, so the claim really happened and what failed is the confirmation.
     const item = queue.get(id)!;
-    expect(item.status).toBe('claimed');
+    expect(item.status).toBe('queued');
     expect(item.claimedBy).toBe('worker_test');
     expect(item.acceptedAt).toBeNull();
     // Nothing ran and nothing was reported - the same refusal to act as a rejected
@@ -269,7 +269,7 @@ describe('worker poll CLI', () => {
     // The item was claimed, so the claim really did happen and the refusal is about the
     // acceptance rather than about the item never being handed out.
     const item = queue.get(id)!;
-    expect(item.status).toBe('claimed');
+    expect(item.status).toBe('queued');
     expect(item.claimedBy).toBe('worker_test');
     expect(item.acceptedAt).toBeNull();
     // Nothing ran: the write the item describes never reached the workdir.
@@ -297,7 +297,7 @@ describe('worker poll CLI', () => {
     await withCapturedLog(() =>
       workerPollCommand({ port: String(port), workdir, once: true, environmentId: 'env_a' }));
 
-    expect(queue.get(id)!.status).toBe('pending');
+    expect(queue.get(id)!.status).toBe('queued');
   });
 
   it('renews its claim while an item runs, stops when it ends, and survives a failed renewal', async () => {
@@ -372,7 +372,7 @@ describe('worker poll CLI', () => {
       await withCapturedLog(() => workerPollCommand({
         port: String(port), workdir, once: true, workerId: 'worker_test', heartbeatMs: '60',
       }));
-      expect(queue.get(polled)!.status).toBe('done');
+      expect(queue.get(polled)!.status).toBe('applied');
     } finally {
       scheduled.mockRestore();
     }

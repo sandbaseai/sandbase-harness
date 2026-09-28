@@ -90,7 +90,7 @@ describe('Environment worker keys (documented routes)', () => {
     // env_b's item belongs to another environment and must not appear here.
     expect(body.data.map((item: { id: string }) => item.id).sort()).toEqual([first, second].sort());
     expect(body.first_id).toBe(body.data[0].id);
-    expect(body.counts).toEqual({ pending: 2 });
+    expect(body.counts).toEqual({ queued: 2 });
     // The item is the shape a worker receives from the claim route.
     expect(body.data[0].sessionId).toBe('sess_a');
 
@@ -178,7 +178,7 @@ describe('Environment worker keys (documented routes)', () => {
     const { res, body } = await claim({ worker_id: 'w1', environment_key: key.secret_key, environment_id: 'env_a' });
     expect(res.status).toBe(400);
     expect(body.error.message).toContain('environment_key scope');
-    expect(queue.list()[0].status).toBe('pending');
+    expect(queue.list()[0].status).toBe('queued');
   });
 
   it('refuses an unknown key', async () => {
@@ -212,7 +212,7 @@ describe('Environment worker keys (documented routes)', () => {
     const { res, body } = await claim({ worker_id: 'w1', environment_key: key.secret_key });
     expect(res.status).toBe(401);
     expect(body.error.message).toContain('expired');
-    expect(queue.list()[0].status).toBe('pending');
+    expect(queue.list()[0].status).toBe('queued');
   });
 
   it('revoking an unknown key is a 404', async () => {

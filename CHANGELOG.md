@@ -3,6 +3,28 @@
 ## Unreleased
 
 ### Changed
+- Work-item statuses are renamed to the vocabulary the frozen worker-protocol spec fixes:
+  `queued -> accepted -> applied`, plus `failed` and `unknown`. The old `claimed` was written the
+  moment a worker took an item and left there while the item ran, so the status column could not
+  say whether anybody had committed to running it without also reading `accepted_at` - the same
+  word meaning both "somebody took it" and "the effect may already have happened". `queued` now
+  covers both an item nobody has touched and one a worker holds a lease on but has not accepted,
+  which is the same state; `accepted` is the point from which the effect may already have
+  happened; and only `queued` is claimable, so the acceptance fence is a status comparison rather
+  than a second column the predicate has to remember to consult. `applied` replaces `done`.
+  Taking a lease is no longer a status change at all, which is the point of the rename. The
+  transition chain is frozen and diagrammed in `docs/api.md`. Workspaces created earlier are
+  renamed once on migration 048, completely and idempotently: `pending` and unaccepted `claimed`
+  become `queued`, accepted `claimed` becomes `accepted`, and `done` becomes `applied`; the old
+  words are never written again. **One behaviour had to move with the vocabulary to stay
+  correct:** the arm that reports `work_queue_timeout` - the one reason a caller is told it is
+  safe to submit the work again - tested `status = 'pending'`, which under the old vocabulary
+  proved no executor had seen the item. Under the new one `queued` also covers a row a worker is
+  holding, so the test is now "queued **and never claimed**". Without that, work that was about
+  to run would have been reported as safe to resubmit, which is the hazard the previous change
+  was written to close. Re-accepting stays idempotent for the holder: `accepted` is admitted by
+  the accept predicate so a worker retrying over a flaky link is not told it lost a lease it
+  still holds.
 - A self-hosted work item whose holder accepted it is no longer replayed when its lease lapses.
   The claim predicate treated any lapsed claim as reclaimable, with no test for `accepted_at`,
   so a worker that accepted an item, started running it, and then died had that item handed to
