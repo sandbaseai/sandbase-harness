@@ -176,7 +176,18 @@ export class DefaultSessionExecutor implements SessionExecutor {
       // parent session's backend instead of always landing on local.
       provisionSandbox: (session, sandboxId) => this.sandboxLifecycle.provisionDetached(session, sandboxId),
       composeSystemPrompt: (agent) => this.contextBuilder.composeSystemPrompt(agent),
-      buildMemoryContext: async (childSession, childAgent, childEvent) => (await this.contextBuilder.build(childSession, childAgent, childEvent, undefined, () => {})).systemPrompt,
+      // The child's sandbox is provisioned through the same lifecycle, so the
+      // child's prompt describes its resources against the same backend as the
+      // parent's: a sub-agent that was told the canonical path only, while its
+      // parent was told both spellings, would read the same mount differently.
+      buildMemoryContext: async (childSession, childAgent, childEvent) => (await this.contextBuilder.build(
+        childSession,
+        childAgent,
+        childEvent,
+        undefined,
+        () => {},
+        { sandboxProvider: this.sandboxLifecycle.resolveProviderType(childSession) },
+      )).systemPrompt,
       buildSandboxTools: (agent, sandbox, parentSession) => this.toolResolver.buildSandboxTools(
         agent,
         sandbox,
@@ -296,6 +307,11 @@ export class DefaultSessionExecutor implements SessionExecutor {
     // A repository mounted for this session ships its own `.claude/skills`; the
     // instructions are read out of the sandbox they were written to, so the
     // prompt and the tree the agent can see cannot disagree.
+    //
+    // The backend is asked of the lifecycle rather than read off the session,
+    // because the paths a resource can be reached by depend on where the sandbox
+    // is: the same mount is an absolute path for a command in a container and a
+    // sandbox-relative one for a command on the local host.
     const repositorySkills = await this.loadRepositorySkills(session, sandbox);
     const { systemPrompt, messages } = await this.contextBuilder.build(
       session,
@@ -303,7 +319,10 @@ export class DefaultSessionExecutor implements SessionExecutor {
       event,
       model,
       broadcast,
-      { repositorySkills },
+      {
+        repositorySkills,
+        sandboxProvider: this.sandboxLifecycle.resolveProviderType(session),
+      },
     );
 
     // 5. Build tools: built-in sandbox tools, MCP tools, delegation tools, and

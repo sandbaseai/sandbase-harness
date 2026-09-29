@@ -3,9 +3,10 @@
 Contract area: the `github_repository` session resource — cloning a repository
 into the sandbox, checking out a ref, discovering the skills it ships, and
 keeping the access token out of everything the model can read. Status:
-`partial`, see §7 — the wiring is in place and the local backend mounts the
-canonical root, while docker refuses it and the mount is not announced to the
-agent. Source: `src/core/resources/github-materializer.ts`,
+`partial`, see §7 — the wiring is in place, the local backend mounts the
+canonical root, and the repository, its checkout, and its mount path are named in
+the agent's instructions, while docker refuses that root and nothing yet refuses
+such a session at creation. Source: `src/core/resources/github-materializer.ts`,
 `src/core/resources/github-runtime.ts`,
 `src/core/session/sandbox-lifecycle.ts`, `src/core/runtime/session-runtime.ts`,
 `src/api/routes/session-resources.ts`.
@@ -107,8 +108,10 @@ at provisioning. `kubernetes` resolves an absolute path against its own
 `/workspace`, so it accepts this mount — and only nothing-under-`/mnt` is
 refused there, which this resource never touches — but that was not exercised
 against a cluster, and no creation-time admission exists on any backend yet. The
-mount path is also never named in the agent's instructions. Those gaps are why the
-entry is `partial` rather than `supported`. §4 records them, and
+mount path, URL, and checkout are named in the agent's instructions, in the
+canonical spelling and — on the local backend — the shell-usable one
+(`src/core/session/session-resource-prompt.ts`). The admission gap is why the
+entry is `partial` rather than `supported`. §4 records it, and
 `tests/integration/session-resource-wiring.test.ts` pins the docker refusal so
 that fixing it forces this status to move.
 
@@ -117,16 +120,15 @@ that fixing it forces this status to move.
 Aligned for: the resource being declarable per session, the URL grammar and
 ref handling, the token never being model-visible or persisted, the identity
 freeze being refused at the route, the discovered skills reaching the
-instruction boundary, and the mount itself on the local backend. Not aligned for
-docker, whose refusal is not yet an admission decision, and not aligned for
-announcing the mount path to the agent.
+instruction boundary, the mount path being announced to the agent with the URL,
+checkout, and shell-usable spelling, and the mount itself on the local backend.
+Not aligned for docker, whose refusal is not yet an admission decision.
 
 ## 4. Differences
 
 | Difference | Detail |
 | --- | --- |
 | Mount refused by docker | The materializer is implemented, tested, and injected by the composition root, so a session with a `github_repository` resource reaches it. On the local backend it mounts at the canonical `/workspace/<repo>` root, and `kubernetes` accepts the same path inside its own `/workspace`. `docker` rejects it as an absolute path, so a session on docker fails at provisioning instead of being refused at creation. The published contract describes a repository available in the sandbox. |
-| The mount path is not announced | The published contract makes the mounted repository available to the agent. The tree is readable at the mount path, but no instruction names it, so an agent that does not guess the default location will not read it. |
 | Repository skills reach the prompt only as text | `discoveredRepositorySkills` has a caller now, and each discovered `SKILL.md` is read out of the sandbox into the system prompt. Pi's `--skill` flag is not given a directory for them: skill packages live inside the guest filesystem and Pi takes host paths, so a Pi session reads them from the prompt rather than loading them as packages. |
 | Dead identity helper | `mountIdentityChanged` implements the freeze decision and is unit-tested, while the route enforces the same rule through a field allowlist. The rule a caller observes is enforced; the helper is not the enforcement point. |
 | URL grammar | Only `https://github.com/<owner>/<repo>` is accepted. A self-hosted GitHub Enterprise host, an SSH remote, and a `.git` suffix are rejected rather than silently normalized. |
@@ -137,19 +139,18 @@ announcing the mount path to the agent.
 
 ## 5. Reason for the difference
 
-- **The remaining gap is a backend limitation plus an unannounced path, not a
+- **The remaining gap is a backend limitation plus an admission gap, not a
   design.** The materializer is fully written, covered at both the decision and
   the host layer, and injected by the composition root; on the local backend a
-  caller can mount a repository and read it at the published path, and kubernetes
-  resolves the same root inside its own workspace. What a caller still cannot do is
-  mount one on docker (its confinement refuses every absolute path, and that
-  refusal is not yet an admission decision) or learn the mount path from the
-  agent's instructions. Recording it as `partial` is the only honest status while
+  caller can mount a repository, read it at the published path, and see the path,
+  URL, and checkout named in the agent's instructions, and kubernetes resolves the
+  same root inside its own workspace. What a caller still cannot do is mount one on
+  docker (its confinement refuses every absolute path, and that refusal is not yet
+  an admission decision). Recording it as `partial` is the only honest status while
   part of the published behaviour is unreachable through a started runtime, however
   complete the helper is. Raising it to `supported` is an
   admission change plus the canary in
-  `tests/integration/session-resource-wiring.test.ts` and the announcement in the
-  system prompt, not a prose change.
+  `tests/integration/session-resource-wiring.test.ts`, not a prose change.
 - Restricting the URL grammar is a security decision: accepting an arbitrary git
   remote would turn a resource declaration into an arbitrary-code-fetch
   primitive, and SSH remotes would require key material the runtime does not
@@ -191,6 +192,11 @@ announcing the mount path to the agent.
   works, not that `createGithubMaterializer` clones. That half is covered by the
   decision and host-layer suites above, and no test runs the production
   materializer end to end against a `LocalSandboxProvider`.
+- `tests/integration/session-resources-prompt.test.ts` — the announcement of the
+  mount: a session that attaches a repository and a file turns once, and the
+  prompt the strategy received names the URL, the `main` checkout, the
+  `/workspace/<repo>` mount path, the shell-usable spelling on the local backend,
+  and never the `authorization_token` the caller supplied.
 - `tests/integration/api.test.ts` — the resource on the wire: a
   `github_repository` resource is accepted, and the token is absent from the
   response, the session detail, and the stored row.
@@ -215,12 +221,11 @@ Enterprise remain unverified.
 `partial`. The materializer is implemented end to end and exercised by tests at
 the decision layer, the host layer, through `SandboxLifecycle` with an injected
 dependency, and on the real local backend; the composition root injects it,
-discovered repository skills reach the context builder, and the identity freeze is
-enforced by the resource route. It is not `supported` for two reasons: `docker`
-refuses an absolute path, so a session that attaches a `github_repository`
-resource there is accepted and then fails at provisioning rather than being
-refused at creation (kubernetes accepts the canonical `/workspace/<repo>` root on
-a code reading, unverified against a cluster); and the mount path is never named
-in the agent's instructions, so the mount is readable but not announced. The
-cache-key scope, the URL grammar, and the mount identity rule are documented
-deviations, recorded in §4.
+discovered repository skills reach the context builder, the mount path, checkout,
+and URL are named in the agent's instructions, and the identity freeze is enforced
+by the resource route. It is not `supported` because `docker` refuses an absolute
+path, so a session that attaches a `github_repository` resource there is accepted
+and then fails at provisioning rather than being refused at creation (kubernetes
+accepts the canonical `/workspace/<repo>` root on a code reading, unverified
+against a cluster). The cache-key scope, the URL grammar, and the mount identity
+rule are documented deviations, recorded in §4.

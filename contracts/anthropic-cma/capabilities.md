@@ -74,8 +74,8 @@ under this directory, and the real mount graph to the same facts:
   nothing wires it, and cannot stay below `supported` once something does and no
   recorded blocker remains. When a wired capability is still `partial` for a
   reason outside the composition root — the container backends refusing the
-  canonical mount roots and the mount path not reaching the agent's instructions,
-  for the two session-resource entries — the reason and the canary that pins it
+  canonical mount roots, for the two session-resource entries, and those refusals
+  not yet being admission decisions — the reason and the canary that pins it
   are recorded beside the wiring symbol, and the guard fails if the status moves
   to `supported` while that canary still pins the gap;
 - the routes listed in `routes.md` and the routes the server mounts are the same

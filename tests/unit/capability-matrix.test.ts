@@ -115,11 +115,13 @@ describe('capability matrix', () => {
     // The materializer and the file mount are implemented and tested, and the
     // composition root injects both, so a session that declares one reaches
     // them. The local backend now reaches the canonical in-sandbox roots the
-    // provisioning pass writes to, so a local session materializes its
-    // resources. What keeps the entries `partial` is the rest of the claim: the
-    // container backends still refuse those roots, and the mount path is not
-    // announced to the agent. `supported` here was the drift this work item
-    // exists to remove: the helper worked and the capability was unreachable.
+    // provisioning pass writes to and the agent is told which path its resource
+    // landed at, so a local session materializes and announces its resources.
+    // What keeps the entries `partial` is the rest of the claim: the container
+    // backends still refuse those roots, and such a session is accepted and then
+    // fails at provisioning instead of being refused when it is created.
+    // `supported` here was the drift this work item exists to remove: the helper
+    // worked and the capability was unreachable.
     expect(capabilityEntry('github-repository-materialization').status).toBe('partial');
     expect(capabilityEntry('github-repository-materialization').reason.toLowerCase())
       .toContain('canonical `/workspace/<repo>` root');

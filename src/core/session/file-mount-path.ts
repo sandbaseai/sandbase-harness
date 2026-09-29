@@ -15,6 +15,8 @@
  *   prefix must never be the thing that makes a traversal attempt look valid.
  */
 
+import { posix } from 'node:path';
+
 /** Internal directory every file resource is mounted under. */
 export const FILE_MOUNT_ROOT = '/mnt/session/uploads';
 
@@ -95,4 +97,39 @@ export function sandboxPathFor(mountPath: string): string {
 export function canonicalPathFromSandboxPath(sandboxPath: string): string | undefined {
   if (!sandboxPath.startsWith(`${FILE_MOUNT_ROOT}/`)) return undefined;
   return `/${sandboxPath.slice(FILE_MOUNT_ROOT.length + 1)}`;
+}
+
+/**
+ * Resolve the sandbox path a stored file resource is materialized to.
+ *
+ * A row written by the current build stores the canonical logical path
+ * (`/data.csv`); a row written by an earlier build stored the internal
+ * `/uploads/...` spelling. Both converge here, so every reader of a stored
+ * resource — the provisioning pass and the prompt that names the same file —
+ * derives one path instead of two that can drift apart.
+ */
+export function sandboxPathForStoredMountPath(value: unknown, fileId: string): string {
+  if (typeof value !== 'string' || value.trim() === '') {
+    return resolveFileMountPath(undefined, fileId).sandboxPath!;
+  }
+
+  const legacyRelative = legacyUploadsRelative(value);
+  if (legacyRelative !== undefined) return `${FILE_MOUNT_ROOT}/${legacyRelative}`;
+
+  const resolved = resolveFileMountPath(value, fileId);
+  if (!resolved.ok) throw new Error(`File session resource ${resolved.message}`);
+  return resolved.sandboxPath!;
+}
+
+/** Recognize the pre-canonical `/uploads/...` spelling and return its relative part. */
+function legacyUploadsRelative(value: string): string | undefined {
+  if (!value.startsWith('/uploads/')) return undefined;
+  if (value.includes('\\') || value.includes('\u0000')) {
+    throw new Error('File session resource mount_path must not contain a backslash or NUL byte');
+  }
+  const relative = posix.normalize(value.slice(1));
+  if (!relative.startsWith('uploads/') || relative === 'uploads' || relative.endsWith('/')) {
+    throw new Error('File session resource mount_path must stay under /uploads/');
+  }
+  return relative.slice('uploads/'.length);
 }

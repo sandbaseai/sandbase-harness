@@ -330,7 +330,10 @@ file is readable inside the session at `/mnt/session/uploads/notes.txt` (a comma
 the agent runs names the same file by its sandbox-relative spelling,
 `mnt/session/uploads/notes.txt`). On the default `local` backend each session gets
 a directory under the workspace data directory, so the same bytes are at
-`<data-dir>/sandbox/<session_id>/mnt/session/uploads/notes.txt`. The container
+`<data-dir>/sandbox/<session_id>/mnt/session/uploads/notes.txt`. The agent is told
+where the file landed: a session with a file or repository resource carries a
+`# Session Resources` section in its system prompt naming both spellings on the
+`local` backend, so it does not have to guess the path. The container
 backends still refuse that root, so a file resource on `docker` or `kubernetes`
 is accepted and then fails at provisioning; see
 [Mounting a file into a session](api.md#mounting-a-file-into-a-session).

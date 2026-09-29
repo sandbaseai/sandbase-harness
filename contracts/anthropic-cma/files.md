@@ -2,10 +2,11 @@
 
 Contract area: `/v1/files` and file session resources.
 Status: `partial` — the Files API, the mount-path form, the reader the
-provisioning pass calls, and the write itself on the local backend are
-implemented; the container backends still refuse the canonical mount root, and
-the agent is not yet told where the mount landed. See §4.
+provisioning pass calls, the write itself on the local backend, and the
+announcement of the mount path in the agent's instructions are implemented; the
+container backends still refuse the canonical mount root. See §4.
 Source: `src/core/session/file-mount-path.ts`,
+`src/core/session/session-resource-prompt.ts`,
 `src/api/routes/session-resources.ts`, `src/core/session/session-resources.ts`,
 `src/core/runtime/session-runtime.ts`, `src/api/routes/files.ts`.
 
@@ -77,20 +78,21 @@ Mounting is composed and blocked by the container backends:
   (`LocalSandboxProvider`; see `tests/integration/local-canonical-roots.test.ts`).
   The same mapping covers an `execute` working directory; a command string is not
   rewritten, so inside a command the file is named by its sandbox-relative
-  spelling and the agent has to be told that spelling. The container backends do
-  not map anything: `docker` refuses an absolute path at all and Kubernetes
-  refuses anything outside `/workspace`, so a session on one of those is accepted
-  and then fails at provisioning. The entry stays `partial` for that reason, and
-  because the agent is not told the mount path it was given;
-  `tests/integration/session-resource-wiring.test.ts` pins the container refusal
-  so that fixing one forces the status to move.
+  spelling, and the system prompt's `# Session Resources` section names both
+  spellings for the agent (`tests/integration/session-resources-prompt.test.ts`).
+  The container backends do not map anything: `docker` refuses an absolute path at
+  all and Kubernetes refuses anything outside `/workspace`, so a session on one of
+  those is accepted and then fails at provisioning. The entry stays `partial` for
+  that reason; `tests/integration/session-resource-wiring.test.ts` pins the
+  container refusal so that fixing one forces the status to move.
 
 ## 3. Alignment
 
 Aligned for: upload/list/read, the scoped listing, resource attachment, canonical
-mount path form, independent resource identity, and the reader the provisioning
-pass calls — an attached file is read back from the Files API's own row and
-artifact.
+mount path form, independent resource identity, the reader the provisioning pass
+calls — an attached file is read back from the Files API's own row and artifact —
+and the agent being told the mounted path in its instructions, in the canonical
+spelling and, on the local backend, the shell-usable one.
 
 ## 4. Differences
 
@@ -101,8 +103,7 @@ artifact.
 | Mount root | SandBase mounts under its own sandbox root layout. The published contract specifies a logical path, not a host directory. |
 | What a scoped listing contains | `scope_id` selects files whose recorded session is that session. A file created directly through `POST /v1/files` records no session, so it appears in the unscoped listing and in **no** scoped one — it is not attributed to a session that did not create it. The published contract describes session outputs; it does not state where a session-less upload should appear, so the choice is to leave it unattributed rather than guess an owner. |
 | The listing excludes `role = 'artifact'` | Rows written with `role = 'artifact'` are outside this listing in both scoped and unscoped form. That predates the scope parameter and is unchanged by it; recorded here because a caller reasoning about "every file for this session" should know the listing is not the whole table. |
-| The container backends refuse the mount root | The mount path is derived and validated, the reader is wired, and the local backend writes the bytes at `/mnt/session/uploads`, but `docker` and Kubernetes reject that root as outside their own workspace root. Recorded as `partial` rather than `supported` until every backend a session can select either serves the canonical root or refuses the resource at creation. |
-| The agent is not told the mount path | The published contract has the file mounted so the agent can read it. The bytes are readable at the canonical path, but the path is not named in the system prompt, so an agent that does not guess it will not open the file. Recorded as `partial` while the announcement is missing. |
+| The container backends refuse the mount root | The mount path is derived and validated, the reader is wired, and the local backend writes the bytes at `/mnt/session/uploads` and announces the path, but `docker` and Kubernetes reject that root as outside their own workspace root. Recorded as `partial` rather than `supported` until every backend a session can select either serves the canonical root or refuses the resource at creation. |
 
 ## 5. Reason for the difference
 
@@ -118,9 +119,8 @@ artifact.
   holding the workspace directory, the database, and the artifact store at once.
   It is wired there now rather than in the lifecycle, and the entry stays
   `partial` because the mount reaches the agent in two halves — the bytes at the
-  canonical path, and the path named in its instructions. The first half holds on
-  the local backend; the container backends still refuse the path, and the second
-  half is missing on every backend.
+  canonical path, and the path named in its instructions. Both halves hold on the
+  local backend; the container backends still refuse the path.
 
 ## 6. Corresponding tests
 
@@ -150,9 +150,21 @@ artifact.
   and a spilled tool output is readable at the canonical path the model was given.
 - `tests/unit/local-sandbox.test.ts` — the path mapping itself: `/workspace` and
   `/mnt/session` resolve below the sandbox directory, a command runs in a
-  canonical working directory, and another absolute path, a prefix-sharing name,
-  a traversal out of a root, a NUL byte, and a symlink out of the sandbox are all
-  refused.
+  canonical working directory and reads a file by its sandbox-relative spelling,
+  and another absolute path, a prefix-sharing name, a traversal out of a root, a
+  NUL byte, and a symlink out of the sandbox are all refused.
+- `tests/unit/session-resource-prompt.test.ts` — the announcement itself: the
+  canonical path, the repository URL with its checkout and mount path, the
+  shell-usable spelling added on `local` and only there, no section when the
+  session declares no file or repository, and a credential or an undescribable
+  entry never reaching the text.
+- `tests/integration/session-resources-prompt.test.ts` — the same section through
+  the running runtime: a session created by `POST /v1/sessions` with a file and a
+  repository turns once, the prompt the strategy received names both in both
+  spellings, the caller's `authorization_token` is absent from it, the path it
+  names is the path the real `LocalSandboxProvider` serves the bytes at, a
+  resource-less session has no section, and a `docker` session is told the
+  canonical path only.
 - `tests/unit/file-artifact-reader.test.ts` — the default reader's row
   semantics: the bytes the Files API stored, an archived file, a row whose
   artifact is gone, and a session artifact, each answered as the resource
@@ -168,11 +180,12 @@ artifact.
 ## 7. Status
 
 `partial` — file upload/list/read, mount path derivation, resource identity, the
-running-session resource lifecycle, and the reader the provisioning pass calls
-are implemented and covered by tests, and on the local backend the bytes are
-written at the canonical `/mnt/session/uploads` root and read back from it. It is
-not `supported` for two reasons: the container backends still refuse that root, so
-a session that attaches a file on one of them is accepted and then fails at
-provisioning; and the agent is never told the mount path, so the mount is
-readable but not announced. The mount-path entry is `supported` on its own,
-because path derivation and validation are complete and tested.
+running-session resource lifecycle, the reader the provisioning pass calls, and
+the announcement of the mount path in the agent's instructions are implemented and
+covered by tests, and on the local backend the bytes are written at the canonical
+`/mnt/session/uploads` root, read back from it, and named to the agent in both the
+canonical and the shell-usable spelling. It is not `supported` for one reason: the
+container backends still refuse that root, so a session that attaches a file on
+one of them is accepted and then fails at provisioning. The mount-path entry is
+`supported` on its own, because path derivation and validation are complete and
+tested.

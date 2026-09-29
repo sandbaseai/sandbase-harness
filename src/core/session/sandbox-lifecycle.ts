@@ -1,4 +1,3 @@
-import { posix } from 'node:path';
 import {
   type SandboxProvider,
   type SandboxInstance,
@@ -8,7 +7,7 @@ import {
 import type { Session } from '@/types/session.js';
 import { UnknownSandboxProviderError, type SandboxProviderRegistry } from '@/sandbox/registry.js';
 import type { SnapshotManager } from './snapshot-manager.js';
-import { FILE_MOUNT_ROOT, resolveFileMountPath } from './file-mount-path.js';
+import { sandboxPathForStoredMountPath } from './file-mount-path.js';
 import {
   materializeGithubRepository,
   type GithubRepositoryResource,
@@ -181,7 +180,7 @@ export class SandboxLifecycle {
     for (const resource of fileResources) {
       const fileId = typeof resource.file_id === 'string' ? resource.file_id : '';
       if (!fileId) throw new Error('File session resource is missing file_id');
-      const mountPath = sandboxPathForMount(resource.mount_path, fileId);
+      const mountPath = sandboxPathForStoredMountPath(resource.mount_path, fileId);
       const bytes = await this.deps.fileArtifactReader(fileId);
       await sandbox.writeFile(mountPath, bytes);
     }
@@ -354,38 +353,27 @@ export class SandboxLifecycle {
     if (type === this.deps.sandboxProvider.type) return this.deps.sandboxProvider;
     throw new UnknownSandboxProviderError(type, [this.deps.sandboxProvider.type]);
   }
-}
 
-/**
- * Resolve the sandbox path a file resource is materialized to.
- *
- * A row written by the current build stores the canonical logical path
- * (`/data.csv`); a row written by an earlier build stored the internal
- * `/uploads/...` spelling. Both converge through the shared mapper so an
- * existing workspace keeps working while the public field stays canonical.
- */
-function sandboxPathForMount(value: unknown, fileId: string): string {
-  if (typeof value !== 'string' || value.trim() === '') {
-    return resolveFileMountPath(undefined, fileId).sandboxPath!;
+  /**
+   * The backend that serves a session, for a caller that has to describe it.
+   *
+   * The provider bound at provision time is authoritative, for the same reason
+   * `snapshotAfterTurn` reads it: the sandbox in hand proves which backend served
+   * this session, and the environment row can be edited after that bind — a
+   * session running on a local sandbox whose named environment is later switched
+   * to `docker` must still be described as local, or the instructions would name
+   * the one spelling that sandbox cannot reach. Re-resolving would also make a
+   * session fail that previously continued on its bound sandbox, because an
+   * environment edited to name an unregistered backend now throws here.
+   *
+   * A session with no bound sandbox (a delegated sub-agent's own session, which
+   * owns a detached sandbox) falls back to the environment resolution, which is
+   * the same decision provisioning would make.
+   */
+  resolveProviderType(session: Session): SandboxProviderType {
+    const bound = this.bound.get(session.id)?.provider;
+    if (bound) return bound.type;
+    const envConfig = this.resolveEnvironmentConfig(session);
+    return this.resolveProvider(envConfig.sandbox_provider).type;
   }
-
-  const legacyRelative = legacyUploadsRelative(value);
-  if (legacyRelative !== undefined) return `${FILE_MOUNT_ROOT}/${legacyRelative}`;
-
-  const resolved = resolveFileMountPath(value, fileId);
-  if (!resolved.ok) throw new Error(`File session resource ${resolved.message}`);
-  return resolved.sandboxPath!;
-}
-
-/** Recognize the pre-canonical `/uploads/...` spelling and return its relative part. */
-function legacyUploadsRelative(value: string): string | undefined {
-  if (!value.startsWith('/uploads/')) return undefined;
-  if (value.includes('\\') || value.includes('\u0000')) {
-    throw new Error('File session resource mount_path must not contain a backslash or NUL byte');
-  }
-  const relative = posix.normalize(value.slice(1));
-  if (!relative.startsWith('uploads/') || relative === 'uploads' || relative.endsWith('/')) {
-    throw new Error('File session resource mount_path must stay under /uploads/');
-  }
-  return relative.slice('uploads/'.length);
 }

@@ -594,8 +594,10 @@ resource is written where the resource says it is. The container backends have n
 such mapping: `docker` refuses every absolute path, so both resources fail there;
 `kubernetes` resolves an absolute path against its own `/workspace`, which accepts
 a repository mount and refuses the upload root, so a file resource fails there. In
-either case the session is accepted and then fails at provisioning, and the mount
-path is not yet part of the agent's instructions. See
+either case the session is accepted and then fails at provisioning. The mount path
+is named in the agent's instructions — see
+[Session resources](#session-resources) — but announcing it is not enough on a
+backend that will not accept it. See
 [Mounting a file into a session](#mounting-a-file-into-a-session) for the file
 case and `contracts/anthropic-cma/github-repository.md` for the repository case;
 both capabilities are recorded as `partial`.
@@ -1337,18 +1339,18 @@ A command string is not rewritten: the shell resolves an absolute path against
 the host filesystem, so inside a command the same file is named by its
 sandbox-relative spelling (`mnt/session/uploads/file.txt`), and a tool that
 reaches the sandbox through the runtime's file API can use the canonical path.
-The container backends still do not: `docker` rejects an absolute path outright
-and `kubernetes` rejects anything outside `/workspace`, so a session that attaches
-a file resource on one of those is accepted and then fails at provisioning
-(`Path escapes sandbox workspace`). A `self_hosted` worker is handed the path and
-decides for itself. The capability is recorded as `partial` in
-`contracts/anthropic-cma/files.md` for both reasons — the container refusal, and
-the mount path not being named in the agent's instructions yet. On `local`, the
-mount is readable through the file tools and through an `execute` working
-directory; until the path is announced in the system prompt, tell the agent the
-spelling that matches how it will reach the file: the canonical
-`/mnt/session/uploads/file.txt` for a file tool, and the sandbox-relative
-`mnt/session/uploads/file.txt` for a shell command.
+The system prompt's `# Session Resources` section names the mounted path to the
+agent — the canonical spelling, plus the sandbox-relative one on the `local`
+backend (see [Session Resources](#session-resources) below). The backend it names
+is the one recorded when the session's sandbox was provisioned, so editing an
+Environment's `sandbox_provider` after a session is bound does not change what
+that session's instructions say: the sandbox in hand is the one serving it.
+The container backends still do not mount it: `docker` rejects an absolute path
+outright and `kubernetes` rejects anything outside `/workspace`, so a session that
+attaches a file resource on one of those is accepted and then fails at
+provisioning (`Path escapes sandbox workspace`). A `self_hosted` worker is handed
+the path and decides for itself. The capability is recorded as `partial` in
+`contracts/anthropic-cma/files.md` for the container refusal.
 
 ## Session Artifacts
 
@@ -1423,6 +1425,15 @@ instance cannot be detached. A github_repository `authorization_token` is
 write-only and is never echoed in any response, and rotating it is the only
 updatable field: changing the repository, checkout, or mount path requires a new
 resource instance.
+
+The runtime also tells the agent where its resources are. A session that declares
+at least one `file` or `github_repository` resource carries a `# Session
+Resources` section in its system prompt, naming each file's sandbox path and each
+repository's URL, checkout, and mount path; on the `local` backend the section
+also gives the sandbox-relative spelling a shell command needs, because a local
+command resolves an absolute path against the host rather than the sandbox. A
+session with no such resource has no section, and a resource's
+`authorization_token` never reaches it.
 
 ## Skills
 

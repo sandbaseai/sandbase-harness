@@ -8,6 +8,8 @@ import { composeSystemPrompt, type Skill } from '@/core/skills/loader.js';
 import type { MemoryProvider } from '@/core/memory/memory-provider.js';
 import { memoryBindingIsWritable, resolveMemoryBindings } from '@/core/memory/bindings.js';
 import { getAgentSkillIds } from '@/core/agent/standard.js';
+import type { SandboxProviderType } from '@/types/sandbox.js';
+import { renderSessionResources } from './session-resource-prompt.js';
 
 type SessionAwareMemoryProvider = MemoryProvider & {
   addForSession?: (
@@ -43,6 +45,14 @@ export interface ContextBuildOptions {
    * them on a per-agent assignment would drop half of what the caller declared.
    */
   repositorySkills?: Skill[];
+  /**
+   * Backend the session's environment resolves to, as reported by the lifecycle.
+   *
+   * Used to name the paths a mounted resource can be reached by: the canonical
+   * path always, plus the sandbox-relative spelling a shell needs on the local
+   * backend, where a command runs on the host rather than in the sandbox.
+   */
+  sandboxProvider?: SandboxProviderType;
 }
 
 export class ContextBuilder {
@@ -69,6 +79,11 @@ export class ContextBuilder {
     if (this.deps.memoryRecords && bindings.length > 0) {
       systemPrompt = await this.injectMountedMemory(systemPrompt, bindings, event);
     }
+
+    const resources = renderSessionResources(session.resources, {
+      sandboxProvider: options?.sandboxProvider,
+    });
+    if (resources) systemPrompt = `${systemPrompt}\n\n${resources}`;
 
     return { systemPrompt, messages };
   }

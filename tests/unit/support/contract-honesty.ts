@@ -66,11 +66,12 @@ export interface WiringRequirement {
    * implies "reachable": a session's resources are materialized through the
    * selected sandbox backend. The local backend reaches the canonical in-sandbox
    * roots the lifecycle writes to, so a session there does materialize what it
-   * declared; docker still refuses them (kubernetes accepts the repository root
-   * and refuses the upload root), and the published contract asks for more than a
-   * writable mount (the agent has to be told where it landed). The runtime reaches
-   * the code and part of the claim is still unhonoured, which is exactly what
-   * `partial` means.
+   * declared and the agent is told where it landed; docker still refuses them
+   * (kubernetes accepts the repository root and refuses the upload root), and the
+   * published contract asks for a session the selected backend cannot serve to be
+   * refused when it is created rather than fail at provisioning. The runtime
+   * reaches the code and part of the claim is still unhonoured, which is exactly
+   * what `partial` means.
    *
    * Recording the blocker as a marker in the test that demonstrates it keeps the
    * status honest in both directions. The canary fails first when a backend is
