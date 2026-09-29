@@ -202,7 +202,7 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
     area: 'streaming',
     id: 'resumable-sse',
     status: 'supported',
-    reason: 'SSE replay resumes from the last delivered sequence without gaps or duplicates.',
+    reason: 'A stream is live-only without a cursor and replays from the last delivered sequence with no gaps or duplicates when one is sent; a cursor that is not a sequence number is refused before the stream opens.',
     contract: 'contracts/anthropic-cma/streaming.md',
   },
   {

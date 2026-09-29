@@ -235,9 +235,10 @@ describe('session CLI group', () => {
 
   it('tails the real event stream and reports the events it receives', async () => {
     // `tail` is documented as a stream that does not exit on its own, so this test has to
-    // end it the way nothing else can: by closing the connection. The stream replays from
-    // the start when no `Last-Event-ID` is sent, so a seeded event must appear without a
-    // second write.
+    // end it the way nothing else can: by closing the connection. The command reads the
+    // recorded log first — a stream opened without a cursor carries live events only — and
+    // then subscribes from the last sequence it printed, so a seeded event must appear
+    // without a second write and an event written afterwards must still be followed.
     //
     // What is asserted is the printed output. What is deliberately NOT asserted is how the
     // forced close surfaces: it reaches the SDK as a transport `TypeError: terminated`,
@@ -263,6 +264,10 @@ describe('session CLI group', () => {
 
     try {
       await waitFor(() => [...log, ...chunks].join('\n').includes('tail me'));
+      // The follow half: this write happens after the command read the log, so it can only
+      // arrive through the subscription the command resumed.
+      await seedEvent(app, sessionId, 'followed live');
+      await waitFor(() => [...log, ...chunks].join('\n').includes('followed live'));
     } finally {
       listening!.closeAllConnections?.();
       await tailing;
@@ -270,10 +275,16 @@ describe('session CLI group', () => {
       writeSpy.mockRestore();
     }
 
-    // The event arrived on the real SSE route and was rendered by the command's own
+    // The events arrived on the real SSE route and were rendered by the command's own
     // printer — `user.message` goes through the JSON branch, so the payload is visible.
     const printed = [...log, ...chunks].join('\n');
     expect(printed).toContain('tail me');
+    // Exactly once: the log read prints the recorded event and the subscription resumes
+    // after it. A subscription that replayed the whole log as well would print it twice,
+    // so this is what pins "read the log, then follow from what it printed" rather than
+    // "follow and let the server replay".
+    expect(printed.match(/tail me/g)).toHaveLength(1);
+    expect(printed).toContain('followed live');
     expect(printed).toContain('user.message');
   });
 

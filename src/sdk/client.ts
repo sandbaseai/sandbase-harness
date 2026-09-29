@@ -358,6 +358,13 @@ export interface EnvironmentWorkerKeyCreateResponse extends EnvironmentWorkerKey
 
 export interface StreamedEvent {
   id?: string;
+  /**
+   * Append-only per-session sequence, and the value to send as `lastEventId`
+   * when resuming: a stream opened without one carries live events only.
+   * `0` on a transient frame (`agent.message_stream_*`, `event_start`,
+   * `event_delta`), which is never persisted and must not advance the cursor.
+   */
+  seq?: number;
   type: string;
   content?: ContentBlock[] | null;
   delta?: string;
@@ -459,7 +466,12 @@ export class ManagedAgentsClient {
       body: opts?.body !== undefined ? JSON.stringify(opts.body) : undefined,
     });
     if (!res.ok || !res.body) {
-      throw new ManagedAgentsApiError(res.status, `stream failed: ${res.statusText}`);
+      // A stream can refuse before it opens — for example a resume cursor the
+      // server will not order by — and that refusal is a normal JSON error
+      // response. Read it like every other route does, so the caller sees the
+      // API's own message instead of a bare status text.
+      const envelope = res.ok ? { message: '' } : await readErrorEnvelope(res);
+      throw new ManagedAgentsApiError(res.status, envelope.message || `stream failed: ${res.statusText}`, envelope);
     }
 
     const reader = res.body.getReader();
@@ -477,7 +489,11 @@ export class ManagedAgentsClient {
         const frame = buffer.slice(0, idx);
         buffer = buffer.slice(idx + 2);
         const parsed = parseSseFrame(frame);
-        if (parsed && parsed.event !== 'heartbeat' && parsed.data) {
+        // Keepalives are transport, not session events: this runtime sends
+        // `ping`, and older servers sent `heartbeat`. Neither may be yielded to
+        // a caller, which would otherwise see a `ping` event every 15 seconds.
+        const keepalive = parsed?.event === 'ping' || parsed?.event === 'heartbeat';
+        if (parsed && !keepalive && parsed.data) {
           try {
             yield JSON.parse(parsed.data) as StreamedEvent;
           } catch {
@@ -738,7 +754,14 @@ class SessionsResource {
     });
   }
 
-  /** Tail the full live event stream (never closes until aborted). */
+  /**
+   * Tail a session's event stream (never closes until aborted).
+   *
+   * Without `lastEventId` the stream carries live events only — nothing already
+   * recorded is replayed — so a caller that also wants the log reads
+   * `sessions.events(id)` and passes the sequence it reached as `lastEventId`
+   * (which replays the events after it, with no gap against that read).
+   */
   tail(id: string, opts?: { lastEventId?: string }): AsyncIterable<StreamedEvent> {
     return this.client.stream(`/v1/sessions/${encodeURIComponent(id)}/events/stream`, opts);
   }

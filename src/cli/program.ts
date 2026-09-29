@@ -267,7 +267,7 @@ export function createCliProgram({ version, startServer }: CliProgramOptions): C
     .description('Stream a session event log (does not exit on its own)')
     .option('-p, --port <port>', 'Server port to connect to', '3000')
     .option('-k, --api-key <key>', 'API key if the server has auth enabled')
-    .option('--last-event-id <id>', 'Resume after this event id instead of replaying from the start')
+    .option('--last-event-id <seq>', 'Start the stream after this event seq (a number, as shown by `id:`) instead of printing the recorded log first')
     .action(async (sessionId, opts) => {
       await sessionTailCommand(sessionId, opts);
     });

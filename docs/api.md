@@ -662,6 +662,28 @@ curl -N http://127.0.0.1:3000/v1/sessions/SESSION_ID/events/stream \
   -H "Last-Event-ID: 42"
 ```
 
+A stream opened **without** a cursor carries live events only: it does not replay
+the session's history, because a client that wants the log reads `GET /events`
+(or resumes from what it has). `Last-Event-ID: 0` is a cursor, and replays the
+whole log. A cursor must be a safe integer — the numeric `seq` this stream uses
+as its `id`, which is the only value the log can resume from — and anything else
+answers `400 invalid_request_error` before the stream opens, rather than being
+silently read as "replay everything" or as "replay nothing". A value too large to
+compare exactly is refused with the rest, because every real `seq` is below it
+and the connection would never receive a persisted event again. A blank header is
+no cursor, and a `Last-Event-ID` that disagrees with `last_event_id` is refused
+rather than resolved by precedence.
+
+Every 15 seconds an open stream sends a keepalive frame, which a client skips
+rather than treating as an event:
+
+```
+event: ping
+data: {"type":"ping"}
+```
+
+It carries no `id`, so it never moves the resume cursor.
+
 Opt into token-level previews on one connection:
 
 ```bash
@@ -727,7 +749,8 @@ dropped rather than projected as an empty turn.
 Persisted event responses include an append-only per-session `seq` and optional
 `metadata`. The same envelope is used by `GET /events` and the resumable event
 tail. SSE uses the numeric `seq` as its `id`; send the highest contiguous value
-received as `Last-Event-ID` to replay only later durable events. Transient
+received as `Last-Event-ID` to replay only later durable events, and send nothing
+to receive live events only. Transient
 `agent.message_stream_*` events have `seq: 0`, are not replayed, and must not
 advance that cursor.
 
@@ -982,7 +1005,7 @@ drive the session lifecycle by hand. A run is one turn of one session, so
 | --- | --- |
 | `wait` (default) | 200 with `run_id`, `session_id`, `status`, `output` (the `agent.message` content blocks), and `usage`. |
 | `sse` | An SSE stream of the session's events, ending on a terminal event. |
-| `async` | 202 with `run_id`, `session_id`, `status`, `events_url`, and `stream_url`. |
+| `async` | 202 with `run_id`, `session_id`, `status`, `events_url`, and `stream_url`. `stream_url` is the session's event stream, which carries live events only unless the caller resumes from a cursor (`events_url` first, then its last `seq` as `Last-Event-ID`). |
 
 `max_wait_seconds` bounds only the `wait` mode, from 0 to 3600. When it elapses
 with the turn still working, the answer is 202 with the query handle and

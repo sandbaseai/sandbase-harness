@@ -171,16 +171,19 @@ describe('Client SDK', () => {
     try {
       const s = await client.sessions.create({ agent: 'agent_echo' });
 
-      // Readiness anchor. The SSE route subscribes before it replays the stored
-      // log, so a persisted event that already exists can only reach this stream
-      // once the server-side subscription is live. `user.interrupt` appends and
-      // broadcasts without starting a turn, which keeps the anchor inert.
+      // Readiness anchor. This tail resumes from cursor `0`, so every recorded
+      // event is replayed once the server-side subscription is live and a
+      // persisted event can only reach the stream through that subscription.
+      // `user.interrupt` appends and broadcasts without starting a turn, which
+      // keeps the anchor inert. A cursor-less tail would carry live events only
+      // and this anchor would never arrive — which is the other mode, covered by
+      // `tests/integration/event-stream-subscription.test.ts`.
       await client.sessions.interrupt(s.id);
 
       const received: string[] = [];
       const ready = deferred();
       const tailPromise = (async () => {
-        for await (const ev of client.sessions.tail(s.id)) {
+        for await (const ev of client.sessions.tail(s.id, { lastEventId: '0' })) {
           if (ev.type === 'user.interrupt') {
             ready.resolve();
             continue;
@@ -249,6 +252,28 @@ describe('Client SDK', () => {
 
   it('throws ManagedAgentsApiError on 404', async () => {
     await expect(client.sessions.get('sess_nope')).rejects.toThrow(/API error 404/);
+  });
+
+  it('surfaces a refusal that arrives before a stream opens', async () => {
+    // A stream can be refused before it opens — a resume cursor the server will
+    // not order by is one — and that refusal is an ordinary JSON error response.
+    // The caller has to see the API's own message, not a bare status text, or the
+    // one thing that would tell them how to fix the cursor is lost.
+    const s = await client.sessions.create({ agent: 'agent_echo' });
+    const failure = await (async () => {
+      try {
+        for await (const _event of client.sessions.tail(s.id, { lastEventId: 'sevt_abc' })) {
+          throw new Error('the refused stream delivered an event');
+        }
+        return undefined;
+      } catch (error) {
+        return error as { status?: number; message?: string; type?: string };
+      }
+    })();
+
+    expect(failure?.status).toBe(400);
+    expect(failure?.type).toBe('invalid_request_error');
+    expect(failure?.message).toContain('numeric seq');
   });
 });
 

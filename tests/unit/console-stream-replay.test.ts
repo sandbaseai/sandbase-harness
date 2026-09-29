@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
-import { createEventStreamParser } from '../../apps/console/src/api.js';
+import { describe, expect, it, vi } from 'vitest';
+import { createEventStreamParser, readEventStream } from '../../apps/console/src/api.js';
 import {
   contiguousSessionSequence,
   mergeOrderedSessionEvents,
@@ -55,5 +55,33 @@ describe('Console SSE parser', () => {
       event: 'agent.message',
       data: { id: 'evt_7', seq: 7, type: 'agent.message' },
     }]);
+  });
+
+  it('sends the resume cursor even when it is zero, and omits it only when asked', async () => {
+    // A stream without a cursor carries live events only, so the session page
+    // always names where to resume from — `0` included, which replays the log the
+    // page would otherwise miss while its own history read is still in flight.
+    const headers: Array<Record<string, string>> = [];
+    const fetchStub = vi.fn(async (_url: string, init: RequestInit) => {
+      headers.push(init.headers as Record<string, string>);
+      return new Response('id: 1\nevent: user.message\ndata: {"seq":1}\n\n', {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    });
+    vi.stubGlobal('fetch', fetchStub);
+    try {
+      const received: unknown[] = [];
+      await readEventStream('/v1/sessions/sess_1/events/stream', (event) => received.push(event), {
+        lastEventId: '0',
+      });
+      expect(headers[0]['Last-Event-ID']).toBe('0');
+      expect(received).toHaveLength(1);
+
+      await readEventStream('/v1/sessions/sess_1/events/stream', () => {});
+      expect(headers[1]['Last-Event-ID']).toBeUndefined();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

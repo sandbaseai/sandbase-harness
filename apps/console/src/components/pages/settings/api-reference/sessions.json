@@ -190,12 +190,24 @@
     "title": "Stream session events",
     "method": "GET",
     "path": "/v1/sessions/{session_id}/events/stream",
-    "summary": "Subscribe to live Server-Sent Events for a running session.",
+    "summary": "Subscribe to a session's Server-Sent Events. With a Last-Event-ID cursor the stored events after it are replayed and the stream then goes live; without one it carries live events only, and a cursor that is not the numeric seq is refused with a 400 before the stream opens.",
+    "parameters": [
+      {
+        "name": "Last-Event-ID",
+        "type": "string (header) or last_event_id (query)",
+        "description": "The seq of the last event you saw. Omit it for a live-only stream; send 0 to replay the whole log."
+      }
+    ],
     "response": [
       {
         "name": "event",
         "type": "SSE event",
         "description": "Live session and agent-loop events."
+      },
+      {
+        "name": "ping",
+        "type": "SSE keepalive every 15 seconds",
+        "description": "event: ping with data {\"type\":\"ping\"} and no id, so it cannot move the resume cursor."
       }
     ]
   },

@@ -731,6 +731,10 @@ curl -N http://127.0.0.1:3000/v1/sessions/SESSION_ID/events/stream \
   -H "Last-Event-ID: 42"
 ```
 
+A stream opened without a cursor carries live events only; read the event log
+first (`GET /v1/sessions/SESSION_ID/events`) and resume from the last `seq` you
+saw.
+
 ## SDK
 
 ```typescript

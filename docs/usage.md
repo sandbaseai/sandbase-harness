@@ -292,6 +292,9 @@ curl -N http://127.0.0.1:3000/v1/sessions/SESSION_ID/events/stream \
   -H "Last-Event-ID: 42"
 ```
 
+Without the cursor the stream carries live events only, so read
+`GET /v1/sessions/SESSION_ID/events` first and pass the last `seq` you saw.
+
 Stop a session:
 
 ```bash

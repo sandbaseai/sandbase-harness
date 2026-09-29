@@ -274,7 +274,9 @@ export function SessionDetail({
   }, [session.id]);
 
   const applyStreamEvent = (streamEvent: { event: string; data: unknown; id?: string }) => {
-    if (streamEvent.event === 'heartbeat') return;
+    // Keepalives are not events: the stream sends `ping`, and older servers sent
+    // `heartbeat`. Neither may reach the projection below.
+    if (streamEvent.event === 'ping' || streamEvent.event === 'heartbeat') return;
     const payload = streamEvent.data && typeof streamEvent.data === 'object'
       ? streamEvent.data as Partial<SessionEvent> & { message_id?: string; delta?: string }
       : null;
@@ -325,10 +327,15 @@ export function SessionDetail({
         try {
           setStreamConnection(retry > 0 ? 'reconnecting' : 'connecting');
           setStreamConnection('connected');
+          // Always name where to resume, cursor `0` included: a stream without a
+          // cursor carries live events only, so a subscription opened before this
+          // page's own history read finishes — or one that races an event written
+          // between the read and the subscribe — would miss it. Resuming from 0
+          // replays the log, which the projection below already merges by seq.
           await readEventStream(
             `/v1/sessions/${encodeURIComponent(session.id)}/events/stream`,
             applyStreamEvent,
-            { signal: controller.signal, lastEventId: lastDurableSequence.current > 0 ? String(lastDurableSequence.current) : undefined },
+            { signal: controller.signal, lastEventId: String(lastDurableSequence.current) },
           );
           retry = 0;
         } catch (err) {

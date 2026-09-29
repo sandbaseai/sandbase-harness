@@ -415,6 +415,11 @@ describe('Console page static coverage', () => {
     expect(sessionPage).toContain('miniEventEmpty');
     expect(sessionPage).toContain("label: 'Pending actions'");
     expect(sessionPage).toContain("value: formatUsage(session.usage)");
+    // A stream without a cursor carries live events only, so the page always
+    // names where to resume from — it must not fall back to a cursor-less
+    // subscription when it has not read a sequence yet.
+    expect(sessionPage).toContain('lastEventId: String(lastDurableSequence.current)');
+    expect(sessionPage).not.toContain('lastDurableSequence.current > 0 ?');
     const routeHook = readFileSync('apps/console/src/hooks/useHashRoute.ts', 'utf8');
     expect(routeHook).toContain("'webhooks'");
     expect(routeHook).toContain("'scheduled-deployments'");

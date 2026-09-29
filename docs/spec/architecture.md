@@ -150,16 +150,23 @@ sequenceDiagram
     participant Events as Event Logger
     participant Hub as SSE Hub
 
-    Client->>API: GET /events/stream
-    API->>Events: read persisted events after cursor
-    Events-->>API: historical events
-    API-->>Client: replay events
+    Client->>API: GET /events/stream (Last-Event-ID optional)
     API->>Hub: subscribe
+    alt cursor sent
+        API->>Events: read persisted events after cursor
+        Events-->>API: historical events
+        API-->>Client: replay events
+    else no cursor
+        Note over API,Client: live events only, nothing recorded is replayed
+    end
     Hub-->>Client: live events
 ```
 
 Persisted events have a positive sequence number. Transient live chunks use
-`seq = 0` and do not advance the replay cursor.
+`seq = 0` and do not advance the replay cursor. A cursor that is not the numeric
+`seq` the stream uses as its `id` is refused before the stream opens; the
+subscription is established before the backfill read, so an event that lands
+during it is buffered and written once rather than dropped or duplicated.
 
 ## Data Boundaries
 
