@@ -369,6 +369,19 @@ export interface StreamedEvent {
   content?: ContentBlock[] | null;
   delta?: string;
   message_id?: string;
+  /**
+   * Why the turn stopped, on `session.status_idle`.
+   *
+   * `requires_action` is the runtime asking for approval: `event_ids` names the
+   * blocking events, and a client answers each one with a `user.tool_confirmation`
+   * (or a `user.custom_tool_result` for a custom tool) before the turn can go on.
+   * An ended turn carries `end_turn`. A model-derived event spells the same field
+   * as the provider's own string, so both shapes are possible here — the object is
+   * what the documented client loop reads (`docs/api.md`).
+   */
+  stop_reason?: string | { type: 'end_turn' | 'requires_action'; event_ids?: string[] };
+  /** The event's own metadata carrier, as persisted and published. */
+  metadata?: Record<string, unknown>;
 }
 
 /**
@@ -478,29 +491,38 @@ export class ManagedAgentsClient {
     const decoder = new TextDecoder();
     let buffer = '';
 
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
 
-      // SSE frames are separated by a blank line
-      let idx: number;
-      while ((idx = buffer.indexOf('\n\n')) !== -1) {
-        const frame = buffer.slice(0, idx);
-        buffer = buffer.slice(idx + 2);
-        const parsed = parseSseFrame(frame);
-        // Keepalives are transport, not session events: this runtime sends
-        // `ping`, and older servers sent `heartbeat`. Neither may be yielded to
-        // a caller, which would otherwise see a `ping` event every 15 seconds.
-        const keepalive = parsed?.event === 'ping' || parsed?.event === 'heartbeat';
-        if (parsed && !keepalive && parsed.data) {
-          try {
-            yield JSON.parse(parsed.data) as StreamedEvent;
-          } catch {
-            // skip malformed frames
+        // SSE frames are separated by a blank line
+        let idx: number;
+        while ((idx = buffer.indexOf('\n\n')) !== -1) {
+          const frame = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          const parsed = parseSseFrame(frame);
+          // Keepalives are transport, not session events: this runtime sends
+          // `ping`, and older servers sent `heartbeat`. Neither may be yielded to
+          // a caller, which would otherwise see a `ping` event every 15 seconds.
+          const keepalive = parsed?.event === 'ping' || parsed?.event === 'heartbeat';
+          if (parsed && !keepalive && parsed.data) {
+            try {
+              yield JSON.parse(parsed.data) as StreamedEvent;
+            } catch {
+              // skip malformed frames
+            }
           }
         }
       }
+    } finally {
+      // A consumer is allowed to stop early — an approval flow reads up to the
+      // frame that parks the turn, answers it, and reads on from its own cursor —
+      // and that must close the response. Leaving it open keeps the pending
+      // `read()` (and the socket, and the process) alive after the caller has
+      // finished, which is a hang with no error to show for it.
+      await reader.cancel().catch(() => {});
     }
   }
 }

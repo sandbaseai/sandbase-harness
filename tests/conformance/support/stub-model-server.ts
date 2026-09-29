@@ -66,7 +66,27 @@ export interface StubModelServer {
   close(): Promise<void>;
 }
 
-export async function startStubModelServer(): Promise<StubModelServer> {
+/** A tool call the stub should issue, instead of picking from what is offered. */
+export interface StubToolCall {
+  name: string;
+  arguments?: unknown;
+}
+
+export interface StubModelServerOptions {
+  /**
+   * The calls the first tool-calling reply issues, in order.
+   *
+   * Without this the stub picks one tool from the ones the runtime offers
+   * (`TOOL_PREFERENCE`), which is what the conformance quickstart needs. A test
+   * that has to park a *particular* call — a custom tool, a gated tool the
+   * default preference would not reach — names it here instead, and naming more
+   * than one issues them in the same reply, which is how one model step parks
+   * two calls at once (`confirmation_group_id`).
+   */
+  toolCalls?: StubToolCall[];
+}
+
+export async function startStubModelServer(options: StubModelServerOptions = {}): Promise<StubModelServer> {
   const requests: StubModelRequest[] = [];
   let calledTool: string | undefined;
 
@@ -79,15 +99,23 @@ export async function startStubModelServer(): Promise<StubModelServer> {
     void readJson(req).then((body) => {
       const request = body as StubModelRequest;
       requests.push(request);
-      if (wantToolCall(request) && calledTool === undefined) {
-        const tool = pickTool(request.tools);
-        // Only the first reply calls a tool: the runtime then sends the result
-        // back, and the second reply has to end the turn or the session never
-        // reaches idle and the quickstart would hang instead of failing.
-        if (tool) {
-          calledTool = tool;
-          respond(req, res, request, { tool, toolArguments: TOOL_ARGUMENTS[tool] ?? {} });
+      if (wantToolCall(request)) {
+        const scripted = options.toolCalls;
+        if (scripted?.length) {
+          calledTool = scripted[0].name;
+          respond(req, res, request, { tools: scripted });
           return;
+        }
+        if (calledTool === undefined) {
+          const tool = pickTool(request.tools);
+          // Only the first reply calls a tool: the runtime then sends the result
+          // back, and the second reply has to end the turn or the session never
+          // reaches idle and the quickstart would hang instead of failing.
+          if (tool) {
+            calledTool = tool;
+            respond(req, res, request, { tools: [{ name: tool, arguments: TOOL_ARGUMENTS[tool] ?? {} }] });
+            return;
+          }
         }
       }
       respond(req, res, request, { text: STUB_REPLY_TEXT });
@@ -132,13 +160,18 @@ function respond(
   req: IncomingMessage,
   res: ServerResponse,
   request: StubModelRequest,
-  reply: { text?: string; tool?: string; toolArguments?: unknown },
+  reply: { text?: string; tools?: StubToolCall[] },
 ): void {
   const model = request.model ?? 'stub-model';
   const id = `chatcmpl-stub-${Math.random().toString(36).slice(2, 10)}`;
   const created = Math.floor(Date.now() / 1000);
   const promptTokens = 12;
   const completionTokens = 7;
+  const toolCalls = reply.tools?.map((tool, index) => ({
+    id: `call_stub_${index + 1}`,
+    type: 'function' as const,
+    function: { name: tool.name, arguments: JSON.stringify(tool.arguments ?? {}) },
+  }));
 
   if (!request.stream) {
     res.writeHead(200, { 'content-type': 'application/json' });
@@ -149,18 +182,10 @@ function respond(
       model,
       choices: [{
         index: 0,
-        message: reply.tool
-          ? {
-            role: 'assistant',
-            content: null,
-            tool_calls: [{
-              id: 'call_stub_1',
-              type: 'function',
-              function: { name: reply.tool, arguments: JSON.stringify(reply.toolArguments ?? {}) },
-            }],
-          }
+        message: toolCalls?.length
+          ? { role: 'assistant', content: null, tool_calls: toolCalls }
           : { role: 'assistant', content: reply.text ?? '' },
-        finish_reason: reply.tool ? 'tool_calls' : 'stop',
+        finish_reason: toolCalls?.length ? 'tool_calls' : 'stop',
       }],
       usage: {
         prompt_tokens: promptTokens,
@@ -187,21 +212,23 @@ function respond(
   };
 
   chunk({ role: 'assistant', content: '' });
-  if (reply.tool) {
-    // Split the argument object across fragments: a provider is allowed to, and
+  if (toolCalls?.length) {
+    // Split each argument object across fragments: a provider is allowed to, and
     // the runtime has to reassemble it before the tool call is executable.
-    const args = JSON.stringify(reply.toolArguments ?? {});
-    const cut = Math.max(1, Math.floor(args.length / 2));
-    chunk({
-      tool_calls: [{
-        index: 0,
-        id: 'call_stub_1',
-        type: 'function',
-        function: { name: reply.tool, arguments: '' },
-      }],
+    toolCalls.forEach((call, index) => {
+      chunk({
+        tool_calls: [{
+          index,
+          id: call.id,
+          type: 'function',
+          function: { name: call.function.name, arguments: '' },
+        }],
+      });
+      const args = call.function.arguments;
+      const cut = Math.max(1, Math.floor(args.length / 2));
+      chunk({ tool_calls: [{ index, function: { arguments: args.slice(0, cut) } }] });
+      chunk({ tool_calls: [{ index, function: { arguments: args.slice(cut) } }] });
     });
-    chunk({ tool_calls: [{ index: 0, function: { arguments: args.slice(0, cut) } }] });
-    chunk({ tool_calls: [{ index: 0, function: { arguments: args.slice(cut) } }] });
     chunk({}, 'tool_calls');
   } else {
     const text = reply.text ?? '';

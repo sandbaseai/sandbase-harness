@@ -520,6 +520,38 @@ exit on its own; `session inspect` prints a summary (or the session and its even
 as JSON with `--json`) and `session logs` prints every recorded event, one JSON
 object per line. Every command accepts `--port` and `--api-key`.
 
+`chat` starts a session on the first loaded agent (or the id you pass), streams
+each reply as it is produced, and keeps reading until you interrupt it. `--message`
+sends exactly one message and exits, which is the form a script uses.
+
+A turn whose tool needs approval does not fail — it **parks**. The runtime ends the
+turn with a `session.status_idle` whose `stop_reason.type` is `requires_action` and
+names the blocking events in `stop_reason.event_ids`, and the tool does not run
+until each of those is answered. `chat` reads them, asks per call on a terminal
+(anything that is not `y` denies), answers with `user.tool_confirmation` addressed
+to the event id, and the runtime then continues the same turn on its own. Nothing
+extra is typed: the reply to the resumed turn appears under the answer prompt.
+
+`--tool-approval` decides without asking, for a script or a CI job:
+`ask` (the default) prompts, `allow` answers every gated call with `allow`, and
+`deny` answers every gated call with `deny` and a reason. `allow` is a
+preauthorization you state on the command line, which is why it is not the
+default. Without `--message` the command reads lines — from a terminal, or from
+a redirected stdin — and that same reader answers the prompt, so a pipe can say
+`y`: the answer is read when the prompt appears, so a script writes it after the
+prompt rather than ahead of it. `--message` is the one-shot form and has no
+reader attached: with `ask` it answers nothing at all, prints the calls that are
+waiting along with the two ways to decide them, and exits non-zero with the
+session still parked, because a tool the operator never saw must not be allowed
+by a default. An input that ends while a call waits for its answer is not a
+decision either: the call stays parked, the command says so, and it exits
+non-zero.
+
+A **custom** tool is the one case `chat` cannot finish. The runtime has no executor
+for it, so it waits for a `user.custom_tool_result` that only your own client can
+produce: the command prints the exact request that would resume the turn and exits
+non-zero, leaving the call parked and the tool unrun.
+
 `environments create` requires `--name`; `--hosting-type` is one of `cloud`,
 `local`, or `self_hosted`, and `--config-json` supplies the backend config as a
 JSON object. A `--config-json` value that is not valid JSON, or that parses to

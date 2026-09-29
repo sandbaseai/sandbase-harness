@@ -39,6 +39,15 @@ export interface RuntimeHarnessOptions {
   model?: string;
   /** How long to wait for the health route, in milliseconds. */
   readyTimeoutMs?: number;
+  /**
+   * The workspace agent's tool entries, as YAML lines under `tools:`.
+   *
+   * Defaults to the conformance quickstart's single always-allowed `glob`, which
+   * is what a turn without an approval gate needs. A test about approval has to
+   * say which tool is gated and how — that is the configuration under test, and
+   * no default can stand in for it.
+   */
+  agentTools?: string[];
 }
 
 export interface RunningRuntime {
@@ -93,14 +102,16 @@ export async function startRuntimeHarness(options: RuntimeHarnessOptions): Promi
       'system: |',
       '  You are a conformance assistant.',
       'tools:',
-      '  - type: agent_toolset_20260401',
-      '    default_config:',
-      '      enabled: false',
-      '    configs:',
-      '      - name: glob',
-      '        enabled: true',
-      '        permission_policy:',
-      '          type: always_allow',
+      ...(options.agentTools ?? [
+        '  - type: agent_toolset_20260401',
+        '    default_config:',
+        '      enabled: false',
+        '    configs:',
+        '      - name: glob',
+        '        enabled: true',
+        '        permission_policy:',
+        '          type: always_allow',
+      ]),
       'max_turns: 5',
       'temperature: 0.0',
       '',

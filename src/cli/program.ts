@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import type { ParkedToolCall, ToolApprovalPolicy } from './chat-approvals.js';
 import { defaultConfigPath, defaultTemplateCacheDir, WORKSPACE_STATE_DIR } from '../core/config/paths.js';
 import { createTemplate, installTemplate, listTemplates, resolveTemplateSource } from '../core/templates/templates.js';
 import {
@@ -103,6 +104,11 @@ export function createCliProgram({ version, startServer }: CliProgramOptions): C
     .option('-p, --port <port>', 'Server port to connect to', '3000')
     .option('-m, --message <text>', 'Send a single message and exit (non-interactive)')
     .option('-k, --api-key <key>', 'API key if the server has auth enabled')
+    .option(
+      '--tool-approval <policy>',
+      'What to do when a turn waits for tool approval: ask (default), allow, or deny',
+      'ask',
+    )
     .action(async (agent, opts) => {
       await chatCommand(agent, opts);
     });
@@ -538,13 +544,28 @@ environments:
 
 async function chatCommand(
   agentArg: string | undefined,
-  opts: { port: string; message?: string; apiKey?: string },
+  opts: { port: string; message?: string; apiKey?: string; toolApproval?: string },
 ) {
   const { ManagedAgentsClient } = await import('../sdk/client.js');
+  const {
+    answerParkedCalls,
+    parkedCallFromEvent,
+    parkedCalls,
+    parkedEventIds,
+    pendingNotice,
+    unanswerableNotice,
+  } = await import('./chat-approvals.js');
   const client = new ManagedAgentsClient({
     baseUrl: `http://localhost:${opts.port}`,
     apiKey: opts.apiKey,
   });
+
+  const policy = (opts.toolApproval ?? 'ask').trim().toLowerCase();
+  if (policy !== 'ask' && policy !== 'allow' && policy !== 'deny') {
+    console.error(`Error: [CHAT] --tool-approval must be ask, allow, or deny (got "${opts.toolApproval}").`);
+    process.exit(1);
+  }
+  const toolApproval = policy as ToolApprovalPolicy;
 
   let agent = agentArg;
   try {
@@ -565,36 +586,156 @@ async function chatCommand(
   const session = await client.sessions.create({ agent: agent! });
   console.log(`Chatting with "${agent}" (session ${session.id}). Ctrl+C to exit.\n`);
 
-  const streamReply = async (text: string) => {
-    for await (const ev of client.sessions.chat(session.id, text)) {
-      if (ev.type === 'agent.message_chunk') process.stdout.write(ev.delta ?? '');
-      else if (ev.type === 'agent.tool_use' || ev.type === 'agent.mcp_tool_use') {
-        const b = (ev.content ?? [])[0] as any;
+  // Every tool call the stream shows, by event id, so the idle frame that parks
+  // the turn can be described (a name beats a bare id) and so a call this CLI
+  // cannot answer can be told apart from one it can.
+  const seen = new Map<string, ParkedToolCall>();
+  // The last persisted `seq` printed, which is the cursor a continuation resumes
+  // from: `tail` without one is live-only, and the events between the idle frame
+  // and the restart would be missed.
+  let lastSeq = 0;
+
+  /**
+   * Stream one turn and report what it parked on.
+   *
+   * A turn that waits for approval ends in an ordinary `session.status_idle`
+   * whose `stop_reason` is `requires_action`; an ended turn ends in the same
+   * event without that reason. Both end the read: a `tail` stream stays open
+   * afterwards (that is what makes it a tail), so waiting for the socket to close
+   * would hang the prompt instead of returning to it.
+   */
+  const runTurn = async (events: AsyncIterable<import('../sdk/client.js').StreamedEvent>) => {
+    // A replayed turn carries the persisted `agent.message` and none of the
+    // transient chunk frames that were only ever broadcast live, so the text is
+    // printed from whichever of the two this segment actually has.
+    let streamedText = false;
+    for await (const ev of events) {
+      if (typeof ev.seq === 'number' && ev.seq > lastSeq) lastSeq = ev.seq;
+      if (ev.type === 'agent.message_chunk') {
+        streamedText = true;
+        process.stdout.write(ev.delta ?? '');
+      } else if (ev.type === 'agent.message' && !streamedText) {
+        const text = (ev.content ?? [])
+          .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+          .map((block) => block.text)
+          .join('');
+        if (text) process.stdout.write(text);
+      } else if (ev.type === 'agent.tool_use' || ev.type === 'agent.mcp_tool_use' || ev.type === 'agent.custom_tool_use') {
+        const b = (ev.content ?? [])[0] as { name?: string } | undefined;
         process.stdout.write(`\n  -> tool: ${b?.name ?? '?'}\n`);
+        const call = parkedCallFromEvent(ev);
+        if (call) seen.set(call.eventId, call);
+      } else if (ev.type === 'session.status_idle') {
+        return parkedCalls(parkedEventIds(ev), seen);
       }
+    }
+    return [] as ParkedToolCall[];
+  };
+
+  const readline = await import('node:readline');
+  // Without `-m` the command reads lines, exactly as it did before approvals
+  // existed: a terminal types them, and a redirected stdin pipes them. That
+  // reader is also what answers an approval prompt, so it is created whenever
+  // there is no one-shot message — a pipe can say `y`, and it is the operator's
+  // own line rather than a default this command chose. Only `-m` runs with no
+  // reader at all.
+  const readingLines = !opts.message;
+  const rl = readingLines
+    ? readline.createInterface({ input: process.stdin, output: process.stdout })
+    : undefined;
+  let inputClosed = false;
+  /** Which notices have been printed, so a replayed frame does not repeat them. */
+  const noticed = new Set<string>();
+  const io = {
+    policy: toolApproval,
+    interactive: readingLines,
+    write: (text: string) => process.stdout.write(text),
+    question: (prompt: string) =>
+      new Promise<string | undefined>((resolve) => {
+        if (!rl || inputClosed) {
+          resolve(undefined);
+          return;
+        }
+        // stdin can end while a call is waiting for its answer. The question
+        // then has no answer, which is not the same as a refusal: the call stays
+        // parked and the run ends non-zero, instead of the process dying on a
+        // closed interface.
+        const onClose = () => resolve(undefined);
+        rl.once('close', onClose);
+        rl.question(prompt, (answer: string) => {
+          rl.removeListener('close', onClose);
+          resolve(answer);
+        });
+      }),
+  };
+  rl?.on('close', () => {
+    inputClosed = true;
+  });
+
+  /**
+   * Run a turn, answer what it parked on, and repeat while that resumes it.
+   *
+   * Answering the last parked call makes the runtime start the turn again on its
+   * own, so a second wait is streamed from the cursor rather than by sending a
+   * new `user.message` — which would be a second turn, not the continuation of
+   * this one.
+   */
+  const runUntilSettled = async (input: string) => {
+    let parked = await runTurn(client.sessions.chat(session.id, input));
+    while (parked.length > 0) {
+      const outcome = await answerParkedCalls(parked, { client: client.sessions, sessionId: session.id, io });
+      for (const call of outcome.unanswerable) {
+        // A resumed turn re-reports what is still parked, so the same call can
+        // arrive twice; the operator needs it once.
+        if (noticed.has(call.eventId)) continue;
+        noticed.add(call.eventId);
+        process.stdout.write(`\n${unanswerableNotice(call, session.id)}\n`);
+      }
+      if (outcome.unanswered.length > 0) {
+        process.stdout.write(`\n${pendingNotice(session.id, outcome.unanswered)}\n`);
+      }
+      if (outcome.error) {
+        // The runtime refused an answer, so the session is still held and the
+        // earlier answers of this batch may not have applied. Say both.
+        process.stdout.write(`\nError: [CHAT] the runtime refused an answer: ${outcome.error}\n`);
+      }
+      if (outcome.answered.length === 0 || outcome.error) {
+        // Either nothing was answered — the runtime is still waiting and the
+        // turn cannot continue, which is a run that needs a person, not a
+        // success — or a refusal stopped a batch halfway, so the session is
+        // still held and the remaining calls were never sent. Both are
+        // non-zero, and neither may be reported as a finished turn.
+        process.exitCode = 1;
+        return;
+      }
+      process.stdout.write('agent> ');
+      parked = await runTurn(client.sessions.tail(session.id, { lastEventId: String(lastSeq) }));
     }
     process.stdout.write('\n');
   };
 
   if (opts.message) {
-    await streamReply(opts.message);
+    await runUntilSettled(opts.message);
     return;
   }
 
-  const readline = await import('node:readline');
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  const ask = () =>
+  // A reader exists here (`readingLines`), and it can still end between two
+  // lines: re-entering with a closed interface would throw, so the prompt stops
+  // instead and the process exits with whatever the last turn left behind.
+  const ask = () => {
+    if (!rl || inputClosed) return;
     rl.question('you> ', async (line) => {
       const text = line.trim();
       if (!text) return ask();
       process.stdout.write('agent> ');
       try {
-        await streamReply(text);
+        await runUntilSettled(text);
       } catch (err: any) {
         console.error(`\nError: [CHAT] ${err.message}`);
       }
       ask();
     });
+  };
   ask();
 }
 

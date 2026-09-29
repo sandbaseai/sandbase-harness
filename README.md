@@ -669,9 +669,18 @@ managed-agents init
 managed-agents start [--host 127.0.0.1] [--port 3000]
 managed-agents list
 managed-agents reload
-managed-agents chat <agent-id> --message "hello"
+managed-agents chat <agent-id> --message "hello" [--tool-approval ask|allow|deny]
 managed-agents template list | install <name> | create <name>
 ```
+
+A turn whose tool needs approval parks instead of failing, and `chat` asks before
+running it, then lets the runtime continue the same turn. `--tool-approval allow`
+decides every such call in advance, which is what a script or a CI job uses, and
+`deny` refuses them. With no terminal to prompt, the default `ask` answers nothing
+and exits non-zero with the calls that are waiting named, so a script states its
+policy rather than inheriting one. A custom tool is the exception: only your own
+client can produce its result, and `chat` says so and exits non-zero. See
+[usage](docs/usage.md#cli-commands).
 
 ## API Examples
 
