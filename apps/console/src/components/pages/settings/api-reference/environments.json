@@ -30,18 +30,23 @@
       },
       {
         "name": "hosting_type",
-        "type": "cloud | self_hosted",
-        "description": "Where session work is expected to run."
+        "type": "local | docker | kubernetes | self_hosted",
+        "description": "Where session work runs. The published config.type spelling of the same field is also read, and sending both with different values is refused. An update that names one spelling replaces the stored spelling in the other, so an environment stored with the published spelling can be repaired from this form. cloud is refused with unsupported_hosting_type: no backend here can serve it."
+      },
+      {
+        "name": "config",
+        "type": "object",
+        "description": "Published CMA configuration. config.type is read as hosting_type (and config.type: \"cloud\" is refused), config.networking is normalized into the recorded local network key names, and config.packages is preserved without being installed."
       },
       {
         "name": "network",
         "type": "object",
-        "description": "Limited or unrestricted network policy."
+        "description": "Limited or unrestricted network policy, recorded but not enforced: no shipped provider reads it, so a declared limit does not change what a session can reach."
       },
       {
         "name": "packages",
         "type": "array",
-        "description": "Package manager and package declarations available in this environment."
+        "description": "Package manager and package declarations available in this environment. Recorded, not installed: no provider here installs them."
       },
       {
         "name": "sandbox",
@@ -102,18 +107,23 @@
       },
       {
         "name": "hosting_type",
-        "type": "cloud | self_hosted",
-        "description": "Hosting mode."
+        "type": "local | docker | kubernetes | self_hosted",
+        "description": "Hosting mode. The published config.type spelling of the same field is also read, and sending both with different values is refused. An update that names one spelling replaces the stored spelling in the other, so an environment stored with the published spelling can be repaired from this form. cloud is refused with unsupported_hosting_type."
+      },
+      {
+        "name": "config",
+        "type": "object",
+        "description": "Published CMA configuration. config.type is read as hosting_type (and config.type: \"cloud\" is refused), config.networking is normalized into the recorded local network key names, and config.packages is preserved without being installed."
       },
       {
         "name": "network",
         "type": "object",
-        "description": "Network policy."
+        "description": "Network policy, recorded but not enforced: no shipped provider reads it, so a declared limit does not change what a session can reach."
       },
       {
         "name": "packages",
         "type": "array",
-        "description": "Package declarations."
+        "description": "Package declarations. Recorded, not installed: no provider here installs them."
       },
       {
         "name": "sandbox",

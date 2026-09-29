@@ -60,9 +60,9 @@ export function ResourceModal({ kind, onClose, onSaved }: { kind: 'environment' 
             <select value={hostingType} onChange={(event) => setHostingType(event.target.value as EnvironmentHostingType)}>
               <option value="local">Local</option>
               <option value="docker">Docker</option>
-              <option value="cloud">Cloud</option>
               <option value="self_hosted">Self-hosted</option>
             </select>
+            <small>Cloud hosting is not offered: the runtime has no cloud execution backend and refuses it with `unsupported_hosting_type`.</small>
           </label>
           {hostingType === 'docker' ? (
             <label className="editField">

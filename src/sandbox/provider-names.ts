@@ -13,7 +13,10 @@
  *   `self_hosted`. It mixes ownership (`cloud` is the official spelling for
  *   hosting on machines this runtime does not own, and no backend here can
  *   serve it) with materialization (`docker`, `kubernetes`), so it is
- *   translated rather than interpreted at each call site.
+ *   translated rather than interpreted at each call site. The published CMA
+ *   spells this same axis `config.type`, so both spellings are read through
+ *   {@link readDeclaredHostingType} — one place, one vocabulary, and a config
+ *   that declares them inconsistently is refused instead of resolved.
  *
  * The only provider difference between the first two is the self-hosted worker,
  * which Settings V2 spells `remote`. Every direction of every alias lives here
@@ -75,6 +78,75 @@ export const ENVIRONMENT_HOSTING_TYPES = [
 ] as const;
 
 export type EnvironmentHostingType = (typeof ENVIRONMENT_HOSTING_TYPES)[number];
+
+/**
+ * The two spellings of the hosting axis, in projection order.
+ *
+ * `hosting_type` is what this runtime's own Console, SDK, and CLI write. `type`
+ * is the published CMA spelling inside `config`
+ * (`config: { type: "cloud" | "self_hosted" }`, the official quickstart shape).
+ * They name one vocabulary, so they are read together rather than one of them
+ * being ignored: measured against the official TypeScript SDK at `0.129.0`,
+ * `config: { type: "self_hosted" }` used to be accepted and reported back as
+ * `hosting_type: "local"` while `config: { type: "cloud" }` was accepted
+ * outright.
+ */
+export const ENVIRONMENT_HOSTING_FIELDS = ['hosting_type', 'type'] as const;
+
+export type EnvironmentHostingField = (typeof ENVIRONMENT_HOSTING_FIELDS)[number];
+
+/**
+ * The hosting type a config declares, or why its declaration cannot be read.
+ *
+ * A reason is returned rather than thrown so the write path can answer 400 with
+ * the same words the resolution path throws: one config must not produce two
+ * different explanations depending on which caller reads it.
+ */
+export type DeclaredHostingDeclaration =
+  | { ok: true; value?: string }
+  | { ok: false; code: EnvironmentConfigErrorCode; message: string };
+
+/**
+ * Read `hosting_type` and the published `type` as one declaration.
+ *
+ * `undefined`, `null`, and an empty string mean "not declared" in either
+ * spelling. Two spellings that disagree are refused rather than resolved by
+ * precedence: the runtime cannot know which one the caller meant, and picking
+ * one would run the session somewhere the other spelling did not ask for.
+ */
+export function readDeclaredHostingType(
+  config: Record<string, unknown>,
+  context: string,
+): DeclaredHostingDeclaration {
+  const declared: Array<{ field: EnvironmentHostingField; value: string }> = [];
+  for (const field of ENVIRONMENT_HOSTING_FIELDS) {
+    const value = config[field];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== 'string') {
+      return {
+        ok: false,
+        code: ENVIRONMENT_CONFIG_ERROR_CODES.invalidConfig,
+        message: `${context} declares ${field} as `
+          + `${Array.isArray(value) ? 'an array' : typeof value}, which cannot name a hosting type.`,
+      };
+    }
+    if (value.trim()) declared.push({ field, value: value.trim() });
+  }
+
+  if (declared.length === 0) return { ok: true };
+  const [first, ...rest] = declared;
+  const disagreement = rest.find((entry) => entry.value !== first.value);
+  if (disagreement) {
+    return {
+      ok: false,
+      code: ENVIRONMENT_CONFIG_ERROR_CODES.invalidConfig,
+      message: `${context} declares ${first.field} "${first.value}" and ${disagreement.field} `
+        + `"${disagreement.value}", two spellings of one hosting type that disagree. `
+        + 'Declare the hosting type once, or make both spellings name the same one.',
+    };
+  }
+  return { ok: true, value: first.value };
+}
 
 /**
  * Reported as an Environment's `hosting_type` when its stored config cannot be
@@ -214,12 +286,13 @@ export function hostingTypeRefusal(hostingType: string): string {
  * `sandbox_provider` wins when present and is preserved verbatim: availability
  * is the sandbox registry's call, so an out-of-tree provider name still reaches
  * the registry, which reports the backends it actually has. A config that
- * declares only `hosting_type` is translated, and a config that declares
- * neither gets {@link DEFAULT_SANDBOX_PROVIDER}.
+ * declares only a hosting type — either spelling — is translated, and a config
+ * that declares neither gets {@link DEFAULT_SANDBOX_PROVIDER}.
  *
  * A declaration that is present but is not a name — a number, an object — is
- * refused like any other unreadable config. Treating it as absent is what made
- * a damaged record resolve to `local`.
+ * refused like any other unreadable config, and so is a pair of spellings that
+ * disagree. Treating either as absent is what made a damaged record resolve to
+ * `local`.
  */
 export function sandboxProviderForEnvironmentConfig(
   config: Record<string, unknown>,
@@ -227,30 +300,38 @@ export function sandboxProviderForEnvironmentConfig(
 ): SandboxProviderType {
   const declaredProvider = declaredName(config.sandbox_provider, 'sandbox_provider', context);
   if (declaredProvider) return declaredProvider;
-  const declaredHosting = declaredName(config.hosting_type, 'hosting_type', context);
-  if (declaredHosting) return sandboxProviderForHostingType(declaredHosting, context);
-  return DEFAULT_SANDBOX_PROVIDER;
+  const declaredHosting = readDeclaredHostingType(config, context);
+  if (!declaredHosting.ok) throw new EnvironmentConfigError(declaredHosting.code, declaredHosting.message);
+  return declaredHosting.value
+    ? sandboxProviderForHostingType(declaredHosting.value, context)
+    : DEFAULT_SANDBOX_PROVIDER;
 }
 
 /**
  * The public `hosting_type` projection for an Environment.
  *
- * A declared `hosting_type` is echoed. Otherwise the declared backend names the
- * same thing — reporting `kubernetes` as `cloud` described hosting this runtime
- * does not have — and a config that declares neither is reported as the backend
- * it resolves to. A value this runtime does not recognize is echoed verbatim
- * rather than replaced, so a stored record is never displayed as a backend it
- * did not name, and a declaration that is not a name at all is reported as
- * {@link UNREADABLE_HOSTING_TYPE} rather than as `local`.
+ * A declared hosting type is echoed, in either spelling — the published `type`
+ * is reported as the local `hosting_type` so a caller of the official shape
+ * reads back the hosting it asked for instead of the `local` default. Otherwise
+ * the declared backend names the same thing — reporting `kubernetes` as `cloud`
+ * described hosting this runtime does not have — and a config that declares
+ * neither is reported as the backend it resolves to. A value this runtime does
+ * not recognize is echoed verbatim rather than replaced, so a stored record is
+ * never displayed as a backend it did not name, and a declaration that is not a
+ * name at all — or two spellings that disagree, which the resolution path
+ * refuses — is reported as {@link UNREADABLE_HOSTING_TYPE} rather than as a
+ * backend a session on this record would not use.
  */
 export function environmentHostingProjection(config: Record<string, unknown>): string {
-  for (const key of ['hosting_type', 'sandbox_provider'] as const) {
-    const value = config[key];
-    if (value === undefined || value === null) continue;
-    if (typeof value !== 'string') return UNREADABLE_HOSTING_TYPE;
-    if (value.trim()) return value.trim();
-  }
-  return DEFAULT_SANDBOX_PROVIDER;
+  // Read through the same function resolution uses, so a record cannot be
+  // reported as runnable and refused when a session is created on it.
+  const declared = readDeclaredHostingType(config, 'Environment');
+  if (!declared.ok) return UNREADABLE_HOSTING_TYPE;
+  if (declared.value) return declared.value;
+  const provider = config.sandbox_provider;
+  if (provider === undefined || provider === null) return DEFAULT_SANDBOX_PROVIDER;
+  if (typeof provider !== 'string') return UNREADABLE_HOSTING_TYPE;
+  return provider.trim() || DEFAULT_SANDBOX_PROVIDER;
 }
 
 /**

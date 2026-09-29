@@ -322,7 +322,8 @@ export interface EnvironmentSummary {
   type: 'environment';
   name: string;
   description: string;
-  hosting_type: 'cloud' | 'local' | 'self_hosted';
+  /** `unknown` is what the runtime reports for a stored config it cannot read. */
+  hosting_type: 'local' | 'docker' | 'kubernetes' | 'cloud' | 'self_hosted' | 'unknown';
   sandbox_provider: string | null;
   network: Record<string, unknown>;
   packages: unknown[];
@@ -874,7 +875,8 @@ class EnvironmentsResource {
   create(input: {
     name: string;
     description?: string;
-    hosting_type?: 'cloud' | 'local' | 'self_hosted';
+    /** The published `config.type` spelling is accepted too; `cloud` is refused. */
+    hosting_type?: 'local' | 'docker' | 'kubernetes' | 'cloud' | 'self_hosted';
     sandbox_provider?: string;
     network?: Record<string, unknown>;
     packages?: unknown[];
@@ -887,7 +889,8 @@ class EnvironmentsResource {
   update(id: string, input: Partial<{
     name: string;
     description: string;
-    hosting_type: 'cloud' | 'local' | 'self_hosted';
+    /** The published `config.type` spelling is accepted too; `cloud` is refused. */
+    hosting_type: 'local' | 'docker' | 'kubernetes' | 'cloud' | 'self_hosted';
     sandbox_provider: string;
     network: Record<string, unknown>;
     packages: unknown[];

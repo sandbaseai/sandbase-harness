@@ -16,12 +16,19 @@ import {
 import { rejectUnexpectedQueryParams } from './query-params.js';
 import { SHIPPED_SANDBOX_PROVIDER_TYPES } from '@/types/sandbox.js';
 import {
+  ENVIRONMENT_CONFIG_ERROR_CODES,
+  ENVIRONMENT_HOSTING_FIELDS,
   environmentHostingProjection,
   hostingTypeError,
   isEnvironmentConfigError,
   parseEnvironmentConfig,
+  readDeclaredHostingType,
   UNREADABLE_HOSTING_TYPE,
 } from '@/sandbox/provider-names.js';
+import {
+  normalizeEnvironmentNetwork,
+  sameEnvironmentNetwork,
+} from '@/core/config/environment-network.js';
 import {
   createEnvironmentWorkerKey,
   listEnvironmentWorkerKeys,
@@ -57,10 +64,10 @@ export function environmentRoutes(deps: ServerDeps) {
     const name = stringField(body.value.name);
     if (!name) return invalid(c, 'name is required');
     const normalized = normalizeEnvironmentConfig(body.value);
-    if (!normalized.ok) return invalid(c, normalized.message);
+    if (!normalized.ok) return invalid(c, normalized.message, normalized.code);
     const config = normalized.config;
     const providerError = sandboxProviderError(config);
-    if (providerError) return invalid(c, providerError);
+    if (providerError) return invalid(c, providerError.message, providerError.code);
     const id = `env_${nanoid(18)}`;
     try {
       deps.db.prepare(
@@ -108,10 +115,10 @@ export function environmentRoutes(deps: ServerDeps) {
       }
     }
     const normalized = normalizeEnvironmentConfig(body.value, storedConfig);
-    if (!normalized.ok) return invalid(c, normalized.message);
+    if (!normalized.ok) return invalid(c, normalized.message, normalized.code);
     const config = normalized.config;
     const providerError = sandboxProviderError(config);
-    if (providerError) return invalid(c, providerError);
+    if (providerError) return invalid(c, providerError.message, providerError.code);
     deps.db.prepare(
       'UPDATE environments SET name = ?, description = ?, config = ?, metadata = ?, updated_at = datetime(\'now\') WHERE id = ?',
     ).run(
@@ -259,7 +266,7 @@ function toEnvironment(row: EnvironmentRow) {
     description: row.description ?? '',
     hosting_type: unreadable ? UNREADABLE_HOSTING_TYPE : environmentHostingType(config),
     sandbox_provider: typeof config.sandbox_provider === 'string' ? config.sandbox_provider : null,
-    network: objectField(config.network),
+    network: environmentNetworkProjection(config),
     packages: Array.isArray(config.packages) ? config.packages : [],
     status: row.archived_at ? 'archived' : 'active',
     config,
@@ -277,22 +284,205 @@ function toEnvironment(row: EnvironmentRow) {
  * would leave the Environment resolving to a backend the caller did not ask
  * for. Individual field shapes are validated on the merged config by
  * {@link sandboxProviderError}.
+ *
+ * Both published spellings are read here rather than stored as written:
+ * `config.networking` becomes `config.network`, and `config.type` counts as
+ * `hosting_type`. The local spelling is the one this runtime records and reads
+ * back. Two spellings declared by **one request** with different content are
+ * refused — they cannot both be honoured, and silently preferring one would
+ * apply a declaration the caller did not write. A spelling left behind by an
+ * older row is not a caller statement: a declaration in the request supersedes
+ * it, because an update naming one spelling is a normal field update and not a
+ * contradiction. Leaving the stale twin in place would make the record
+ * unrepairable through the spelling the caller actually wrote — including
+ * through the Console, which only ever sends the local one.
  */
 function normalizeEnvironmentConfig(
   body: Record<string, unknown>,
   existing: Record<string, unknown> = {},
-): { ok: true; config: Record<string, unknown> } | { ok: false; message: string } {
+): { ok: true; config: Record<string, unknown> } | { ok: false; message: string; code: string } {
   if (body.config !== undefined && (!body.config || typeof body.config !== 'object' || Array.isArray(body.config))) {
-    return { ok: false, message: 'config must be an object' };
+    return { ok: false, message: 'config must be an object', code: ENVIRONMENT_CONFIG_ERROR_CODES.invalidConfig };
   }
-  const config = {
-    ...existing,
-    ...objectField(body.config),
-  };
-  for (const key of ['hosting_type', 'sandbox_provider', 'network', 'packages'] as const) {
-    if (body[key] !== undefined) config[key] = body[key];
+  const incoming = { ...objectField(body.config) };
+  for (const key of ['hosting_type', 'sandbox_provider', 'network', 'networking', 'packages'] as const) {
+    if (body[key] !== undefined) incoming[key] = body[key];
   }
+
+  const translated = translateIncomingNetwork(incoming);
+  if (!translated.ok) return translated;
+  // A policy the request named — in either spelling — replaces the stored one,
+  // including a damaged stored value the request is repairing.
+  const declaredNetwork = incoming.network !== undefined;
+
+  const config = { ...existing, ...incoming };
+  supersedeStoredHostingSpelling(config, incoming);
+  const stored = migrateStoredNetwork(config, declaredNetwork);
+  if (!stored.ok) return stored;
   return { ok: true, config };
+}
+
+/**
+ * Drop the stored spelling of the hosting axis that the request did not use.
+ *
+ * The request's own declaration is already merged in. What can still sit beside
+ * it is the *other* spelling left by an older row — `config.type` beside a
+ * request's `hosting_type`, or the reverse. A declaration in one spelling
+ * supersedes the stored declaration in the other, which makes an update a normal
+ * field update: without it, a row the previous version wrote with the published
+ * spelling could not be renamed or repaired through the local spelling, and a
+ * request naming the hosting type once would be refused for disagreeing with a
+ * value it never sent. Clearing a spelling with `null` or an empty string
+ * touches only that spelling, so the other one still decides the backend.
+ */
+function supersedeStoredHostingSpelling(
+  config: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+): void {
+  const declared = ENVIRONMENT_HOSTING_FIELDS.filter((field) => {
+    const value = incoming[field];
+    return typeof value === 'string' && value.trim() !== '';
+  });
+  if (declared.length === 0) return;
+  for (const field of ENVIRONMENT_HOSTING_FIELDS) {
+    if (!declared.includes(field)) delete config[field];
+  }
+}
+
+/**
+ * Read the two spellings of the network policy a request declares.
+ *
+ * `networking` is translated into the local `network` key; both being present
+ * with different content is refused. The published key is consumed rather than
+ * echoed, the same way a legacy spelling elsewhere in this runtime is accepted
+ * on ingress and not returned as written.
+ */
+function translateIncomingNetwork(
+  incoming: Record<string, unknown>,
+): { ok: true } | { ok: false; message: string; code: string } {
+  if (incoming.networking === undefined) return { ok: true };
+  if (incoming.networking === null) {
+    // `null` is how a client clears a field, in this spelling too: the two
+    // spellings are one policy, so clearing through either clears it.
+    delete incoming.networking;
+    if (incoming.network === undefined) incoming.network = null;
+    return { ok: true };
+  }
+  const published = normalizeEnvironmentNetwork(incoming.networking);
+  if (!published) {
+    return {
+      ok: false,
+      message: 'config.networking must be an object',
+      code: ENVIRONMENT_CONFIG_ERROR_CODES.invalidConfig,
+    };
+  }
+  if (incoming.network !== undefined) {
+    const local = normalizeEnvironmentNetwork(incoming.network);
+    if (!local) {
+      return {
+        ok: false,
+        message: 'config.network must be an object',
+        code: ENVIRONMENT_CONFIG_ERROR_CODES.invalidConfig,
+      };
+    }
+    if (!sameEnvironmentNetwork(local, published)) {
+      return {
+        ok: false,
+        message: 'config.network and config.networking are two spellings of one network policy '
+          + 'and they disagree. Declare the policy once, or make both spellings name the same one.',
+        code: ENVIRONMENT_CONFIG_ERROR_CODES.invalidConfig,
+      };
+    }
+  }
+  incoming.network = published;
+  delete incoming.networking;
+  return { ok: true };
+}
+
+/**
+ * Normalize the policy a merged config holds, including a stored `networking`
+ * from a row written before both spellings were read.
+ *
+ * `declaredByRequest` says whether the request named the policy. When it did, the
+ * request's value is the policy and any stored spelling of it — readable or
+ * damaged, local or published — is superseded, which is what makes a damaged
+ * stored value repairable by writing a good one and clearable with `null`. When
+ * it did not, storage decides: a readable published-spelling policy is
+ * translated into the recorded local key, and one that cannot be read at all is
+ * refused with the repair it needs rather than applied or dropped.
+ */
+function migrateStoredNetwork(
+  config: Record<string, unknown>,
+  declaredByRequest: boolean,
+): { ok: true } | { ok: false; message: string; code: string } {
+  if (declaredByRequest) {
+    delete config.networking;
+    if (config.network === null) {
+      // `null` clears the policy instead of being stored as an unreadable one.
+      delete config.network;
+      return { ok: true };
+    }
+    const normalized = normalizeEnvironmentNetwork(config.network);
+    if (!normalized) {
+      return {
+        ok: false,
+        message: 'config.network must be an object',
+        code: ENVIRONMENT_CONFIG_ERROR_CODES.invalidConfig,
+      };
+    }
+    config.network = normalized;
+    return { ok: true };
+  }
+
+  if (config.network === null) {
+    delete config.network;
+  } else if (config.network !== undefined) {
+    const normalized = normalizeEnvironmentNetwork(config.network);
+    if (!normalized) return unreadableStoredPolicy('network');
+    config.network = normalized;
+  }
+  if (config.networking === undefined) return { ok: true };
+  if (config.networking === null) {
+    delete config.networking;
+    return { ok: true };
+  }
+  const legacy = normalizeEnvironmentNetwork(config.networking);
+  if (!legacy) return unreadableStoredPolicy('networking');
+  if (config.network === undefined) config.network = legacy;
+  // The local key is the record; the published one is an ingress spelling.
+  delete config.networking;
+  return { ok: true };
+}
+
+/**
+ * Refuse a stored policy that is not an object, naming the way out.
+ *
+ * The row is not repaired silently: the caller asked to change something else,
+ * and dropping a value they did not mention is how a policy disappears without
+ * anyone deciding it should. The message names the request that replaces it, so
+ * a stuck row is one call away from being usable again.
+ */
+function unreadableStoredPolicy(key: string): { ok: false; message: string; code: string } {
+  return {
+    ok: false,
+    message: `stored ${key} is not an object and cannot be read as a network policy. `
+      + 'Send config.network with a policy object to replace it, or null to clear it.',
+    code: ENVIRONMENT_CONFIG_ERROR_CODES.invalidConfig,
+  };
+}
+
+/**
+ * The declared network policy, in the local spelling.
+ *
+ * A stored row that holds only the published `networking` is read here too, so a
+ * policy written before both spellings were accepted is still reported instead of
+ * disappearing from the response. A policy that cannot be read at all reports as
+ * an empty object: nothing executes on it, so there is no backend to misreport.
+ */
+function environmentNetworkProjection(config: Record<string, unknown>): Record<string, unknown> {
+  return normalizeEnvironmentNetwork(config.network)
+    ?? normalizeEnvironmentNetwork(config.networking)
+    ?? {};
 }
 
 /**
@@ -301,22 +491,32 @@ function normalizeEnvironmentConfig(
  *
  * Without this the environment is accepted at write time and then either fails
  * much later, when a session tries to boot a sandbox that does not exist, or —
- * for `hosting_type` — silently ran on the local backend instead.
+ * for `hosting_type` — silently ran on the local backend instead. The refusal
+ * carries the same code the resolution path raises, because `docs/api.md`
+ * documents one code per cause and a caller that only sees this response must be
+ * able to branch on it.
  */
-function sandboxProviderError(config: Record<string, unknown>): string | undefined {
+function sandboxProviderError(
+  config: Record<string, unknown>,
+): { message: string; code: string } | undefined {
   const malformed = hostingFieldError(config);
-  if (malformed) return malformed;
-  // `hosting_type` is checked first so the message names the field the caller
-  // most likely wrote: the Console derives the backend from it, so a hosting
-  // value this runtime cannot serve would otherwise be reported as a backend
-  // name the operator never typed.
-  const hostingType = stringField(config.hosting_type);
-  const hostingError = hostingType ? hostingTypeError(hostingType) : undefined;
-  if (hostingError) return hostingError;
+  if (malformed) return { message: malformed, code: ENVIRONMENT_CONFIG_ERROR_CODES.invalidConfig };
+  // `hosting_type` is checked before `sandbox_provider` so the message names the
+  // field the caller most likely wrote: the Console derives the backend from it,
+  // so a hosting value this runtime cannot serve would otherwise be reported as a
+  // backend name the operator never typed. The published `type` is read by the
+  // same function, so it is refused in the same words.
+  const declared = readDeclaredHostingType(config, 'Environment');
+  if (!declared.ok) return { message: declared.message, code: declared.code };
+  const hostingError = declared.value ? hostingTypeError(declared.value) : undefined;
+  if (hostingError) return { message: hostingError, code: ENVIRONMENT_CONFIG_ERROR_CODES.unsupportedHostingType };
   const provider = stringField(config.sandbox_provider);
   if (provider && !(SHIPPED_SANDBOX_PROVIDER_TYPES as readonly string[]).includes(provider)) {
-    return `sandbox_provider "${provider}" is not a known sandbox backend `
-      + `(expected one of: ${SHIPPED_SANDBOX_PROVIDER_TYPES.join(', ')})`;
+    return {
+      message: `sandbox_provider "${provider}" is not a known sandbox backend `
+        + `(expected one of: ${SHIPPED_SANDBOX_PROVIDER_TYPES.join(', ')})`,
+      code: ENVIRONMENT_CONFIG_ERROR_CODES.invalidConfig,
+    };
   }
   return undefined;
 }
@@ -328,10 +528,11 @@ function sandboxProviderError(config: Record<string, unknown>): string | undefin
  * dropping it would leave the Environment resolving to the default local
  * backend while the caller believed it had declared something. `null` and an
  * empty string mean "not declared" — how a client clears a field — and are left
- * to the resolver's documented default.
+ * to the resolver's documented default. Both spellings are checked, because the
+ * published `type` is a hosting declaration too.
  */
 function hostingFieldError(config: Record<string, unknown>): string | undefined {
-  for (const key of ['hosting_type', 'sandbox_provider'] as const) {
+  for (const key of ['hosting_type', 'type', 'sandbox_provider'] as const) {
     const value = config[key];
     if (value === undefined || value === null) continue;
     if (typeof value !== 'string') return `${key} must be a string`;

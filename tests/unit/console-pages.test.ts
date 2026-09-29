@@ -467,6 +467,12 @@ describe('Console page static coverage', () => {
     expect(quickCreateSessionModals).toContain('Local is the v1 quick-start path');
     expect(quickCreateSessionModals).not.toContain('<option value="cloud">Cloud</option>');
     expect(quickCreateSessionModals).not.toContain('<option value="self_hosted">Self-hosted</option>');
+    // The environment create form offers no hosting type the API refuses: cloud
+    // is answered with `unsupported_hosting_type`, so offering it only produced a
+    // failed save.
+    const environmentModals = readFileSync('apps/console/src/components/modals/ResourceModals.tsx', 'utf8');
+    expect(environmentModals).not.toContain('<option value="cloud">Cloud</option>');
+    expect(environmentModals).toContain('<option value="self_hosted">Self-hosted</option>');
     expect(css).toMatch(/\.yamlToolbar\s*\{[^}]*border-bottom:\s*1px solid var\(--border-subtle\)/s);
     expect(readFileSync('apps/console/src/components/pages/SessionPages.tsx', 'utf8').match(/Create session/g)?.length).toBeGreaterThanOrEqual(3);
     expect(readFileSync('apps/console/src/components/pages/EnvironmentPages.tsx', 'utf8').match(/Create environment/g)?.length).toBeGreaterThanOrEqual(3);

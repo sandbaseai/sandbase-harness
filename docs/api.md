@@ -1451,8 +1451,9 @@ follows the Environment, not the sandbox in hand, so the refusal is conservative
 only when the Environment is the stricter of the two. Binding a session to a
 sandbox and re-reading the Environment on every attachment are both deliberate;
 the alternative would be accepting a mount the named backend cannot serve. An
-Environment that cannot be resolved at all — a damaged config or a legacy
-`hosting_type: "cloud"` row — is answered with its own `400` and code
+Environment that cannot be resolved at all — a damaged config, or a row
+declaring `hosting_type: "cloud"` or the published `config: {"type": "cloud"}` —
+is answered with its own `400` and code
 (`unsupported_hosting_type`), not a `500`, on this route as on creation.
 A `memory_store` resource can only be attached when the session is created,
 because memories are part of the context the session was built with; attaching
@@ -1548,20 +1549,79 @@ one sessions use:
   registry, so an unregistered name is refused there by name rather than
   replaced with another backend. A runtime that registers a provider this build
   does not ship can still name it.
-- Otherwise `hosting_type` selects the backend: `local`, `docker`,
+- Otherwise the hosting type selects the backend: `local`, `docker`,
   `kubernetes`, and `self_hosted` map to the backend of the same name.
 - Otherwise the environment runs on `local`, the runtime default. An
   environment that declares neither is the only case that resolves to `local`;
   a declaration this runtime cannot serve is never lowered to it.
 
-`hosting_type: "cloud"` is refused with `400 invalid_request_error` and code
-`unsupported_hosting_type`: cloud names hosting on machines this runtime does
-not own, so no setting of this runtime can honor it. The same refusal covers any
-other unrecognized `hosting_type`. A `config` that is not a JSON object, a
-stored `config` that is not valid JSON, or a declared `hosting_type` /
-`sandbox_provider` that is not a string is refused with code
-`invalid_environment_config` or `unsupported_hosting_type`; an update that does
-not supply a replacement `config` cannot be applied over a damaged record.
+The published CMA `config` shape is read rather than stored and ignored:
+
+- `config.type` is the published spelling of the local `hosting_type`, and both
+  are read as one declaration. A client that sends
+  `"config": {"type": "self_hosted"}` gets `hosting_type: "self_hosted"` back
+  instead of the local default, and the value selects the backend through the
+  resolution above. `null` and `""` mean "not declared" in either spelling; any
+  other non-string is refused rather than read as undeclared.
+- Two spellings that disagree — `"type": "docker"` beside
+  `"hosting_type": "local"` — are refused with `400` and code
+  `invalid_environment_config`: one environment cannot run in two places, so the
+  runtime refuses instead of picking one. Sending both with the same value is
+  accepted. That is about what one request declares: a spelling an *older row*
+  already holds is not a caller statement, so an update that names the axis in
+  one spelling replaces the stored declaration in the other. A row the previous
+  version wrote as `"config": {"type": "cloud"}` can therefore be renamed or
+  repaired with `"hosting_type": "local"`, including from the Console, which only
+  ever sends that spelling; clearing a spelling with `null` or `""` touches only
+  that one.
+- `config.networking` is normalized into the recorded local `config.network`
+  before it is stored, under the local key names: `allow_mcp_servers` becomes
+  `allow_mcp_server_network_access`, and `allow_package_managers` becomes
+  `allow_package_manager_network_access`. The published key is consumed rather
+  than stored beside its local twin, so a stored environment holds one policy in
+  one spelling. The defaults are fail-closed: an unrecognized `type` reads as
+  `limited`, and a permission that is absent or not the boolean `true` reads as
+  denied. Sending both spellings with different content is refused with
+  `invalid_environment_config`. Sending `network: null` — or `networking: null`,
+  which is the same policy — clears the recorded policy, including one an older
+  row stored in the other spelling; any other value that is
+  not an object is refused. A stored policy that is not an object at all is
+  refused with a message naming the update that replaces it, so a damaged row is
+  repaired by declaring a policy rather than being un-updatable.
+- A stored declaration the resolution refuses — two spellings that disagree, or a
+  value that is not a name — is reported as `hosting_type: "unknown"` rather than
+  as a backend, so a listing never presents as runnable an environment whose
+  sessions are refused.
+- `config.packages` is preserved as written. No provider in this runtime
+  installs packages, in either the published object shape or the local list
+  shape, so a declaration there does not reach a sandbox. The response's
+  top-level `packages` field stays the local list shape, so a published object
+  shape is visible only inside `config`.
+
+`hosting_type: "cloud"` — and the published `config: {"type": "cloud"}` — is
+refused with `400 invalid_request_error` and code `unsupported_hosting_type`:
+cloud names hosting on machines this runtime does not own, so no setting of this
+runtime can honor it, and the message names the hosting types it can execute.
+The same refusal covers any other unrecognized hosting type, in either spelling.
+A published quickstart's cloud environment therefore needs that one line
+changed to a hosting type this runtime can run.
+
+A `config` that is not a JSON object, a stored `config` that is not valid JSON,
+a declared `hosting_type` / `type` / `sandbox_provider` that is not a string, or
+a `sandbox_provider` that names no shipped backend is refused with code
+`invalid_environment_config`; a hosting type this runtime cannot execute is
+refused with `unsupported_hosting_type`; an update that does not supply a
+replacement `config` cannot be applied over a damaged record.
+
+### Network policy
+
+An environment's network policy is recorded and returned, and **nothing enforces
+it**: no sandbox provider shipped in this runtime reads it, so
+`{"type": "limited", "allowed_hosts": []}` reaches the same network as
+`{"type": "unrestricted"}`. Store the declaration — a provider that can apply it
+will read the stored shape — but do not treat it as a sandbox boundary. A
+credential vault's own `allowed_hosts` policy is a different thing and *is*
+enforced when the credential is injected.
 
 Resolution failures surface at `POST /v1/sessions`, before any session row is
 written, and at `POST /v1/sessions/{id}/events`, before any event is appended,
@@ -1576,7 +1636,16 @@ choice: an update that does not carry a replacement `config` is refused.
 `env_default` is the workspace fallback Environment, so its backend is the
 workspace runtime setting (`sandbox.provider`) and its stored `config` is the
 legacy seed those settings were derived from; a named Environment decides its own
-backend as described above.
+backend as described above. That seed is why a workspace whose `env_default`
+declares a hosting type this runtime cannot execute — the published
+`config: {"type": "cloud"}` spelling included, which the version before this one
+accepted and stored verbatim — refuses to derive its runtime settings at all on a
+workspace that has no settings row yet, rather than quietly seeding the local
+backend the declaration did not ask for. A workspace that already has settings
+rows boots normally: `env_default` is then resolved per session and refuses its
+own sessions with `unsupported_hosting_type`. Repair the row with an update that
+names one spelling, which replaces the other one rather than disagreeing with it:
+`PUT /v1/environments/env_default {"hosting_type": "local"}`.
 
 Worker keys and work queues are advanced self-hosted controls. They are not
 needed for the default local runtime.

@@ -56,6 +56,7 @@ export const CAPABILITY_AREAS = [
   'memory-stores',
   'files',
   'credentials',
+  'environments',
   'github-repository',
   'operations',
   'capabilities',
@@ -385,6 +386,20 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
     status: 'supported',
     reason: 'The six-value status enum distinguishes unimplemented from deliberately out-of-scope and from unverified, and a guard test enforces the claim: every entry\'s contract document must restate that entry\'s status, cite no source or test file that does not exist, and list the mounted route surface with its methods.',
     contract: 'contracts/anthropic-cma/capabilities.md',
+  },
+  {
+    area: 'environments',
+    id: 'environment-hosting-config',
+    status: 'supported',
+    reason: 'The hosting axis has two published-and-local spellings, config.type and config.hosting_type, and both are read as one declaration by readDeclaredHostingType: either resolves through one vocabulary, a declaration that is not a string is refused instead of read as absent, and two spellings that disagree are refused with invalid_environment_config rather than resolved by precedence. cloud is refused at write time with unsupported_hosting_type naming the hosting types this build can execute, so an environment this runtime cannot run is never accepted and then failed at session start. The response projects hosting_type from the declaration in either spelling, so a caller of the published shape reads back the hosting it asked for rather than the local default.',
+    contract: 'contracts/anthropic-cma/environments.md',
+  },
+  {
+    area: 'environments',
+    id: 'environment-network-policy',
+    status: 'partial',
+    reason: 'The published config.networking object is accepted in its own vocabulary (limited/unrestricted, allowed_hosts, allow_mcp_servers, allow_package_managers) and normalized into the recorded local config.network spelling by one normalizer, with fail-closed defaults for an unrecognized type and for an unset permission, and a request declaring both spellings inconsistently refused. It is partial because nothing enforces it: no sandbox provider shipped in this runtime reads an environment network policy, so a declared limited policy with an empty allowed_hosts grants the same egress as unrestricted, which the contract file, docs/api.md, and the Console API reference state plainly. The status becomes supported when a provider applies the policy it is given.',
+    contract: 'contracts/anthropic-cma/environments.md',
   },
   {
     area: 'routes',

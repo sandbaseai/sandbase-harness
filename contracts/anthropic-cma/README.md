@@ -9,7 +9,7 @@ Two contract layers, kept strictly separate:
 
 | Layer | Surface | Rule |
 | --- | --- | --- |
-| CMA canonical contract | `/v1/agents`, `/v1/sessions` (including `initial_events`), `/v1/sessions/:id/events(+stream)`, `/v1/files`, `/v1/memory_stores`, `/v1/vaults` | Follow the published definition. Types and semantics do not bend to fit the local implementation. |
+| CMA canonical contract | `/v1/agents`, `/v1/sessions` (including `initial_events`), `/v1/sessions/:id/events(+stream)`, `/v1/files`, `/v1/memory_stores`, `/v1/vaults`, `/v1/environments` (a published beta surface: `config.type`, `config.networking`, `config.packages`) | Follow the published definition. Types and semantics do not bend to fit the local implementation. |
 | SandBase local extensions | `/v1/x/*`, local / Docker / Kubernetes / self-hosted sandboxes, SQLite memory, local workers | Free to differ, but must stay in the extension namespace and must not share a type or semantic with the canonical layer. |
 
 `/v1/x/*` is deliberately excluded from CMA request admission, so a local
@@ -51,6 +51,7 @@ deviation. If the reason stops being true, the difference should be removed.
 | [`memory-stores.md`](./memory-stores.md) | Memory stores, scoping, limits, versions |
 | [`files.md`](./files.md) | Files and file session resources |
 | [`credentials.md`](./credentials.md) | Vaults, credential wire profile, rotation |
+| [`environments.md`](./environments.md) | Execution environments, the published `config` shape, network policy |
 | [`github-repository.md`](./github-repository.md) | Cloning, mounting, and skill discovery for the `github_repository` resource |
 | [`operations.md`](./operations.md) | Webhook delivery behaviour and scheduled deployments (published contract), plus the local outcome evaluator |
 | [`capabilities.md`](./capabilities.md) | Capability reporting and status truthfulness |
