@@ -968,11 +968,21 @@ the turn fails with `model_config_invalid` and a message naming the variable, th
 field (`api_key` or `base_url`), and the provider, and **no request is sent**:
 the alternative this replaced left the placeholder in place, so
 `${OPENAI_API_KEY}` travelled as the credential and the provider answered `401`
-with a message that named neither. The session is left resumable — the same
-message tells the operator to set the variable, paste the value in
-`Dashboard Settings > Setup` and restart the runtime once (a settings write is
-`restart_required` until the next start), or remove the reference — and a later
-turn on the same session runs once one of those is done.
+with a message that named neither. The message carries the three repairs that
+apply — set the variable in the environment the runtime was started from, write
+the value literally in `Dashboard Settings > Models`, or remove the reference —
+and the session is left resumable, so a later turn on it runs once one of them is
+done. Saving that literal value through `PUT /v1/x/settings` is only in effect
+after the runtime restarts (the write stays `restart_required` until the next
+start), which the settings response reports and the Console's Setup page states.
+That code and that classification are the builtin engine's. With
+`loop_engine.provider: "pi"` the same unset reference is refused one step earlier
+— the launcher resolves the model's credential before it spawns the Pi CLI, so no
+request is sent there either, and its message names the variable — but it is
+reported as `internal_error` with `retry_status: "unknown"` and the session is
+left `failed` rather than resumable. Only the code and the session's ability to
+continue differ; making the Pi path raise the same error is a decision this
+document does not make.
 
 Which path can reach that failure is worth stating, because the two write paths
 differ. `PUT /v1/x/settings` refuses a document whose `model.api_key` (or another
@@ -981,15 +991,23 @@ the `missing_env` issue naming the variable; the workspace configuration file
 (`.managed-agents/config.yaml`, which `init` writes as
 `api_key: ${OPENAI_API_KEY}`) is read at start-up with no such check, and a
 variable that was set when settings were saved can also be gone from a later
-start's environment. Both are the case this refusal covers, and either way the
-turn is the first place the runtime can name what is missing.
+start's environment. Both reach the refusal above. The turn is where a provider
+is first contacted; the runtime names the variable earlier than that when it can —
+a workspace configuration that cannot be activated reports `activation_status:
+"failed"` with `activation_errors` naming it in the settings response, from the
+first start.
+
+Two states supply no value and both are refused: the variable is unset, or it is
+set to the empty string. The settings layer reports either as `missing_env`, and
+the model client treats either as a configuration mistake rather than sending an
+empty credential the provider would answer with an unattributed `401`.
 
 `retry_status` is derived from `type`, never guessed from the message:
 
 | Value | Meaning | Codes |
 | --- | --- | --- |
 | `retryable` | Transient; the same request may succeed. | `pi_session_busy`, `work_queue_timeout` |
-| `not_retryable` | The runtime will refuse this request again. | `pi_cleanup_pending`, `pi_timed_out`, `pi_rpc_gate_unavailable`, `pi_rpc_gate_lost`, `pi_rpc_approval_not_pending`, `pi_always_ask_not_supported`, `pi_tool_policy_not_supported`, `pi_sandbox_provider_not_supported`, `pi_user_event_not_supported`, `pi_message_content_not_supported`, `loop_engine_not_supported`, `loop_engine_invalid`, `unsupported_capability`, `work_outcome_unknown`, `work_lease_lost`, `outcome_evaluator_unavailable`, `outcome_rubric_file_not_found`, `model_not_found`, `model_provider_not_configured`, `model_config_invalid`, `model_auth_failed` |
+| `not_retryable` | The runtime will refuse this request again. | `pi_cleanup_pending`, `pi_timed_out`, `pi_rpc_gate_unavailable`, `pi_rpc_gate_lost`, `pi_rpc_approval_not_pending`, `pi_rpc_protocol_error`, `pi_rpc_timeout`, `pi_rpc_outcome_unknown`, `pi_always_ask_not_supported`, `pi_tool_policy_not_supported`, `pi_sandbox_provider_not_supported`, `pi_user_event_not_supported`, `pi_message_content_not_supported`, `loop_engine_not_supported`, `loop_engine_invalid`, `unsupported_capability`, `requires_action_timeout`, `work_outcome_unknown`, `work_lease_lost`, `outcome_evaluator_unavailable`, `outcome_rubric_file_not_found`, `model_not_found`, `model_provider_not_configured`, `model_config_invalid`, `model_auth_failed` |
 | `unknown` | Not classified. Treat as possibly retryable. | any other code, including a failure with no code |
 
 `pi_always_ask_not_supported` is retained in that table but is no longer produced:

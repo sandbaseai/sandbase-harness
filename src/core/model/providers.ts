@@ -135,11 +135,20 @@ const ENV_PLACEHOLDER = /\$\{[^}]+\}/;
 function configState(value?: string): RuntimeModelInfo['api_key_state'] {
   if (!value) return 'not_set';
   const resolved = resolveEnvVars(value, false);
-  return ENV_PLACEHOLDER.test(resolved) ? 'missing_env' : 'configured';
+  // A variable that is unset leaves its `${VAR}` behind; one that is set to the
+  // empty string resolves to nothing. Both are a credential a client cannot use,
+  // and `secretState` (`src/core/settings/secrets.ts`) already reports both as
+  // `missing_env` — reporting `configured` here would have the Console tell the
+  // operator a key is in place while the model client refuses to build one.
+  if (ENV_PLACEHOLDER.test(resolved) || (ENV_PLACEHOLDER.test(value) && resolved === '')) {
+    return 'missing_env';
+  }
+  return 'configured';
 }
 
 function publicBaseUrl(value?: string): string | undefined {
   if (!value) return undefined;
   const resolved = resolveEnvVars(value, false);
-  return ENV_PLACEHOLDER.test(resolved) ? undefined : resolved;
+  if (ENV_PLACEHOLDER.test(resolved) || (ENV_PLACEHOLDER.test(value) && resolved === '')) return undefined;
+  return resolved;
 }

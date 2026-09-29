@@ -332,7 +332,7 @@ SandBase Harness 提供这层运行时基础设施。它不是可视化工作流
 node dist/index.js start --host 0.0.0.0
 ```
 
-打开转发的 **SandBase Harness Console** 端口，然后在 **Settings > Models**
+打开转发的 **SandBase Harness Console** 端口，然后在 **Settings > Setup**
 中配置模型。GitHub 可能会对 Codespaces 用量计费；下方的本地快速开始仍然免费，
 并会把全部运行时数据保存在你的机器上。
 
@@ -364,8 +364,11 @@ node ../sandbase-harness/dist/index.js init
 node ../sandbase-harness/dist/index.js start
 ~~~
 
-打开 http://127.0.0.1:3000/dashboard，进入 **Settings > Models**，
-配置模型 API Key 后即可创建 Agent 和会话。
+打开 http://127.0.0.1:3000/dashboard，在 **Settings > Setup** 上完成两步：
+先在提供者表单里保存 API Key，页面提示保存的配置尚未生效时重启 Runtime，
+再在 **Agent models** 面板里把每个 Agent 的模型 ID 改成你的提供者实际提供的
+那个（例如 DeepSeek 用 `deepseek-chat`）。模型 ID 属于 Agent 本身，`init`
+写入的 `gpt-4o` 并非每个提供者都能用。
 
 ## 接入 DeepSeek Harness
 

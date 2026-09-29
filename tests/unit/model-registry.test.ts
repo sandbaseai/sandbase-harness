@@ -436,6 +436,28 @@ describe('ModelRegistry unresolved environment references', () => {
     expect(error.message).toContain(KEY_VAR);
     expect(error.message).toContain('api_key');
     expect(error.message).toContain('Dashboard Settings > Models');
+    expect(error.message).toContain('is not set in the runtime');
+  });
+
+  it('refuses a variable that is set to the empty string, the same way the settings layer reads it', () => {
+    // `KEY=""` resolves, so a lenient reading builds a client that sends an empty
+    // credential and the provider's `401` names nothing. The settings layer
+    // already calls this state `missing_env` (`src/core/settings/schema.ts`), and
+    // a runtime that acted on the empty value instead would contradict the Console.
+    vi.stubEnv(KEY_VAR, '');
+
+    let thrown: unknown;
+    try {
+      registryWith({ api_key: `\${${KEY_VAR}}` }).createModel('deepseek-chat');
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ModelCredentialUnresolvedError);
+    const error = thrown as ModelCredentialUnresolvedError;
+    expect(error.variable).toBe(KEY_VAR);
+    expect(error.code).toBe(MODEL_CONFIG_INVALID_CODE);
+    expect(error.message).toContain('is set to an empty value');
   });
 
   it('names the endpoint field when the unset reference is the base URL', () => {
@@ -482,5 +504,25 @@ describe('ModelRegistry unresolved environment references', () => {
 
     expect(info[0]?.api_key_state).toBe('missing_env');
     expect(info[0]?.api_key_state).not.toBe('configured');
+  });
+
+  it('reports a variable that is set to the empty string as missing, like the strict path does', () => {
+    // Reading and writing have to agree here, or the Console would show a key as
+    // configured while every turn is refused for not having one.
+    vi.stubEnv(KEY_VAR, '');
+    const info = registryWith({ api_key: `\${${KEY_VAR}}` }).listRuntimeInfo();
+
+    expect(info[0]?.api_key_state).toBe('missing_env');
+    expect(info[0]?.base_url_state).toBe('configured');
+  });
+
+  it('builds a provider that has no credential at all, which is not a missing variable', () => {
+    // An endpoint that needs no key (a local gateway, a test double) configures
+    // none, and strictness must not turn "absent" into "unresolved": the resolver
+    // itself rejects `undefined`, so the guard in front of it is what keeps this
+    // case working, and it is pinned here rather than assumed.
+    const registry = registryWith({});
+
+    expect(() => registry.createModel('deepseek-chat')).not.toThrow();
   });
 });

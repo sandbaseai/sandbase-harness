@@ -296,8 +296,13 @@ function collectSecretCredentialIssues(
     const environment = COMPLETE_ENV_REFERENCE.exec(value);
     if (environment) {
       const resolved = process.env[environment[1]];
-      if (!resolved) {
+      if (resolved === undefined) {
         errors.push({ path, code: 'missing_env', message: `${environment[1]} is not set` });
+      } else if (resolved === '') {
+        // Set, but supplies nothing: the same unusable secret as an unset one,
+        // and saying "not set" of a variable that is set would send the operator
+        // looking for the wrong mistake.
+        errors.push({ path, code: 'missing_env', message: `${environment[1]} is set to an empty value` });
       } else if (resolved.includes('${')) {
         errors.push({
           path,

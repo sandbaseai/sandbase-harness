@@ -74,6 +74,10 @@ export function SettingsGeneral({
   }
 
   async function restartRuntime() {
+    // Same gate as the other two callers of `/v1/x/restart`: the endpoint
+    // interrupts active sessions, and this button is one click from the page a
+    // new user lands on.
+    if (!window.confirm('Restart the runtime? Active sessions will be interrupted.')) return;
     setRestarting(true);
     setMessage(null);
     try {

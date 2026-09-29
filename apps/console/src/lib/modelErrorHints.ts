@@ -35,7 +35,8 @@ const HINTS: Record<string, string> = {
     + 'in the environment the runtime was started from, or paste the value in Settings > Setup and restart the runtime.',
   model_auth_failed:
     'The provider refused the credential. Re-enter the API key in Settings > Setup — and if the stored key is a '
-    + '`${VAR}` reference, set that variable in the environment the runtime was started from.',
+    + '`${VAR}` reference, set that variable in the environment the runtime was started from. A key saved here is '
+    + 'picked up at the runtime\'s next start, so restart it before sending the next turn.',
 };
 
 /** The repair sentence for a model failure code, or undefined for any other code. */

@@ -397,7 +397,7 @@ node dist/index.js start --host 0.0.0.0
 ```
 
 Open the forwarded **SandBase Harness Console** port, then configure a model in
-**Settings > Models**. Codespaces usage may be billed by GitHub; the local
+**Settings > Setup**. Codespaces usage may be billed by GitHub; the local
 quick start below remains free and keeps all runtime data on your machine.
 
 ## Why
@@ -554,8 +554,12 @@ node ../sandbase-harness/dist/index.js init
 node ../sandbase-harness/dist/index.js start
 ```
 
-Open `http://127.0.0.1:3000/dashboard`, go to **Settings > Models**, paste your
-API key, and you're running.
+Open `http://127.0.0.1:3000/dashboard` and finish the two steps on **Settings >
+Setup**: save your API key in the provider form, restart the runtime when the page
+reports that the saved configuration is not active yet, then set the model ID your
+provider serves in the **Agent models** panel (`deepseek-chat` for DeepSeek, for
+example). An agent carries its own model ID, so the `gpt-4o` that `init` writes is
+not valid for every provider.
 
 The unscoped `managed-agents` name on npm is not this project. Until an
 official scoped package is announced in this repository, install only from the

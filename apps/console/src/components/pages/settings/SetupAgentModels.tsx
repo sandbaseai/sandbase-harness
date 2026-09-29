@@ -93,6 +93,11 @@ export function SetupAgentModels({
         kind: 'error',
         text: error instanceof Error ? error.message : String(error),
       });
+      // A `409` is the stored `version` having moved since this page was
+      // rendered, and this page does not poll: without a refresh the draft stays
+      // pinned to the stale version and the same conflict repeats forever. A
+      // refetch re-reads the agent, so the next save carries the current one.
+      onRefresh();
     } finally {
       setSavingId(null);
     }
@@ -125,7 +130,7 @@ export function SetupAgentModels({
           <AlertTriangle size={15} />
           <span>
             The saved provider key comes from {provider.missingKeyVariables.map((name) => `\`${name}\``).join(', ')},
-            which the runtime does not see. Set it in the environment the runtime was started from, or paste the key
+            which has no value in the runtime's environment. Set it in the environment the runtime was started from, or paste the key
             itself in the form above. A turn sent before that will fail with an error naming the variable.
           </span>
         </div>

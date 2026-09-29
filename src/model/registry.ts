@@ -9,7 +9,7 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { wrapLanguageModel, type LanguageModel, type LanguageModelMiddleware } from 'ai';
-import { EnvVarNotFoundError, resolveEnvVars } from '@/core/config/env-resolver.js';
+import { EnvVarNotFoundError, referencedEnvVars, resolveEnvVars } from '@/core/config/env-resolver.js';
 import { MINIMAX_PROVIDER, miniMaxOpenAiBaseUrl } from '@/core/model/minimax.js';
 import {
   ModelConfigInvalidError,
@@ -164,8 +164,8 @@ export class ModelRegistry {
       );
     }
     const provider = config.provider ?? 'openai';
-    const resolvedApiKey = this.resolveCredential(config.api_key, provider, config.name, 'api_key');
-    const resolvedBaseUrl = this.resolveCredential(config.base_url, provider, config.name, 'base_url');
+    const resolvedApiKey = this.resolveCredential(config.api_key, provider, 'api_key');
+    const resolvedBaseUrl = this.resolveCredential(config.base_url, provider, 'base_url');
 
     const base = createModelInstance(
       provider,
@@ -189,27 +189,40 @@ export class ModelRegistry {
   }
 
   /**
-   * Resolve one provider field, turning an unset `${VAR}` into a named error.
+   * Resolve one provider field, turning a `${VAR}` that supplies nothing into a
+   * named error.
    *
    * Only the model client path is strict. `configState` and `publicBaseUrl` keep
    * reading the same value leniently, which is what lets a caller report *which*
    * variable is missing instead of failing to render the configuration at all.
+   *
+   * Two states supply nothing and both are refused here, because both end with a
+   * client that was built from a credential nobody chose: the variable is unset,
+   * or it is set to the empty string. The settings layer reads the second as
+   * `missing_env` too (`src/core/settings/schema.ts`), so treating it as usable
+   * here would leave the Console reporting a state this path does not act on.
    */
   private resolveCredential(
     value: string | undefined,
     provider: string,
-    modelName: string,
     field: 'api_key' | 'base_url',
   ): string | undefined {
     if (!value) return undefined;
+    let resolved: string;
     try {
-      return resolveEnvVars(value, true);
+      resolved = resolveEnvVars(value, true);
     } catch (error) {
       if (error instanceof EnvVarNotFoundError) {
-        throw new ModelCredentialUnresolvedError(provider, modelName, field, error.varName);
+        throw new ModelCredentialUnresolvedError(provider, field, error.varName);
       }
       throw error;
     }
+    if (resolved === '') {
+      // The whole value resolved to nothing, so every reference in it was empty.
+      const [variable] = referencedEnvVars(value);
+      throw new ModelCredentialUnresolvedError(provider, field, variable ?? value, true);
+    }
+    return resolved;
   }
 
   /**
@@ -373,13 +386,22 @@ function unserviceableNamespaceReason(
 function configState(value?: string): RuntimeConfigState {
   if (!value) return 'not_set';
   const resolved = resolveEnvVars(value, false);
-  return ENV_PLACEHOLDER.test(resolved) ? 'missing_env' : 'configured';
+  // Kept in step with `configState` in `src/core/model/providers.ts`, which
+  // answers the same question for the DB-backed provider list, and with
+  // `secretState` in `src/core/settings/secrets.ts`: a reference to a variable
+  // that is unset *or* empty is a credential no client can use, and the strict
+  // path in `createModelFromConfig` refuses both.
+  if (ENV_PLACEHOLDER.test(resolved) || (ENV_PLACEHOLDER.test(value) && resolved === '')) {
+    return 'missing_env';
+  }
+  return 'configured';
 }
 
 function publicBaseUrl(value?: string): string | undefined {
   if (!value) return undefined;
   const resolved = resolveEnvVars(value, false);
-  return ENV_PLACEHOLDER.test(resolved) ? undefined : resolved;
+  if (ENV_PLACEHOLDER.test(resolved) || (ENV_PLACEHOLDER.test(value) && resolved === '')) return undefined;
+  return resolved;
 }
 
 // ============================================================

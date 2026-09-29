@@ -47,7 +47,7 @@ describe('model_config_invalid', () => {
     // the configuration is unusable and the operator can repair it — so it
     // carries the same code instead of a new one, and inherits both the
     // resumability above and the `not_retryable` disposition a client sees.
-    const error = new ModelCredentialUnresolvedError('openai', 'gpt-4o', 'api_key', 'OPENAI_API_KEY');
+    const error = new ModelCredentialUnresolvedError('openai', 'api_key', 'OPENAI_API_KEY');
 
     expect(error).toBeInstanceOf(ModelResolutionError);
     expect(error.code).toBe(MODEL_CONFIG_INVALID_CODE);

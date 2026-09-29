@@ -122,4 +122,30 @@ describe('A turn whose provider credential variable is not set', () => {
     const messages = resumed.filter((event) => event.type === 'agent.message');
     expect(JSON.stringify(messages)).toContain(STUB_REPLY_TEXT);
   });
+
+  it('refuses a variable that is set to the empty string, which no longer reaches the provider', async () => {
+    // `KEY=""` resolves, so a lenient reading built a client with an empty
+    // credential and the provider's 401 named nothing — the same misdirection as
+    // the placeholder, one step quieter. The settings layer calls the state
+    // `missing_env`; this asserts the turn does too, and that nothing is sent.
+    process.env[CREDENTIAL_VAR] = '';
+    const session = manager.create({ agent: 'agent_b' });
+    await manager.sendEvent(session.id, {
+      type: 'user.message',
+      content: [{ type: 'text', text: 'hi' }],
+    } as never);
+
+    await waitFor(() => manager.get(session.id)!.status === 'paused');
+    const errorEvent = manager
+      .getEventLogger()
+      .getEvents(session.id)
+      .find((event) => event.type === 'session.error');
+    expect(errorEvent).toBeDefined();
+    const error = (errorEvent!.metadata as { error: { type: string; message: string } }).error;
+
+    expect(error.type).toBe('model_config_invalid');
+    expect(error.message).toContain(CREDENTIAL_VAR);
+    expect(error.message).toContain('empty value');
+    expect(stub.requests).toHaveLength(0);
+  });
 });

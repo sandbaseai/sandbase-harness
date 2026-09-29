@@ -134,7 +134,8 @@ describe('Setup agent models panel', () => {
     );
 
     expect(html).toContain('OPENAI_API_KEY');
-    expect(html).toContain('does not see');
+    // The rendered HTML escapes the apostrophe, so assert the fragment before it.
+    expect(html).toContain('has no value in the runtime');
     // The example the official-SDK walkthrough uses, so the guidance matches the
     // documented DeepSeek configuration, with the endpoint's own ids named rather
     // than an OpenAI id that this endpoint does not serve.
