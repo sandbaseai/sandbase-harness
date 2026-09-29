@@ -38,6 +38,8 @@ import {
   normalizeGithubRepositoryResource,
 } from './session-normalizers.js';
 import { isTerminal } from '@/core/session/state-machine.js';
+import { isResourceNotMountableError } from '@/core/resources/resource-mountability.js';
+import { isEnvironmentConfigError } from '@/sandbox/provider-names.js';
 
 /**
  * The core's local mutation code, as the wire spelling for `error.type`.
@@ -91,7 +93,8 @@ export function sessionResourceRoutes(deps: ServerDeps) {
 
   app.post('/:id/resources', async (c) => {
     const sessionId = c.req.param('id')!;
-    if (!requireSession(sessionId)) {
+    const session = requireSession(sessionId);
+    if (!session) {
       return c.json({ error: { type: 'not_found', message: `Session not found: ${sessionId}` } }, 404);
     }
 
@@ -128,6 +131,26 @@ export function sessionResourceRoutes(deps: ServerDeps) {
     const normalized = normalizeResourceForLiveAdd(deps, type, resource);
     if (!normalized.ok) {
       return c.json({ error: { type: 'invalid_request_error', message: normalized.message } }, 400);
+    }
+
+    // Attaching a resource is admitting a mount, so a backend that cannot serve
+    // it is refused here for the same reason creation refuses it: otherwise the
+    // instance is recorded and the failure surfaces at the next provisioning.
+    // Resolving the Environment can also fail on its own — a legacy or damaged
+    // config — and that is the same kind of answer (a request the runtime
+    // declined), so both are mapped here rather than escaping as a 500: this
+    // route is mounted on its own and has no shared error handler.
+    try {
+      deps.sessionManager.assertResourcesMountable(session.environmentId, [normalized.value]);
+    } catch (err) {
+      if (isResourceNotMountableError(err) || isEnvironmentConfigError(err)) {
+        return c.json({ error: {
+          type: 'invalid_request_error',
+          code: (err as Error & { code: string }).code,
+          message: (err as Error).message,
+        } }, 400);
+      }
+      throw err;
     }
 
     const result = addSessionResource(deps.db, {

@@ -333,10 +333,14 @@ a directory under the workspace data directory, so the same bytes are at
 `<data-dir>/sandbox/<session_id>/mnt/session/uploads/notes.txt`. The agent is told
 where the file landed: a session with a file or repository resource carries a
 `# Session Resources` section in its system prompt naming both spellings on the
-`local` backend, so it does not have to guess the path. The container
-backends still refuse that root, so a file resource on `docker` or `kubernetes`
-is accepted and then fails at provisioning; see
-[Mounting a file into a session](api.md#mounting-a-file-into-a-session).
+`local` backend, so it does not have to guess the path. See
+[Mounting a file into a session](api.md#mounting-a-file-into-a-session). The other
+shipped backends do not serve that root — `docker` refuses every absolute path,
+`kubernetes` was never exercised against a cluster, and a `self_hosted` worker
+resolves the path inside its own root — so the runtime refuses the session rather
+than accepting a mount it cannot account for: creating it answers `400` with
+`resource_not_mountable` and writes nothing, so use a `local` environment or
+create the session without the resource.
 
 ## Attach A Memory Store
 
@@ -431,7 +435,8 @@ A refused request throws `ManagedAgentsApiError`, which carries the published
 error envelope's identity as well as its prose: `status`, `type` (for example
 `invalid_request_error`, `not_found`, or `conflict`), and `code` when the
 runtime names a specific cause (`invalid_agent_ref`, `budget_reached`,
-`unsupported_model_field`, and others). Branch on those instead of on the
+`unsupported_model_field`, `resource_not_mountable`, and others). Branch on those
+instead of on the
 message, which is prose and may be reworded:
 
 ```typescript

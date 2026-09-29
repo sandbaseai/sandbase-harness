@@ -58,6 +58,7 @@ import {
   LOOP_ENGINE_INVALID_CODE,
   LOOP_ENGINE_UNSUPPORTED_CODE,
 } from './loop-engine-admission.js';
+import { assertResourcesMountable as assertResourcesMountableOn } from '@/core/resources/resource-mountability.js';
 import type { AgentDefinition, AgentOverrides } from '@/types/agent.js';
 import type { LoopEngineSteerReceipt } from '@/strategy/loop-engine/adapter.js';
 import { agentOverrideError, applyAgentOverrides } from '@/core/agent/overrides.js';
@@ -494,6 +495,11 @@ export class SessionManager {
     // resolve must be refused before the row exists, so a session is never
     // created that can only fail once it tries to provision a sandbox.
     const environmentProvider = this.resolveEnvironmentSandboxProvider(params.environmentId ?? 'env_default');
+    // A mounted resource is written to a canonical absolute in-sandbox path, so a
+    // backend that refuses that path has to be refused here, on the same
+    // before-the-row reasoning: accepting it would promise a mount that only
+    // fails once provisioning reaches the sandbox.
+    this.assertResourcesMountable(params.environmentId ?? 'env_default', params.resources, environmentProvider);
     if (loopEngine === 'pi') {
       assertPiAgentCanExecute(effectiveDefinition);
       assertPiEnvironmentCanExecute(environmentProvider);
@@ -689,6 +695,36 @@ export class SessionManager {
    */
   private assertEnvironmentProviderResolvable(session: Session): void {
     this.resolveEnvironmentSandboxProvider(session.environmentId);
+  }
+
+  /**
+   * Refuse a resource the session's backend cannot serve.
+   *
+   * A `file` or `github_repository` resource is materialized at a canonical
+   * absolute in-sandbox path, so a backend that refuses that path can never serve
+   * it. The refusal is raised before anything is stored — no session row, no
+   * resource instance, no event — because the alternative this replaces is a
+   * session that is accepted and then fails at provisioning, which tells the
+   * caller nothing about the environment they chose.
+   *
+   * Called from creation for both entry points (`POST /v1/sessions` and
+   * `POST /v1/runs`, which creates through the same method) and from the route
+   * that attaches a resource to an existing session.
+   *
+   * The backend is the one the session's Environment resolves to, which is the
+   * same authority creation uses. A session whose sandbox is already bound is not
+   * consulted, so an Environment edited after binding can make this refusal
+   * stricter than the sandbox in hand: that direction is deliberate, because the
+   * alternative is accepting a mount the named backend cannot serve.
+   */
+  assertResourcesMountable(
+    environmentId: string | undefined,
+    resources: ReadonlyArray<Record<string, unknown>> | undefined,
+    /** Backend already resolved by the caller, when it has resolved one. */
+    sandboxProvider?: string,
+  ): void {
+    const provider = sandboxProvider ?? this.resolveEnvironmentSandboxProvider(environmentId ?? 'env_default');
+    assertResourcesMountableOn(resources, provider);
   }
 
   /**

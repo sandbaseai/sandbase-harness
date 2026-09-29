@@ -284,26 +284,35 @@ describe('session resource paths in the system prompt', () => {
     expect(strategy.prompts[0]).not.toContain(SESSION_RESOURCES_HEADING);
   });
 
-  it('announces only the canonical path for a session whose Environment names a container backend', async () => {
+  it('refuses to build the section at all for a session its backend cannot serve', async () => {
+    // A backend that cannot reach the canonical root no longer produces a
+    // misleading announcement — naming a path the mount will never reach — because
+    // the session is refused before a turn, and therefore before any prompt,
+    // exists. The rendering rule this case used to cover (canonical spelling only,
+    // no shell spelling) is pinned where it is reachable, in
+    // `tests/unit/session-resource-prompt.test.ts`; the admission decision, the
+    // status, and the code are pinned in
+    // `tests/integration/resource-admission-refusal.test.ts`.
     const writes: string[] = [];
     addDockerEnvironment('env_docker');
     makeRuntime({ providers: [localProvider, dockerStub(writes)] });
 
     const fileId = await uploadFile('notes.txt', 'attached bytes');
-    const sessionId = await startSession({
+    const refused = await post('/v1/sessions', {
       agent: 'agent_assistant',
       environment_id: 'env_docker',
       resources: [{ type: 'file', file_id: fileId, mount_path: '/notes/input.txt' }],
     });
-    expect(await waitForSettled(sessionId), 'the turn failed').toBeUndefined();
 
-    const prompt = strategy.prompts.at(-1)!;
-    expect(prompt).toContain('- File: `/mnt/session/uploads/notes/input.txt`');
-    // A relative path would name nothing inside the container's own root.
-    expect(prompt).not.toContain('in a shell');
-    // The announced path is the path provisioning asked that backend to write,
-    // so the backend answer did come from this session's Environment.
-    expect(writes).toEqual(['/mnt/session/uploads/notes/input.txt']);
+    expect(refused.status, JSON.stringify(refused.body)).toBe(400);
+    expect(refused.body.error.type).toBe('invalid_request_error');
+    expect(refused.body.error.code).toBe('resource_not_mountable');
+    // No turn was queued and no sandbox was asked to write anything, so nothing
+    // reached the instruction boundary.
+    expect(strategy.prompts).toEqual([]);
+    expect(writes).toEqual([]);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM sessions').get() as { n: number }).n).toBe(0);
+    expect((db.prepare('SELECT COUNT(*) AS n FROM session_resource_instances').get() as { n: number }).n).toBe(0);
   });
 
   it('keeps describing the backend the sandbox was provisioned on after its Environment changes', async () => {

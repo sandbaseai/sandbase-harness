@@ -53,6 +53,7 @@
     "precondition_failed",
     "required",
     "requires_action_timeout",
+    "resource_not_mountable",
     "secret_not_configured",
     "store_full",
     "store_unavailable",

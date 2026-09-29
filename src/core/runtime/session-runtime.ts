@@ -120,7 +120,9 @@ export function createRuntimeSessionServices(options: RuntimeSessionServicesOpti
   // artifact store at once. An embedder that supplies neither still runs; a
   // session that attaches such a resource then fails at provisioning with the
   // missing dependency named, which is the behaviour this wiring replaces for
-  // the started runtime.
+  // the started runtime. Admission is a separate decision, made before anything
+  // is stored: a session on a backend that cannot serve the canonical roots is
+  // refused with `resource_not_mountable`.
   const fileArtifactReader = options.fileArtifactReader
     ?? createFileArtifactReader(options.db, options.artifactStore);
   const githubMaterializer = options.githubMaterializer

@@ -42,7 +42,7 @@
       {
         "name": "session",
         "type": "object",
-        "description": "Session fields applied at creation: title, resources, vault_ids, metadata."
+        "description": "Session fields applied at creation: title, resources, vault_ids, metadata. A file or github_repository resource on an environment whose sandbox_provider cannot serve the canonical mount roots (docker, kubernetes, self_hosted) is refused with resource_not_mountable before the session is created."
       }
     ],
     "response": [

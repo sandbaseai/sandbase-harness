@@ -378,11 +378,13 @@ describe('session resource wiring at the composition root', () => {
     expect(prompt).toContain('# Available Skills');
   });
 
-  it('still refuses the canonical file mount root on the container backends', () => {
-    // The remaining gap, pinned so that fixing it forces the capability matrix
-    // and its contracts to move rather than leaving a stale `partial` behind.
+  it('rejects the canonical file mount root in the provider path checks', () => {
+    // Why the admission decision in
+    // `tests/integration/resource-admission-refusal.test.ts` refuses a file
+    // resource on these backends: the path functions they actually call cannot
+    // take the canonical root.
     //
-    // The local backend reaches the canonical roots now
+    // The local backend reaches the canonical roots
     // (`tests/integration/local-canonical-roots.test.ts` drives the same paths
     // through the real provider). These two do not: docker resolves every path
     // relative to its own `/workspace` and refuses an absolute one, and
@@ -390,22 +392,25 @@ describe('session resource wiring at the composition root', () => {
     // upload root outside it. Both are the functions the providers actually call
     // (`tests/integration/docker-sandbox.test.ts` and the kubernetes suites drive
     // them through a session), and both are pure, so the refusal is pinned without
-    // a daemon or a reachable cluster.
+    // a daemon or a reachable cluster. If either starts accepting the root, this
+    // fails and the refusal table in `src/core/resources/resource-mountability.ts`
+    // has to be revisited.
     expect(() => dockerWorkspacePath('/mnt/session/uploads/notes/input.txt'))
       .toThrow('Docker sandbox paths must stay inside /workspace');
     expect(() => resolveWorkspacePath('/mnt/session/uploads/notes/input.txt'))
       .toThrow('Path escapes sandbox workspace');
   });
 
-  it('still refuses the canonical repository mount root on docker, and kubernetes still accepts it', () => {
-    // The repository half of the same gap: the materializer copies its tree
+  it('rejects the canonical repository mount root on docker, while kubernetes accepts it', () => {
+    // The repository half of the same decision: the materializer copies its tree
     // through the sandbox at the mount path the route resolved, so a backend that
     // will not take `/workspace/...` cannot mount a repository there. Docker does
-    // not; kubernetes resolves it inside its own `/workspace` and does accept it,
-    // which is why the repository entry's recorded blocker names docker rather
-    // than "the container backends". Pinning the acceptance means the opposite
-    // change — kubernetes starting to refuse the root — also fails here instead of
-    // silently leaving a wrong sentence in the contract.
+    // not; kubernetes resolves it inside its own `/workspace` and does accept it.
+    // Both backends are still refused at creation, because accepting the
+    // repository root is not serving a session's resources — kubernetes refuses the
+    // upload root, and no cluster was available to exercise either root — so this
+    // case records the provider facts the refusal rests on rather than a
+    // capability gap.
     expect(() => dockerWorkspacePath('/workspace/widget'))
       .toThrow('Docker sandbox paths must stay inside /workspace');
     expect(resolveWorkspacePath('/workspace/widget')).toBe('/workspace/widget');

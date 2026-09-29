@@ -53,6 +53,7 @@
     "precondition_failed": ["src/core/memory/mount-adapter.ts", "src/core/memory/semantics.ts"],
     "required": ["src/core/settings/schema.ts"],
     "requires_action_timeout": ["src/core/session/parked-wait.ts"],
+    "resource_not_mountable": ["src/core/resources/resource-mountability.ts"],
     "secret_not_configured": ["src/core/settings/schema.ts"],
     "store_full": ["src/core/memory/mount-adapter.ts", "src/core/memory/semantics.ts"],
     "store_unavailable": ["src/core/memory/mount-adapter.ts"],

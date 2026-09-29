@@ -291,8 +291,8 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
   {
     area: 'github-repository',
     id: 'github-repository-materialization',
-    status: 'partial',
-    reason: 'The composition root injects the materializer, the clone is copied through the sandbox at the canonical `/workspace/<repo>` root, and the executor reads each discovered SKILL.md back out of the sandbox: on the local backend, which maps that root into its sandbox directory, an attached repository is cloned, checked out, its skills reach the system prompt, and the mount path, URL, and checkout are named in the agent\'s instructions. What is still missing is the rest of the published contract: the docker backend refuses an absolute path, so a session on docker is accepted and then fails at provisioning instead of being refused when it is created. The kubernetes backend resolves an absolute path inside its own `/workspace` and so accepts this mount, but that was not exercised against a cluster. Not `supported` until a session the selected backend cannot serve is refused when it is created.',
+    status: 'supported',
+    reason: 'The composition root injects the materializer, the clone is copied through the sandbox at the canonical `/workspace/<repo>` root, and the executor reads each discovered SKILL.md back out of the sandbox: on the `local` backend, which maps that root into its sandbox directory, an attached repository is cloned, checked out, its skills reach the system prompt, and the mount path, URL, and checkout are named in the agent\'s instructions. A session whose Environment selects a backend that cannot serve that root is refused when it is created, with `resource_not_mountable`, so no session is admitted that could only fail at provisioning. The supported scope is `local`: `docker` refuses every absolute path, `kubernetes` was never exercised against a cluster, and `self_hosted` resolves the path inside the worker\'s own root, so all three are refused at creation rather than served.',
     contract: 'contracts/anthropic-cma/github-repository.md',
   },
   {
@@ -305,8 +305,8 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
   {
     area: 'files',
     id: 'file-resources',
-    status: 'partial',
-    reason: 'Upload, list, read, resource identity, and canonical mount-path derivation are implemented and tested, and the composition root now injects a reader built from the database and the artifact store, so an attached file is written at provisioning. On the local backend, which maps the canonical `/mnt/session/uploads` root into its sandbox directory, the bytes land where the resource says they are, are readable through the same path, and the mount path is named in the agent\'s instructions in both the canonical and the shell-usable spelling. What is still missing is the rest of the published contract: the docker and kubernetes backends refuse the canonical root — docker refuses every absolute path, kubernetes resolves it against its own `/workspace` — so a session on either is accepted and then fails at provisioning instead of being refused when it is created. Not `supported` until a session the selected backend cannot serve is refused when it is created.',
+    status: 'supported',
+    reason: 'Upload, list, read, resource identity, and canonical mount-path derivation are implemented and tested, and the composition root injects a reader built from the database and the artifact store, so an attached file is written at provisioning. On the `local` backend, which maps the canonical `/mnt/session/uploads` root into its sandbox directory, the bytes land where the resource says they are, are readable through the same path, and the mount path is named in the agent\'s instructions in both the canonical and the shell-usable spelling. A session whose Environment selects a backend that cannot serve that root is refused when it is created, with `resource_not_mountable`, so no session is admitted that could only fail at provisioning. The supported scope is `local`: `docker` refuses every absolute path, `kubernetes` rejects the upload root and was never exercised against a cluster, and `self_hosted` resolves the path inside the worker\'s own root, so all three are refused at creation rather than served.',
     contract: 'contracts/anthropic-cma/files.md',
   },
   {

@@ -590,17 +590,25 @@ A `file` and a `github_repository` resource are both materialized at provisionin
 into the canonical roots the runtime reserves for them
 (`/mnt/session/uploads/...` and `/workspace/<repo>`). The `local` backend maps
 those roots into the session's sandbox directory, so on a local session the
-resource is written where the resource says it is. The container backends have no
-such mapping: `docker` refuses every absolute path, so both resources fail there;
-`kubernetes` resolves an absolute path against its own `/workspace`, which accepts
-a repository mount and refuses the upload root, so a file resource fails there. In
-either case the session is accepted and then fails at provisioning. The mount path
+resource is written where the resource says it is. The other shipped backends do
+not serve those roots, so the runtime does not accept the session at all: `docker`
+refuses every absolute
+path, `kubernetes` resolves an absolute path against its own `/workspace` and so
+refuses the upload root (and its acceptance of the repository root was never
+exercised against a cluster), and a `self_hosted` worker resolves the path inside
+its own root, which the runtime can neither verify nor enforce. A
+session that declares either resource on one of those three is refused when it is
+created, with `resource_not_mountable` and `400`, and nothing is created — no
+session row, no resource instance, no event — so the failure names the backend
+and the resource instead of surfacing at provisioning. The same refusal applies to
+attaching a resource to an existing session
+(`POST /v1/sessions/{id}/resources`). The mount path
 is named in the agent's instructions — see
-[Session resources](#session-resources) — but announcing it is not enough on a
-backend that will not accept it. See
+[Session resources](#session-resources). See
 [Mounting a file into a session](#mounting-a-file-into-a-session) for the file
 case and `contracts/anthropic-cma/github-repository.md` for the repository case;
-both capabilities are recorded as `partial`.
+both capabilities are recorded as `supported` for the `local` backend, which is
+the backend that serves them.
 
 Only `user.*` events can be appended by clients:
 
@@ -982,12 +990,18 @@ with the turn still working, the answer is 202 with the query handle and
 timeout: the session keeps running and its terminal state is not pre-empted.
 
 The optional `session` object applies session fields at creation: `title`,
-`resources`, `vault_ids`, and `metadata`.
+`resources`, `vault_ids`, and `metadata`. A `file` or `github_repository` in
+`session.resources` is admitted on the same terms as session creation, so a run on
+an environment whose `sandbox_provider` cannot serve the canonical mount roots
+(`docker`, `kubernetes`, `self_hosted`) is refused with `400` and code
+`resource_not_mountable` before the session row exists.
 
 A refusal that happens before a turn starts is answered with its own status
 rather than as a runtime fault: an unavailable engine returns
 `loop_engine_not_supported`, an unknown value returns `loop_engine_invalid`,
-and an unknown agent returns 404. A failure raised while waiting or streaming is
+an unresolvable environment returns its own configuration code, a resource its
+backend cannot mount returns `resource_not_mountable`, and an unknown agent
+returns 404. A failure raised while waiting or streaming is
 recorded once into the session's event log as `session.error`, so it replays
 from `GET /v1/sessions/{id}/events` exactly like one the turn loop recorded
 itself.
@@ -1346,11 +1360,15 @@ is the one recorded when the session's sandbox was provisioned, so editing an
 Environment's `sandbox_provider` after a session is bound does not change what
 that session's instructions say: the sandbox in hand is the one serving it.
 The container backends still do not mount it: `docker` rejects an absolute path
-outright and `kubernetes` rejects anything outside `/workspace`, so a session that
-attaches a file resource on one of those is accepted and then fails at
-provisioning (`Path escapes sandbox workspace`). A `self_hosted` worker is handed
-the path and decides for itself. The capability is recorded as `partial` in
-`contracts/anthropic-cma/files.md` for the container refusal.
+outright and `kubernetes` rejects anything outside `/workspace`. A session that
+attaches a file resource on one of those, or on a `self_hosted` worker (which
+resolves the path inside its own root), is refused
+when it is created with `resource_not_mountable` and `400`, before any record
+exists, instead of being accepted and failing at provisioning
+(`Path escapes sandbox workspace`). The same refusal answers an attempt to attach
+the resource to an existing session on such a backend. The capability is recorded
+as `supported` for the `local` backend in `contracts/anthropic-cma/files.md`,
+which is the scope the entry states.
 
 ## Session Artifacts
 
@@ -1418,6 +1436,24 @@ from one session leaves it attached to every other session that holds it.
 A resource passed in a session's `resources` at creation is recorded as an
 instance in the same call, so it appears in the list above immediately and can
 be addressed by id; attaching one to an existing session uses the `POST` route.
+A `file` or `github_repository` resource is materialized at a canonical absolute
+in-sandbox path, so a session whose Environment selects a backend that cannot
+serve that path (`docker`, `kubernetes`, `self_hosted`) is refused with `400` and
+code `resource_not_mountable` — at creation, and on the `POST` route above — and
+nothing is written: no session row, no resource instance, no event. The message
+names the backend, the resource type, and the alternative, so the caller does not
+have to reproduce a provisioning failure to learn what to change. The backend
+decided on is the one the session's Environment names — the same authority
+creation uses — so an Environment edited after a sandbox was bound can refuse a
+resource that the bound sandbox could serve, and, the other way round, can accept
+one that the bound sandbox will refuse at its next provisioning: the decision
+follows the Environment, not the sandbox in hand, so the refusal is conservative
+only when the Environment is the stricter of the two. Binding a session to a
+sandbox and re-reading the Environment on every attachment are both deliberate;
+the alternative would be accepting a mount the named backend cannot serve. An
+Environment that cannot be resolved at all — a damaged config or a legacy
+`hosting_type: "cloud"` row — is answered with its own `400` and code
+(`unsupported_hosting_type`), not a `500`, on this route as on creation.
 A `memory_store` resource can only be attached when the session is created,
 because memories are part of the context the session was built with; attaching
 one later is refused with `400 invalid_request_error`, and a `memory_store`
@@ -2370,7 +2406,7 @@ call instead of inferring one from the other:
   "contract": {
     "type": "capability_matrix",
     "statuses": ["supported", "partial", "unavailable", "planned", "not_applicable", "unverified"],
-    "summary": { "supported": 28, "partial": 10, "unavailable": 2, "planned": 0, "not_applicable": 3, "unverified": 1 },
+    "summary": { "supported": 31, "partial": 10, "unavailable": 5, "planned": 0, "not_applicable": 2, "unverified": 1 },
     "capabilities": [
       {
         "area": "capabilities",

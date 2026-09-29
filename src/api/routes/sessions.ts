@@ -39,6 +39,7 @@ import { normalizeDefineOutcome, normalizeInitialEvents } from './initial-events
 import { isBudgetError, parseSessionBudget, BUDGET_ERROR_CODES } from '@/core/session/session-budget.js';
 import { isOutcomeGraderUnavailableError } from '@/core/outcomes/loop.js';
 import { isPiSessionAdmissionError } from '@/core/session/pi-policy.js';
+import { isResourceNotMountableError } from '@/core/resources/resource-mountability.js';
 import { isEnvironmentConfigError } from '@/sandbox/provider-names.js';
 import {
   isLoopEngineAdmissionError,
@@ -162,6 +163,13 @@ export function sessionsRoutes(deps: ServerDeps) {
           code: err.code,
           message: err.message,
         } }, 400);
+      }
+      // A resource the session's own Environment cannot serve is refused before
+      // the session row exists, on the same reasoning as the Environment refusal
+      // below: the caller asked for something this backend cannot materialize,
+      // and a `201` would only move the failure to provisioning.
+      if (isResourceNotMountableError(err)) {
+        return invalidWithCode(c, err.code, err.message);
       }
       // An Environment this runtime cannot resolve is refused here, before the
       // session row exists. It is a configuration fault in the request's target,

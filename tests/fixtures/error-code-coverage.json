@@ -54,6 +54,7 @@
     "precondition_failed": ["tests/integration/memory-mounts.test.ts", "tests/unit/memory-semantics-wiring.test.ts", "tests/unit/memory-semantics.test.ts"],
     "required": ["tests/integration/api.test.ts", "tests/integration/sdk-settings-resource.test.ts", "tests/unit/settings.test.ts"],
     "requires_action_timeout": ["tests/unit/parked-wait.test.ts"],
+    "resource_not_mountable": ["tests/integration/resource-admission-refusal.test.ts", "tests/integration/session-resources-prompt.test.ts", "tests/unit/capability-matrix.test.ts", "tests/unit/resource-mountability.test.ts"],
     "secret_not_configured": ["tests/integration/api.test.ts", "tests/unit/settings.test.ts"],
     "store_full": ["tests/unit/memory-semantics.test.ts"],
     "store_unavailable": ["tests/unit/memory-mount-store-unavailable.test.ts"],

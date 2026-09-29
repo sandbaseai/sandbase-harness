@@ -42,7 +42,7 @@
       {
         "name": "resources",
         "type": "array",
-        "description": "Files, GitHub repositories, or memory stores mounted into the session."
+        "description": "Files, GitHub repositories, or memory stores mounted into the session. A file or github_repository on an environment whose sandbox_provider cannot serve the canonical mount roots (docker, kubernetes, self_hosted) is refused with resource_not_mountable before the session is created."
       },
       {
         "name": "vault_ids",
@@ -324,7 +324,7 @@
     "title": "Add a session resource",
     "method": "POST",
     "path": "/v1/sessions/{session_id}/resources",
-    "summary": "Attach a file or github_repository resource to a running session. A memory_store can only be attached when the session is created, because memories are part of the context the session was built with.",
+    "summary": "Attach a file or github_repository resource to a running session. A memory_store can only be attached when the session is created, because memories are part of the context the session was built with. A backend that cannot serve the canonical mount roots (docker, kubernetes, self_hosted) refuses this with resource_not_mountable and records nothing.",
     "parameters": [
       {
         "name": "type",

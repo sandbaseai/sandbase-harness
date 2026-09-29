@@ -72,12 +72,14 @@ under this directory, and the real mount graph to the same facts:
   must name an existing test in §6;
 - a capability the composition root has to wire cannot be `supported` while
   nothing wires it, and cannot stay below `supported` once something does and no
-  recorded blocker remains. When a wired capability is still `partial` for a
-  reason outside the composition root — the container backends refusing the
-  canonical mount roots, for the two session-resource entries, and those refusals
-  not yet being admission decisions — the reason and the canary that pins it
-  are recorded beside the wiring symbol, and the guard fails if the status moves
-  to `supported` while that canary still pins the gap;
+  recorded blocker remains. A wired capability that is still `partial` for a
+  reason outside the composition root records that reason and a canary test
+  pinning it beside the wiring symbol, and the guard fails if the status moves to
+  `supported` while that canary still pins the gap. The two session-resource
+  entries were that case — their symbols were wired while the container backends
+  refused the canonical mount roots and the refusal was not yet an admission
+  decision — and are now `supported`, with both the canaries and the blockers
+  removed together, because creation-time refusal closed the gap they recorded;
 - the routes listed in `routes.md` and the routes the server mounts are the same
   set of `method + path` pairs.
 

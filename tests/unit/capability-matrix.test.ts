@@ -112,23 +112,25 @@ describe('capability matrix', () => {
     // the canonical agent/session surface, so they are exactly the entries a
     // matrix drifts away from. Pinning them keeps "covered by a contract file"
     // and "present in the matrix" the same fact.
-    // The materializer and the file mount are implemented and tested, and the
-    // composition root injects both, so a session that declares one reaches
-    // them. The local backend now reaches the canonical in-sandbox roots the
-    // provisioning pass writes to and the agent is told which path its resource
-    // landed at, so a local session materializes and announces its resources.
-    // What keeps the entries `partial` is the rest of the claim: the container
-    // backends still refuse those roots, and such a session is accepted and then
-    // fails at provisioning instead of being refused when it is created.
-    // `supported` here was the drift this work item exists to remove: the helper
-    // worked and the capability was unreachable.
-    expect(capabilityEntry('github-repository-materialization').status).toBe('partial');
-    expect(capabilityEntry('github-repository-materialization').reason.toLowerCase())
-      .toContain('canonical `/workspace/<repo>` root');
+    // The materializer and the file mount are implemented and tested, the
+    // composition root injects both, the local backend reaches the canonical
+    // in-sandbox roots the provisioning pass writes to, the agent is told which
+    // path its resource landed at, and a session whose Environment selects a
+    // backend that cannot serve those roots is now refused when it is created
+    // with `resource_not_mountable`. The four conditions of the completion
+    // standard are met, so both entries are `supported` with the scope stated:
+    // `local` serves them, and the other shipped backends are refused.
+    const repository = capabilityEntry('github-repository-materialization');
+    expect(repository.status).toBe('supported');
+    expect(repository.reason.toLowerCase()).toContain('canonical `/workspace/<repo>` root');
+    expect(repository.reason).toContain('resource_not_mountable');
+    expect(repository.reason).toContain('`local`');
     expect(capabilityEntry('github-repository-identity-freeze').status).toBe('supported');
-    expect(capabilityEntry('file-resources').status).toBe('partial');
-    expect(capabilityEntry('file-resources').reason.toLowerCase())
-      .toContain('canonical `/mnt/session/uploads` root');
+    const files = capabilityEntry('file-resources');
+    expect(files.status).toBe('supported');
+    expect(files.reason.toLowerCase()).toContain('canonical `/mnt/session/uploads` root');
+    expect(files.reason).toContain('resource_not_mountable');
+    expect(files.reason).toContain('`local`');
     // Webhooks and scheduled deployments *are* covered by the published
     // contract (delivery behaviour, deployment lifecycle), so they are not
     // extensions and cannot be claimed as plain `supported` while the delivery

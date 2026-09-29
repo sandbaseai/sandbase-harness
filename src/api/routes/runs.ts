@@ -5,6 +5,7 @@ import { toApiEvent } from '../standard.js';
 import type { ContentBlock, UserEvent } from '@/types/cma-protocol.js';
 import type { Session, SessionEvent, CreateSessionParams, SessionLoopEngine } from '@/types/session.js';
 import { isPiSessionAdmissionError } from '@/core/session/pi-policy.js';
+import { isResourceNotMountableError } from '@/core/resources/resource-mountability.js';
 import { isEnvironmentConfigError } from '@/sandbox/provider-names.js';
 import { isLoopEngineAdmissionError, resolveRequestedLoopEngine } from '@/core/session/loop-engine-admission.js';
 import { createSessionEventQueue, isMessageStreamTerminalEvent } from './session-stream.js';
@@ -102,7 +103,12 @@ export function runsRoutes(deps: ServerDeps) {
  * `recordErrorOnce`), never with a fabricated one.
  */
 function respondAdmissionError(c: any, err: unknown) {
-  if (isLoopEngineAdmissionError(err) || isPiSessionAdmissionError(err) || isEnvironmentConfigError(err)) {
+  if (
+    isLoopEngineAdmissionError(err)
+    || isPiSessionAdmissionError(err)
+    || isEnvironmentConfigError(err)
+    || isResourceNotMountableError(err)
+  ) {
     const code = (err as { code: string }).code;
     return c.json({ error: { type: 'invalid_request_error', code, message: (err as Error).message } }, 400);
   }

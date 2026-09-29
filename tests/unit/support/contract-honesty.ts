@@ -61,23 +61,19 @@ export interface WiringRequirement {
   /**
    * The reason a wired capability is still `partial`, and the canary pinning it.
    *
-   * These two capabilities are the case the wiring rule alone gets wrong. Both
-   * symbols are injected by the composition root now, so "wired" no longer
-   * implies "reachable": a session's resources are materialized through the
-   * selected sandbox backend. The local backend reaches the canonical in-sandbox
-   * roots the lifecycle writes to, so a session there does materialize what it
-   * declared and the agent is told where it landed; docker still refuses them
-   * (kubernetes accepts the repository root and refuses the upload root), and the
-   * published contract asks for a session the selected backend cannot serve to be
-   * refused when it is created rather than fail at provisioning. The runtime
-   * reaches the code and part of the claim is still unhonoured, which is exactly
-   * what `partial` means.
+   * Some capabilities are reachable in code and still short of the published
+   * contract — the canonical resource mounts were the case that introduced this
+   * field: their symbols were injected by the composition root, yet a session
+   * whose selected sandbox backend refused the canonical roots was accepted and
+   * failed at provisioning. `partial` is the honest status while a wired
+   * capability has such a gap.
    *
    * Recording the blocker as a marker in the test that demonstrates it keeps the
-   * status honest in both directions. The canary fails first when a backend is
-   * fixed, and this guard fails if the status moves to `supported` while the
-   * canary still pins the gap — or if the canary is gone and the status has not
-   * moved.
+   * status honest in both directions: the canary fails first when the gap is
+   * closed, and this guard fails if the status moves to `supported` while the
+   * canary still pins it — or if the canary is gone and the status has not moved.
+   * A blocker is therefore removed only together with the status it justified,
+   * which is what happened when creation-time refusal replaced the gap.
    */
   blocker?: { file: string; symbol: string; detail: string };
 }
@@ -86,20 +82,10 @@ export const PRODUCTION_WIRING: Readonly<Record<string, WiringRequirement>> = {
   'github-repository-materialization': {
     file: 'src/core/runtime/session-runtime.ts',
     symbol: 'githubMaterializer',
-    blocker: {
-      file: 'tests/integration/session-resource-wiring.test.ts',
-      symbol: 'still refuses the canonical repository mount root on docker, and kubernetes still accepts it',
-      detail: 'the docker sandbox backend refuses the canonical /workspace mount root',
-    },
   },
   'file-resources': {
     file: 'src/core/runtime/session-runtime.ts',
     symbol: 'fileArtifactReader',
-    blocker: {
-      file: 'tests/integration/session-resource-wiring.test.ts',
-      symbol: 'still refuses the canonical file mount root on the container backends',
-      detail: 'the docker and kubernetes sandbox backends refuse the canonical /mnt/session/uploads mount root',
-    },
   },
   'local-delegation-subagent': {
     file: 'src/core/session/delegation-service.ts',
