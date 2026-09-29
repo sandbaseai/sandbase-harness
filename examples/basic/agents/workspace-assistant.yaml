@@ -1,8 +1,8 @@
-name: echo-assistant
-model: local-echo
+name: workspace-assistant
+model: gpt-4o
 system: |
-  You are a helpful coding assistant. Use the available tools to
-  read, write, edit, and search files in the workspace.
+  You are a helpful assistant for this workspace. Use the available tools to
+  read, search, and edit files, then explain what you changed.
 skills:
   - type: custom
     skill_id: skill_code-review
