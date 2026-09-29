@@ -24,22 +24,91 @@ Memory、凭证、审计日志、事件回放和可视化 Console 放在同一�
 
 MCP Bridge 容器镜像：[GitHub Container Registry](https://github.com/orgs/sandbaseai/packages/container/package/sandbase-harness-mcp)。
 
-## 从使用场景开始
+## 五分钟快速开始
 
-参见[场景展示](docs/showcase.zh-CN.md)，了解可审计 Coding Agent、以 DeepSeek
-Harness 为交互前端，以及 Local、Docker、Kubernetes、自托管沙箱的受控代码执行。
+要求：Node.js 22+、npm 10+，以及一个模型提供者 API Key（OpenAI、Anthropic、
+MiniMax 或任意 OpenAI-compatible 端点）。Docker 可选，只有使用 Docker 沙箱时
+才需要。
 
-社区实践讨论：
+~~~bash
+git clone --branch v0.3.8 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+cd sandbase-harness
+npm ci
+npm run build
 
-- [Codex、Claude Code 与 DSH 的 Memory 迁移](https://github.com/deepseek-ai/deepseek-harness/discussions/14#discussioncomment-18202967)
-- [第三方插件的沙箱与文件系统防护](https://github.com/deepseek-ai/deepseek-harness/discussions/5068#discussioncomment-18202943)
+mkdir ../my-agents && cd ../my-agents
+node ../sandbase-harness/dist/index.js init
+node ../sandbase-harness/dist/index.js start
+~~~
 
-> 官方 MCP Registry：[io.github.sandbaseai/sandbase-harness](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.sandbaseai%2Fsandbase-harness)（状态：`active`）
+`init` 会在你执行命令的目录里生成工作区：一个 Agent、一个 Skill 目录，以及
+把提供者写成 `${OPENAI_API_KEY}` 引用的 `config.yaml`。`start` 在
+<http://127.0.0.1:3000> 上同时提供 API 和 Console。
 
-> 如果只需要轻量接入而不需要完整 Runtime，可使用 [SandBase CLI](https://github.com/sandbaseai/cli)：
-> 它通过本地 stdio MCP Bridge，将 25 个 AI 客户端目标连接到 2,000+ 模型与 API。
-> 如果它适合你的工作流，欢迎[为 SandBase CLI 点个 Star](https://github.com/sandbaseai/cli/stargazers)，
-> 帮助更多 Agent 用户发现它。
+打开 <http://127.0.0.1:3000/dashboard>，在 **Settings > Setup** 上完成两步：
+
+1. **提供者。** 在提供者表单里粘贴 API Key 并保存。页面随后会提示保存的配置尚未
+   生效：用 Ctrl+C 停掉运行时、再执行一次 `start`，或者用页面上的重启按钮。
+   保存的设置只在启动时生效。如果列表里没有你的提供者，选择
+   OpenAI-compatible，并填上它的 base URL。
+2. **模型。** 在 **Agent models** 面板里填你的提供者真正提供的模型 ID（例如
+   DeepSeek 用 `deepseek-chat`）。模型 ID 属于 Agent 本身，`init` 写入的
+   `gpt-4o` 并非每个提供者都能用；ID 不对时该回合会以 `model_not_found` 失败。
+
+发第一条消息：打开 **Sessions**，为这个 Agent 新建会话，在输入框里发消息。也可以
+在终端里用一条命令：
+
+~~~bash
+node ../sandbase-harness/dist/index.js chat agent_assistant --message "你好" --tool-approval allow
+~~~
+
+`chat` 发完这一条消息、回合结束就退出；不带 `--message` 时才会保持会话打开，
+持续输出直到你按 Ctrl+C。`--tool-approval allow` 事先授权 Agent
+可能发起的工具调用；`init` 模板默认会把这些调用挂起等待人工确认。其余命令见
+[CLI](README.md#cli)。
+
+npm 上未加 scope 的 managed-agents **不是**本项目。在本仓库公布官方 scoped 包之前，
+请只使用上面带标签的 GitHub 源码安装。不要运行 npx managed-agents 或
+npm install managed-agents。
+
+### 在 Codespaces 中试用
+
+[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/sandbaseai/sandbase-harness?quickstart=1)
+
+仓库内置的开发容器会自动安装依赖并构建运行时。终端准备完成后，在转发端口上启动服务：
+
+```bash
+node dist/index.js start --host 0.0.0.0
+```
+
+打开转发的 **SandBase Harness Console** 端口，然后在 **Settings > Setup**
+中配置模型。GitHub 可能会对 Codespaces 用量计费；上方的本地快速开始仍然免费，
+并会把全部运行时数据保存在你的机器上。
+
+## 使用官方 SDK
+
+运行时的 `/v1` API 就在同一个端口上，官方 Anthropic TypeScript SDK 客户端可以
+原样驱动它：把客户端的 `baseURL` 指向运行时、填上运行时 API Key，
+[`examples/official-sdk`](examples/official-sdk/README.md) 里的快速开始就会跑完
+一个完整回合——发消息、工具调用、工具结果、最终回复。该示例由
+`tests/conformance/official-sdk-quickstart.test.ts` 在每次 PR 上真实执行，
+所以这里描述的是被测试过的兼容性，而不是声明出来的兼容性。
+
+同一套接口的规范见 [docs/api.md](docs/api.md)；本仓库自带的 TypeScript SDK 见下文
+[SDK](#使用官方-sdk)。
+
+## 文档
+
+- [机器可读项目元数据](./llms.txt)
+- [Agent / MCP 安装指南](./llms-install.md)
+- [安装](./docs/installation.md)
+- [使用指南](./docs/usage.md)
+- [API](./docs/api.md)
+- [Skill](./docs/skills.md)
+- [部署示例](./docs/deployment.md)
+- [DeepSeek V4](./docs/deepseek-v4.md)
+- [MiniMax](./docs/minimax.md)
+- [系统设计](./docs/spec/design.md)
 
 ## 为什么需要它
 
@@ -54,288 +123,6 @@ Harness 为交互前端，以及 Local、Docker、Kubernetes、自托管沙箱�
 SandBase Harness 提供这层运行时基础设施。它不是可视化工作流编辑器，
 也不替代模型 SDK。
 
-如果它解决了你的真实 Agent 基础设施问题，欢迎
-[为仓库点 Star](https://github.com/sandbaseai/sandbase-harness)，帮助更多开发者发现它。
-
-## 发现 SandBase Harness
-
-项目也可以通过以下独立生态目录发现：
-
-- [官方 MCP Registry](https://registry.modelcontextprotocol.io/v0.1/servers?search=io.github.sandbaseai%2Fsandbase-harness)
-- [deepseek-plugin.org](https://deepseek-plugin.org/plugins/sandbaseai/sandbase-harness)
-- [DeepseekPlugin](https://deepseekplugin.org/plugins/sandbaseai-sandbase-harness)
-- [DSH Plugin Directory](https://dshplugin.app/plugins/sandbase-harness)
-- [DSH Plugin Hub](https://dshpluginhub.dev/en/plugins/sandbaseai/sandbase-harness)
-- [DSH Directory](https://dsh.directory/plugins/sandbaseai/sandbase-harness)
-- [DSH Harness](https://dsharness.io/en/plugins?search=sandbase-harness)
-- [DSH Plugin](https://dshplugin.me/?q=sandbase-harness)
-- [DSH Plugin](https://dsh-plugin.org/plugins/sandbaseai/sandbase-harness)
-- [dsh.so 信任与发现目录](https://www.dsh.so/zh/artifact/sandbase-harness/)
-- [DeepSeek Harness Hub](https://deepseek-harness-hub.com/plugins/sandbase-harness/) — 社区发现页面；当前元数据仍为过期的 v0.3.4，请以[官方安装文档](https://github.com/sandbaseai/sandbase-harness/blob/main/docs/installation.md)为准
-- [Duink DSH Universe](https://duink.com/plugins/1297278222/)
-- [DSH Plugin Leaderboard](https://dshpluginleaderboard.com/)
-- [Awesome 仓库索引](https://awesome.lvtd.dev/repos/?topic=dsh-plugin)
-- [Awesome DSH Plugin](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin)
-- [Awesome DeepSeek Harness](https://github.com/0xsline/awesome-deepseek-harness)
-- [Awesome DeepSeek Harness — 生态列表](https://github.com/fendouai/awesome-deepseek-harness)
-- [DSHarness 101 插件雷达](https://dsharness101.com/plugins/)
-- [DeepSeekDocs 生态目录](https://deepseekdocs.com/en/ecosystem)
-- [Awesome Agents](https://github.com/kyrolabs/awesome-agents)
-- [Sifted Awesome AI Agents — 已验证 Agent Runtime 收录](https://github.com/sifted-network/sifted-awesome-ai-agents/blob/main/top100/Agent%20Runtime.md)
-- [Arnon-hs Open Source / AtlasRepo — 已验证 MCP 收录](https://github.com/Arnon-hs/open-source/blob/main/mcp/sandbaseai-sandbase-harness.md)
-- [Sagargupta16 Awesome MCP Servers — 已合并收录](https://github.com/Sagargupta16/awesome-mcp-servers/pull/79)
-- [Adventure Wave Awesome Agent Security — 已合并收录](https://github.com/adventurewave-labs/awesome-agent-security/pull/2)
-- [Arnon-hs Open Source — MCP 项目](https://github.com/Arnon-hs/open-source/blob/main/mcp/README.md)
-- [SandBase Awesome Agent Runtime](https://github.com/sandbaseai/awesome-agent-runtime)
-- [WalkingLabs Awesome Harness Engineering — 已合并收录](https://github.com/walkinglabs/awesome-harness-engineering/pull/76)
-- [Awesome Native Agent Platforms — 已合并 Harness 条目](https://github.com/sandbaseai/awesome-native-agent-platforms/pull/1)
-- [Yenanjing Awesome Harness Engineering PR #6 — 等待审核](https://github.com/yenanjing/awesome-harness-engineering/pull/6)
-- [abordage/awesome-mcp](https://github.com/abordage/awesome-mcp)
-- [cccakeee/awesome-dsh-plugins](https://github.com/cccakeee/awesome-dsh-plugins)
-- [anbeime/skill — Skills 索引](https://github.com/anbeime/skill)
-- [Awesome DeepSeek Harness Plugins](https://github.com/Zhiyuan-Fan/Awesome-DeepSeek-Harness-Plugins)
-- [Hermes Ecosystem — SandBase 技术栈](https://github.com/ksimback/hermes-ecosystem/blob/main/projects/sandbaseai/cli.html)
-- [AgentStack](https://www.agentstack.live/mcp/io.github.sandbaseai/sandbase-harness)
-- [HVTracker](https://hvtracker.net/agents/sandbase-harness/)：独立自动生成的 Agent Frameworks 项目档案与排名快照，不代表维护者审核或安全认证。
-- [MCP Servers Live](https://linny006.github.io/mcp-servers-live/r/sandbaseai/sandbase-harness/)
-- [DSH X-Ray](https://unstone.github.io/dsh-xray/p/sandbaseai__sandbase-harness.html)
-- [DSH Plugins](https://github.com/HackSing/dsh-plugins)
-- [Awesome DSH Hub](https://github.com/ukinch605/awesome-dsh-hub)
-- [Awesome DSH Plugins 2026](https://github.com/Herdeny/awesome-dsh-plugins-2026)
-- [MCP Repository](https://mcprepository.com/sandbaseai/sandbase-harness)
-- [MCP Server Hub](https://mcpserver.dev/s/sandbase-harness_4o5awxb)：MCP Server Hub 已公开展示 SandBase Harness 条目。
-- [MCPFly 提交](https://mcpserver.so/submit)：仓库已被接口接受并等待审核，尚未宣称已有公开 listing
-- [MCP Central API](https://mcpcentral.io/api/servers?search=sandbase)：公开的 MCP Registry 下游镜像，返回状态为 active 的 `io.github.sandbaseai/sandbase-harness` 条目；版本快照可能滞后于当前 release。
-- [MCPVault](https://mcpvault.io/servers/sandbase-harness)
-- [F8W 中文项目档案](https://www.f8w.com/github/sandbaseai__sandbase-harness/)
-- [RepoRank 俄语项目档案](https://reporank.net/ru/repo/sandbaseai-sandbase-harness.html)
-- [Agent Plugins Hub — 旧版本快照](https://agentplugin.net/dsh/plugins/managed-agents)
-- [MCP Market](https://mcpmarket.com/server/sandbase-harness)
-- [OpenAgentSkill — code-review](https://www.openagentskill.com/skills/sandbaseai-sandbase-harness-code-review)
-- [PluginBench](https://pluginbench.com/mcp/io.github.sandbaseai/sandbase-harness)
-- [DSH Plugin Store](https://www.dshplugin.store/plugin/sandbaseai/sandbase-harness)
-- [DSH Hub](https://dshhub.dev/plugins/sandbase-harness)
-- [dshbase](https://dshbase.com/plugins/sandbase-harness/)
-- [FindHarness](https://findharness.com/plugins/sandbaseai-sandbase-harness)
-- [DSH Market](https://dshmarket.com/p/sandbaseai/sandbase-harness/)
-- [DSH Plugins](https://dshplugins.cc/en/plugins/sandbaseai-sandbase-harness)
-- [DSH Plugin Directory](https://dsh-plugin.github.io/directory.html)
-- [DSH Plugin Registry](https://github.com/dshplugin-app/deepseek-harness-plugins)
-- [dsh-market](https://dshmarket.com/p/sandbaseai/sandbase-harness/)
-- [dshplugin.dev](https://dshplugin.dev/plugins/sandbaseai-sandbase-harness)
-
-近期已核验的社区引用：
-
-- [dshbase 已核验插件页](https://dshbase.com/plugins/sandbase-harness/)
-- [MCP Repository — 已核验项目页](https://mcprepository.com/sandbaseai/sandbase-harness)
-- [DSHarness 101 — 已核验插件雷达条目](https://dsharness101.com/plugins/)
-- [DSH Plugin Leaderboard — 已核验安装条目](https://dshpluginleaderboard.com/)
-- [awesome-agent-runtime — 已合并条目](https://github.com/sandbaseai/awesome-agent-runtime/pull/15)
-- [Awesome Agent Cortex — 已合并条目](https://github.com/0xNyk/awesome-agent-cortex/pull/72)
-- [Awesome AI Devtools — 已合并条目](https://github.com/yeaight7/awesome-ai-devtools/pull/33)
-- [Awesome Agent Skills — 已合并条目](https://github.com/VoltAgent/awesome-agent-skills/pull/946)
-- [WalkingLabs Awesome Harness Engineering — 已合并条目](https://github.com/walkinglabs/awesome-harness-engineering/pull/76)
-- [awesome-mcp-servers — 已合并 MCP 条目](https://github.com/mcpHQ/awesome-mcp-servers/pull/45)
-- [Awesome Coding Agents — 已合并 Harness 条目](https://github.com/kailiu42/awesome-coding-agents/pull/41)
-- [Agent Framework Radar — 已核验自动收录](https://github.com/linny006/agent-framework-radar)
-- [LLM Agents Radar — 已核验自动收录](https://github.com/linny006/llm-agents-radar)
-- [Awesome DSH Plugin — 已核验条目](https://github.com/Anil-matcha/awesome-dsh-plugin)
-- [Awesome DeepSeek Harness — 已核验条目](https://github.com/awesome-deepseekharness/awesome-deepseek-harness)
-- [Dominic789654 Awesome DeepSeek Harness — 已核验公开条目](https://github.com/Dominic789654/awesome-deepseek-harness)
-- [Zhiyuan-Fan Awesome DeepSeek Harness Plugins — 已核验 Runtime 条目](https://github.com/Zhiyuan-Fan/Awesome-DeepSeek-Harness-Plugins)
-- [Herdeny Awesome DSH Plugins 2026 — 已核验公开条目](https://github.com/Herdeny/awesome-dsh-plugins-2026)
-- [HackSing DSH Plugins — 已核验公开条目](https://github.com/HackSing/dsh-plugins)
-- [white0dew Awesome DSH Plugins — 已核验生成条目](https://github.com/white0dew/awesome-dsh-plugins)
-- [saltbo Awesome Stars — 已核验公开条目](https://github.com/saltbo/awesome-stars)
-- [GitHub Insight Radar — 已核验公开推荐](https://github.com/LeombE/github-insight-radar/blob/main/reports/daily/2026-08-30-action-list.md)
-- [Blue-Whale-Harness — 已核验公开目录条目](https://github.com/leenkcool/Blue-Whale-Harness/blob/main/repos.json)
-- [DSH Plugin Radar — 已核验自动收录](https://github.com/AdamPlatin123/dsh-plugin-radar)
-- [Awesome DSH Plugin — 已合并 Harness 条目](https://github.com/awesome-dsh-plugin/awesome-dsh-plugin/pull/1879)
-- [Awesome DeepSeek Harness — 已合并 Runtime 条目](https://github.com/0xsline/awesome-deepseek-harness/pull/141)
-- [Awesome Agents — 已合并 Harness 条目](https://github.com/kyrolabs/awesome-agents/pull/707)
-- [Awesome AI Engineering — 已合并 Harness 条目](https://github.com/Eric-LLMs/Awesome-AI-Engineering/pull/4)
-- [abordage/awesome-mcp — 已合并 Harness 条目](https://github.com/abordage/awesome-mcp/pull/95)
-- [Awesome DSH Plugin — 已合并 Harness 条目](https://github.com/Anil-matcha/awesome-dsh-plugin/pull/47)
-- [Awesome DeepSeek Harness — 已合并 Harness 条目](https://github.com/Dominic789654/awesome-deepseek-harness/pull/182)
-- [DeepSeek Harness Handbook — 已合并 v0.3.8 bridge 指南](https://github.com/sandbaseai/deepseek-harness-handbook/pull/291)
-
-正在等待社区审核：
-
-- [NeuraLiying Awesome Agent Harnesses Issue #4](https://github.com/NeuraLiying/Awesome-Agent-Harnesses/issues/4) — 建议加入 Production Harnesses、SDKs & Frameworks，已补充 v0.3.8、安装/MCP 来源、可选后端及依赖部署的隔离边界核验（[核验说明](https://github.com/NeuraLiying/Awesome-Agent-Harnesses/issues/4#issuecomment-5473588176)）
-- [Acuvity MCP Servers Registry Issue #18](https://github.com/acuvity/mcp-servers-registry/issues/18) — 建议收录 v0.3.8 GHCR stdio Bridge、六个工具及运行时环境变量，已补充维护者核验与依赖后端的隔离边界（[核验说明](https://github.com/acuvity/mcp-servers-registry/issues/18#issuecomment-5473588201)）
-- [Nexu Harness Engineering Guide Issue #70](https://github.com/nexu-io/harness-engineering-guide/issues/70) — 建议作为有来源依据的 Runtime 资源，覆盖会话、工具治理、审批、凭证、Memory、产物、审计/回放及可选后端（[核验说明](https://github.com/nexu-io/harness-engineering-guide/issues/70#issuecomment-5473588182)）
-- [EvoMap Awesome Agent Evolution Issue #53](https://github.com/EvoMap/awesome-agent-evolution/issues/53) — 已按 Agent Development Platforms 提交，附 v0.3.8、安装、MCP、有状态 Runtime 及依赖后端的隔离证据（[核验说明](https://github.com/EvoMap/awesome-agent-evolution/issues/53#issuecomment-5473603962)）
-- [Awesome DeepSeek Harness Top 500 Issue #3](https://github.com/weekend-project-space/awesome-deepseek-harness-top-500/issues/3) — 建议作为 DSH Runtime/Integration 条目，已补充当前版本、Registry、安装及后端隔离边界证据（[核验说明](https://github.com/weekend-project-space/awesome-deepseek-harness-top-500/issues/3#issuecomment-5473603971)）
-- [Libukai Awesome DeepSeek Harness Issue #94](https://github.com/libukai/awesome-deepseek-harness/issues/94) — 建议作为区别于 SandBase CLI 的独立 DSH Runtime 条目，已补充 v0.3.8 安装/MCP 及后端证据（[核验说明](https://github.com/libukai/awesome-deepseek-harness/issues/94#issuecomment-5473606895)）
-- [E2B Awesome AI SDKs PR #344](https://github.com/e2b-dev/awesome-ai-sdks/pull/344) — 已有 canonical Harness 条目，当前可合并；CLA 检查仍需贡献者账号完成
-- [Awesome MCP Servers PR #13240](https://github.com/punkpeye/awesome-mcp-servers/pull/13240) — canonical MCP 目录条目的 `check-submission` 已通过，等待维护者/Glama 审核；旧重复 PR #13188 已关闭
-- [Sunrisepeak dsh-index PR #43](https://github.com/Sunrisepeak/dsh-index/pull/43) — 将 SandBase Harness descriptor 从 v0.3.7 更新至 v0.3.8，提交版本的构建与 boot 检查已通过，但当前 PR 需要 rebase
-- [Awesome AI Agents 2026 PR #240](https://github.com/ARUNAGIRINATHAN-K/awesome-ai-agents-2026/pull/240) — 已在 Agent Tooling and Infrastructure 中将 SandBase Harness runtime 与现有 CLI 条目区分收录，等待维护者审核；失败的链接检查仅涉及 PR 之外既有的 `ofekron/better-agent` 404
-- [E2B Awesome AI Agents Issue #1468](https://github.com/e2b-dev/awesome-ai-agents/issues/1468) — 请求将 SandBase Harness 与已关闭的 CLI 提交区分，已补充来源证据，等待目录确认范围
-- [NipunaRanasinghe Awesome AI Agents PR #184](https://github.com/NipunaRanasinghe/awesome-ai-agents/pull/184) — 使用目录的动态 star badge 将 SandBase Harness 加入 Core Frameworks，等待维护者审核
-- [Zients Awesome Agent Harness PR #10](https://github.com/zients/awesome-agent-harness/pull/10) — 已将 SandBase Harness 加入 Agent Systems & Harnesses，等待维护者审核
-- [McpMux Server Registry PR #286](https://github.com/mcpmux/mcp-servers/pull/286)
-- [Mctrinh Awesome MCP Servers PR #105](https://github.com/mctrinh/awesome-mcp-servers/pull/105)
-- [Docker MCP Registry PR #4841](https://github.com/docker/mcp-registry/pull/4841) — 已完成验证，等待维护者审核
-- [HabitoAI Awesome MCP Servers PR #37](https://github.com/habitoai/Awesome-MCP-Servers-directory/pull/37) — 已加入 Developer Tools，PR 状态干净，等待维护者审核
-- [MCP Hub / mcpdir issue #20](https://github.com/eL1fe/mcpdir/issues/20) — 与已有 CLI 条目分开的 Harness 收录申请，等待目录审核
-- [MCP Server Finder evaluation issue #4](https://github.com/ModelContextProtocol-Security/mcpserver-finder/issues/4) — 已申请独立 MCP bridge 评估，不宣称评分或安全认证
-- [TensorBlock Awesome MCP Servers issue #2067](https://github.com/TensorBlock/awesome-mcp-servers/issues/2067) — issue 与自动 PR #2068 已关闭，并由已合并的 PR #2060 取代；应使用已合并条目/profile，不要使用不完整的自动元数据（[历史修正](https://github.com/TensorBlock/awesome-mcp-servers/issues/2067#issuecomment-5473393345)）
-- [Awesome Agent-Native Services PR #116](https://github.com/haoruilee/awesome-agent-native-services/pull/116) — 已获策展批准并提交 v0.3.8 runtime、MCP、session、approval、credential、audit/replay 证据；PR 可合并但被仓库 gate 阻塞，等待策展方合并（[核验说明](https://github.com/haoruilee/awesome-agent-native-services/pull/116#issuecomment-5473455471)）
-- [ToolSDK MCP Registry PR #488](https://github.com/toolsdk-ai/toolsdk-mcp-registry/pull/488) — Schema 与 Biome 检查通过，等待维护者审核
-- [MCP.Directory 提交](https://mcp.directory/submit) — 已提交，等待目录审核
-- [Hugging Face agent-harness 注册 PR #2432](https://github.com/huggingface/huggingface.js/pull/2432) — 已修正不应将 `MANAGED_AGENTS_HOME` 当作身份标记的问题，检查通过，等待维护者合并
-- [Agent Switchboard 收录 PR #44](https://github.com/assafbar2/agentswitchboard.dev/pull/44) — 已提交 v0.3.8 更新条目，等待维护者验证
-- [Awesome AI Agents 2026 PR #16](https://github.com/Supersynergy/awesome-ai-agents-2026/pull/16) — 已将 SandBase Harness 加入 Agent Runtimes and Platforms，等待维护者审核
-- [Awesome AI Agent Engineering PR #1](https://github.com/sspoisk/awesome-ai-agent-engineering/pull/1) — 已将 SandBase Harness 加入 Deployment，等待维护者审核
-- [AI Native Landscape 提交 #18](https://github.com/rootsongjc/ai-native-landscape/issues/18) — 已提交至 `platform-infra` / `sandboxes-runtimes`，等待策展审核
-- [Agentic Community Landscape PR #2](https://github.com/agentic-community/agentic-landscape/pull/2) — 已将 SandBase Harness 加入 Agentic → Runtime，等待维护者审核
-- [MyMCPTools 目录 Issue #8](https://github.com/shibley/mymcptools/issues/8) — 已提交 v0.3.8 MCP bridge 目录申请，等待维护者审核
-- [mcp.so/mcpso 提交线程](https://github.com/chatmcp/mcpso/issues/1#issuecomment-5471477016) — 已通过公开 GitHub Issue 流程提交 v0.3.8 MCP bridge，等待目录审核
-- [Collective AI Tools Issue #332](https://github.com/hanishrao/collective-ai-tools/issues/332) — 已与现有 CLI 条目分开提交 SandBase Harness，等待目录审核
-- [Awesome Agent Skills PR #79](https://github.com/philipbankier/awesome-agent-skills/pull/79) — 已将 SandBase Harness 加入 MCP runtime 与 infrastructure，等待维护者审核
-- [Awesome MCP List PR #409](https://github.com/MobinX/awesome-mcp-list/pull/409) — 已将 SandBase Harness 加入 AI Agents & Frameworks，等待维护者审核
-- [Best-of MCP Servers Issue #370](https://github.com/tolkonepiu/best-of-mcp-servers/issues/370) — 已提交至 MCP 服务器排行榜，已补充 v0.3.8 bridge 和当前安装元数据，收录/排名仍待审核
-- [Awesome Agent Runtimes PR #4](https://github.com/beejmaxx/awesome-agent-runtimes/pull/4) — 已按成熟度门槛提交至 watchlist，并在[维护者核验](https://github.com/beejmaxx/awesome-agent-runtimes/pull/4#issuecomment-5473692077)中补充当前 v0.3.8、安装、MCP 和 API 证据，等待审核
-- [DeepYard 提交](https://deepyard.dev/submit) — 已通过公开审核表单提交至 `Frameworks & SDKs` 分类，等待审核，尚未宣称公开收录
-- [BotMarket MCP 记录](https://botmarket.bot/v1/mcp/io-github-sandbaseai-sandbase-harness) — 公开 API 当前报告一个来自官方 MCP Registry 的 active 记录（`102971`）；人工提交队列 `4` 仍单独跟踪
-- [Awesome Agent Sandbox PR #2](https://github.com/yanmxa/awesome-agent-sandbox/pull/2) — 已将 SandBase Harness 加入 Related Projects；Sourcery、GitGuardian 和可合并性检查已通过，仍等待维护者合并（[交接说明](https://github.com/yanmxa/awesome-agent-sandbox/pull/2#issuecomment-5473182863)）
-- [Awesome Agent Infra PR #6](https://github.com/shenli/awesome-agent-infra/pull/6) — 已将 SandBase Harness 加入 Runtime and Control Plane，等待维护者审核
-- [Awesome CLI Coding Agents PR #314](https://github.com/bradAGI/awesome-cli-coding-agents/pull/314) — 已将 SandBase Harness 加入 Runtime & execution backends，等待维护者审核
-- [Awesome AI Developer Stack PR #2](https://github.com/masrisystems/awesome-ai-developer-stack/pull/2) — 已将 SandBase Harness 加入 MCP Servers 表格，等待维护者审核
-- [Awesome Agent Cortex PR #74](https://github.com/0xNyk/awesome-agent-cortex/pull/74) — 已将 SandBase Harness 加入 Agent Runtime Infrastructure，等待维护者审核
-- [Awesome Agent Harness PR #29](https://github.com/mahonzhan/awesome-agent-harness/pull/29) — 已将 SandBase Harness 加入 Agent Harness 时间线，PR 状态 clean 且可合并，等待维护者审核（[核验说明](https://github.com/mahonzhan/awesome-agent-harness/pull/29#issuecomment-5473355320)）
-- [AutoJunjie Awesome Agent Harness issue #59](https://github.com/AutoJunjie/awesome-agent-harness/issues/59) — 已申请将 SandBase Harness 加入 Agent Runtimes，已提供当前版本、API、DeepSeek 示例、MCP 镜像及后端依赖隔离说明，等待策展审核（[核验说明](https://github.com/AutoJunjie/awesome-agent-harness/issues/59#issuecomment-5473368720)）
-- [AgentSpot submission #1](https://github.com/agentspot/agentspot-submissions/issues/1) — 已提交 GitHub 源码/发布版本及 GHCR MCP bridge 分发信息，并提供 v0.3.8 安装、MCP、DeepSeek 证据，等待免费目录审核（[核验说明](https://github.com/agentspot/agentspot-submissions/issues/1#issuecomment-5473380420)）
-- [Awesome Loop Engineering resource suggestion #23](https://github.com/ChaoYue0307/awesome-loop-engineering/issues/23) — 已提交基于源码证据的学习资源建议，覆盖 session、工具治理、approval 与 audit/replay，等待维护者策展（[核验说明](https://github.com/ChaoYue0307/awesome-loop-engineering/issues/23#issuecomment-5473407275)）
-- [Best of Agent Harnesses PR #99](https://github.com/RyanAlberts/best-of-Agent-Harnesses/pull/99) — 已按生成式排行目录规范提交 v0.3.8 Harness 条目，PR 可合并，等待维护者审核（[核验说明](https://github.com/RyanAlberts/best-of-Agent-Harnesses/pull/99#issuecomment-5470293386)）
-- [Awesome Agent Harnesses PR #5](https://github.com/Anandesh-Sharma/awesome-agent-harnesses/pull/5) — 已将 SandBase Harness 加入 coding-agent harness 目录，PR 状态 clean 且可合并，CodeRabbit 检查成功，等待维护者审核（[核验说明](https://github.com/Anandesh-Sharma/awesome-agent-harnesses/pull/5#issuecomment-5473341966)）
-- [Awesome Agentic AI 中文 Stage 7 PR #228](https://github.com/WenyuChiou/awesome-agentic-ai-zh/pull/228) — 已于 `1cb0406` 合并，作为 #213 的无冲突整合版本；三语条目及 1,036 个脚本/31 个定向检查已通过
-- [Awesome Terminal Agents PR #5](https://github.com/EnigmaYYYY/awesome-terminal-agents/pull/5) — 已将 SandBase Harness 作为 Engineering-Practice-Tool 加入终端 Agent 专题，等待维护者审核
-- [Awesome MCP DevTools PR #13](https://github.com/Epistates/awesome-mcp-devtools/pull/13) — 已加入 Proxies and Gateways，并在[核验说明](https://github.com/Epistates/awesome-mcp-devtools/pull/13#issuecomment-5473780943)补充当前 v0.3.8 与安装/MCP 来源，等待审核
-- [Awesome MCP Collection PR #39](https://github.com/JustInCache/awesome-mcp-collection/pull/39) — 已将 SandBase Harness 加入 Development & Version Control，等待维护者审核
-- [Awesome MCP Issue #99](https://github.com/abordage/awesome-mcp/issues/99) — 已请求加入 Aggregators & Gateways，等待维护者审核
-- [Awesome MCP Gateways PR #77](https://github.com/e2b-dev/awesome-mcp-gateways/pull/77) — 已将 SandBase Harness 加入 Open-source MCP Gateways，等待维护者审核及 CLA 检查
-- [Awesome AI Harness PR #4](https://github.com/weiwei966/awesome-ai-harness/pull/4) — 已将 SandBase Harness 加入 SDKs & runtimes，等待维护者审核
-- [Awesome AI Coding Sandboxes PR #15](https://github.com/fhiltscher/awesome-ai-coding-sandboxes/pull/15) — 已将 SandBase Harness 加入 Adjacent runtimes，等待维护者审核
-- [Awesome Agent Infrastructure PR #23](https://github.com/backblaze-labs/awesome-agent-infrastructure/pull/23) — 已将 SandBase Harness 加入 Execution Sandboxes，等待维护者审核
-- [Awesome Agent Sandboxing PR #2](https://github.com/IronSecCo/awesome-agent-sandboxing/pull/2) — 已将 SandBase Harness 加入 Self-hosted Agent Runtimes，等待维护者审核
-- [Awesome Sandbox PR #27](https://github.com/restyler/awesome-sandbox/pull/27) — 已新增 SandBase Harness runtime/sandbox 专题章节，等待维护者审核
-- [Awesome AI Agents Security PR #107](https://github.com/ProjectRecon/awesome-ai-agents-security/pull/107) — 已加入 Sandboxing & Isolation Environments，已发布[核验跟进](https://github.com/ProjectRecon/awesome-ai-agents-security/pull/107#issuecomment-5473074958)，PR 可合并，等待维护者审核
-- [UCSB Awesome Agent Security PR #16](https://github.com/ucsb-mlsec/Awesome-Agent-Security/pull/16) — 已将 SandBase Harness 加入 System-level Runtime Defense，PR 可合并，等待维护者审核
-- [Awesome DevOps MCP Servers PR #327](https://github.com/rohitg00/awesome-devops-mcp-servers/pull/327) — 已加入 Code Execution，已发布[核验跟进](https://github.com/rohitg00/awesome-devops-mcp-servers/pull/327#issuecomment-5473090598)，PR 可合并，等待维护者审核
-- [EverWorks Awesome MCP Servers PR #161](https://github.com/ever-works/awesome-mcp-servers/pull/161) — 已加入 Code Execution & Automation，并在[核验说明](https://github.com/ever-works/awesome-mcp-servers/pull/161#issuecomment-5473781279)修正过期文档路径，等待审核
-- [AIAnytime Awesome MCP Server PR #78](https://github.com/AIAnytime/Awesome-MCP-Server/pull/78) — 已独立于 SandBase CLI 加入 MCP bridge 条目，并在[维护者核验](https://github.com/AIAnytime/Awesome-MCP-Server/pull/78#issuecomment-5473797072)修正过期文档路径，等待审核
-- [Collabnix Awesome MCP Lists PR #105](https://github.com/collabnix/awesome-mcp-lists/pull/105) — 已加入 DevOps & Infrastructure，并在[核验说明](https://github.com/collabnix/awesome-mcp-lists/pull/105#issuecomment-5473781090)修正过期文档路径，等待审核
-- [MCP Finder Awesome MCP Servers PR #9](https://github.com/mcp-finder/awesome-mcp-servers/pull/9) — 已加入 Cloud and DevOps，并在[维护者核验](https://github.com/mcp-finder/awesome-mcp-servers/pull/9#issuecomment-5473796953)确认当前来源与后端依赖隔离，等待审核
-- [Awesome AI Agent Tools PR #27](https://github.com/michielhdoteth/awesome-ai-agent-tools/pull/27) — 已合并独立的 SandBase Harness MCP 目录条目和 Docker stdio 安装元数据
-- [Enterprise AI Atlas Awesome MCP Servers PR #10](https://github.com/Enterprise-AI-Atlas/awesome-mcp-servers/pull/10) — 已将 SandBase Harness 加入 Developer Tools，并添加 Docker stdio 安装元数据，PR 可合并，等待维护者审核
-- [Awesome-MCP PR #36](https://github.com/Albertchamberlain/Awesome-MCP/pull/36) — 已新增带 stdio transport 的结构化 SandBase Harness `server` 条目，PR 可合并，CI 已通过
-- [Awesome-MCP PR #36 核验](https://github.com/Albertchamberlain/Awesome-MCP/pull/36#issuecomment-5473810768) — 已确认当前 v0.3.8、Registry、运行中 API 与后端隔离边界
-- [bgizdov Awesome MCP Servers PR #17](https://github.com/bgizdov/awesome-mcp-servers/pull/17) — 已在 DevOps 分类新增 JSON 条目及 Docker stdio bridge，PR 可合并，等待维护者审核
-- [Awesome AI Coding Tools PR #665](https://github.com/ai-for-developers/awesome-ai-coding-tools/pull/665) — 已加入 MCP Servers and Directories，已发布[核验跟进](https://github.com/ai-for-developers/awesome-ai-coding-tools/pull/665#issuecomment-5473061822)，PR 可合并，等待维护者审核
-- [Awesome AI Developer Tools PR #11](https://github.com/ayushrajdev9-cmyk/awesome-ai-developer-tools/pull/11) — 已将 SandBase Harness 加入 DevOps & Deployment，PR 可合并，等待维护者审核
-- [Pipedream Awesome MCP Servers PR #111](https://github.com/PipedreamHQ/awesome-mcp-servers/pull/111) — 已加入 Artificial Intelligence MCP server 列表，已发布[核验跟进](https://github.com/PipedreamHQ/awesome-mcp-servers/pull/111#issuecomment-5473048884)，PR 可合并，等待维护者审核
-- [Awesome AI & Developer Tools PR #5](https://github.com/guojianrong/awesome-ai-developer-tools/pull/5) — 已将 SandBase Harness 加入 CI/CD & DevOps，PR 可合并，等待维护者审核
-- [Awesome AI & Developer Tools PR #5 核验](https://github.com/guojianrong/awesome-ai-developer-tools/pull/5#issuecomment-5473810596) — 已确认当前版本、bridge 镜像、项目范围与后端隔离边界
-- [LaunchApp Awesome AI Coding Tools PR #34](https://github.com/launchapp-dev/awesome-ai-coding-tools/pull/34) — 已将 SandBase Harness 加入 MCP 分类，并标注 self-hosted 与 free/open-source，PR 可合并，等待维护者审核
-- [LaunchApp Awesome AI Coding Tools PR #34 核验](https://github.com/launchapp-dev/awesome-ai-coding-tools/pull/34#issuecomment-5473974225) — 已确认当前 v0.3.8、Registry/镜像引用与依赖后端的 sandbox 边界
-- [AI Agent Sandboxes PR #3](https://github.com/pjlsergeant/ai-sandboxes/pull/3) — 已加入带证据链接的结构化 SandBase Harness 元数据，等待维护者审核
-- [Awesome Agent Sandbox PR #2](https://github.com/vivy-yi/awesome-agent-sandbox/pull/2) — 已将 SandBase Harness 加入 Self-hosted / Open Source 沙箱表格，等待维护者审核
-- [Awesome Agent Sandboxes PR #9](https://github.com/dloss/awesome-agent-sandboxes/pull/9) — 已将 SandBase Harness 加入 Containers，等待维护者审核
-- [Awesome Agent Sandboxes PR #9 核验](https://github.com/dloss/awesome-agent-sandboxes/pull/9#issuecomment-5473974508) — 已确认当前 v0.3.8 来源与依赖后端的隔离边界
-- [Awesome Agent Sandbox PR #4](https://github.com/fishman/awesome-agent-sandbox/pull/4) — 已将 SandBase Harness 加入 Container Sandboxes 及对比表，等待维护者审核
-- [Awesome Agent Sandboxes PR #59](https://github.com/msyvr/awesome-agent-sandboxes/pull/59) — 已加入结构化 SandBase Harness 沙箱元数据并重新生成目录文件，等待维护者审核
-- [MeshKore 目录提交](https://meshkore.com/submit) — 已接受审核，提交编号 #14，公开档案待生成
-- [Awesome Agentic Open-Source Tools PR #1](https://github.com/samaybhavsar/awesome-agentic-opensource-tools/pull/1) — 已加入 Agent Frameworks & Orchestration，等待维护者审核
-- [awesome-ai-agents-2026 PR #2](https://github.com/Dehar624/awesome-ai-agents-2026/pull/2) — 已加入 Local Runtimes & LLM Management，等待维护者审核
-- [AgentFirst 目录 PR #46](https://github.com/bradvin/agentfirst.directory/pull/46) — 已加入 Compute & Sandboxes，enrichment 检查通过，等待维护者审核
-- [AI Agent Tools 提交](https://aiagenttools.dev/submit) — 已提交至 MCP Servers 分类，等待目录审核
-- [MCP Server Finder 评估 Issue #4](https://github.com/ModelContextProtocol-Security/mcpserver-finder/issues/4) — 已请求对 MCP bridge 进行独立质量与安全评估，等待审核
-- [Agentic DevOps MCP PR #42](https://github.com/agenticdevops/awesome-devops-mcp/pull/42) — 已加入 Kubernetes & Containers，等待维护者审核
-- [Awesome DevOps AI PR #54](https://github.com/hammadhaqqani/awesome-devops-ai/pull/54) — 已加入 MCP Servers for DevOps，等待维护者审核
-- [Awesome Platform Engineering PR #63](https://github.com/shospodarets/awesome-platform-engineering/pull/63) — 已加入 Internal Developer Platforms，等待维护者审核
-- [Awesome DevOps Platform PR #4](https://github.com/tysoncung/awesome-devops-platform/pull/4) — 已加入 AI & Automation in DevOps，等待维护者审核
-- [Awesome Platform Engineering PR #11](https://github.com/ShakedBraimok/awesome-platform-engineering/pull/11) — 已加入 AI Platform Engineering & LLMOps，等待维护者审核
-- [Awesome LLMOps PR #539](https://github.com/InftyAI/Awesome-LLMOps/pull/539) — 由项目申请 #538 自动生成，已加入 Runtime / AI Agent，构建通过，等待维护者审核
-- [TensorChord Awesome LLMOps PR #785](https://github.com/tensorchord/Awesome-LLMOps/pull/785) — 已将 SandBase Harness 加入 LLMOps 目录，DCO 已通过，等待维护者审核
-- [Awesome-LLMSecOps PR #66](https://github.com/wearetyomsmnv/Awesome-LLMSecOps/pull/66) — 已将带来源链接的 SandBase Harness 条目加入 Agentic security，PR 状态干净且可合并，等待维护者审核
-- [Awesome Agent Runtime Security PR #30](https://github.com/bureado/awesome-agent-runtime-security/pull/30) — 已将 SandBase Harness 加入 Sandboxing & Isolation，并明确部署/后端限制，PR 状态干净且可合并，等待维护者审核
-- [Awesome LLM Security PR #313](https://github.com/corca-ai/awesome-llm-security/pull/313) — 已将 SandBase Harness 作为运行时治理参考加入 Tools，PR 状态干净且可合并，等待维护者审核
-- [Awesome AI Agents PR #467](https://github.com/jim-schwoebel/awesome_ai_agents/pull/467) — 现有 AI Agent 资源目录收录申请，已添加单行 SandBase Harness 条目，PR 状态干净且可合并，等待维护者审核
-- [Jenqyang Awesome AI Agents PR #460](https://github.com/Jenqyang/Awesome-AI-Agents/pull/460) — 按该目录的开源与中性描述规范，将 SandBase Harness 加入 Applications → Tools，PR 状态干净且可合并，等待维护者审核
-- [Slava Awesome AI Agents PR #403](https://github.com/slavakurilyak/awesome-ai-agents/pull/403) — AI Agent 目录中已有 SandBase Harness 收录申请，PR 状态干净且可合并，等待维护者审核
-- [Scottcjn Awesome Agents PR #59](https://github.com/Scottcjn/awesome-agents/pull/59) — Agent 平台/框架目录中已有 SandBase Harness 收录申请，PR 状态干净且可合并，等待维护者审核
-- [Awesome Agent Infrastructure PR #21](https://github.com/backblaze-labs/awesome-agent-infrastructure/pull/21) — 已加入 Execution Sandboxes，条目已更新至当前 MCP 安装文档，等待维护者审核
-- [Awesome DevOps PR #30](https://github.com/nirgeier/awesome-devops/pull/30) — 已将 SandBase Harness 加入 MCP 工具目录，DCO 已通过，等待维护者审核
-- [Awesome Self-Hosted Agents PR #6](https://github.com/arcane-bear/awesome-self-hosted-agents/pull/6) — 已将 SandBase Harness 加入 self-hosted agent frameworks 列表，PR 状态 clean，等待维护者审核
-- [Awesome Agent Infra PR #2](https://github.com/jovial-liu/awesome-agent-infra/pull/2) — 已将 SandBase Harness 加入机器可读的 runtime catalog，校验、测试和 lint 均通过，等待维护者审核
-- [Awesome AI Agents PR #1](https://github.com/tioraicom/awesome-ai-agents/pull/1) — 已将 SandBase Harness 加入 Agent infrastructure，PR 状态 clean，等待维护者审核
-- [Awesome Agent Operating Systems PR #13](https://github.com/frankxai/awesome-agent-operating-systems/pull/13) — 已将 SandBase Harness 合并加入 Agent Runtimes，并添加日期验证链接
-- [Awesome Agent Services PR #8](https://github.com/farol-team/awesome-agent-services/pull/8) — 已将 SandBase Harness 加入 Sandboxes & Compute，PR 状态 clean，等待维护者审核
-- [Awesome AI Automation PR #3](https://github.com/minhazda/awesome-ai-automation/pull/3) — 已将 SandBase Harness 加入 AI agents & LLM automation，PR 状态 clean，等待维护者审核
-- [Awesome Best Open Source AI Agents 2026 PR #1](https://github.com/GagnDeep/awesome-best-open-source-ai-agents-2026/pull/1) — 已加入包含许可证、语言、Stars、活跃度和 Best-for 元数据的 GitHub 验证条目，PR 状态 clean，等待维护者审核
-- [Awesome AI Agents — Agent Playbook PR #1](https://github.com/agentplaybook-io/awesome-ai-agents/pull/1) — 已将 SandBase Harness 加入 self-hosted frameworks 列表，PR 状态 clean，等待维护者审核
-- [Discussion #116](https://github.com/sandbaseai/sandbase-harness/discussions/116) — 官方 DevOps runtime 与 MCP bridge 推广介绍
-- [DeepSeek Harness Showcase 更新](https://github.com/deepseek-ai/deepseek-harness/discussions/1918#discussioncomment-18212204) — 双语介绍 gVisor 集成路径与 Hugging Face 归因修复审核状态
-- [Cline MCP Marketplace Issue #2364](https://github.com/cline/mcp-marketplace/issues/2364) — v0.3.8 MCP bridge 提交，正在审核；参见[维护者核验说明](https://github.com/cline/mcp-marketplace/issues/2364#issuecomment-5473147267)和[官方双语更新](https://github.com/sandbaseai/sandbase-harness/discussions/116#discussioncomment-18212395)
-- [MCPSo 提交 Issue #3834](https://github.com/chatmcp/mcpso/issues/3834)
-- [Awesome Agent Frameworks 架构提案 #6](https://github.com/subinium/awesome-agent-frameworks/issues/6)
-- [Agent Sandbox Taxonomy 档案提案 #5](https://github.com/kajogo777/the-agent-sandbox-taxonomy/issues/5)
-- [Open-Kairox Awesome Agent Harnesses Issue #1](https://github.com/open-kairox/awesome-agent-harnesses/issues/1) — 建议加入双语 Agent Harness 列表，已补充 v0.3.8、安装/MCP、Runtime 控制及依赖后端的隔离核验（[核验说明](https://github.com/open-kairox/awesome-agent-harnesses/issues/1#issuecomment-5473624141)）
-- [Awesome Agent Sandboxes PR #9](https://github.com/arjan/awesome-agent-sandboxes/pull/9)
-- [Mossaka Awesome Agent Sandboxes PR #1](https://github.com/Mossaka/awesome-agent-sandboxes/pull/1)
-- [dsh-index PR #43](https://github.com/Sunrisepeak/dsh-index/pull/43) — 已提交当前 SandBase Harness 描述；提交版本检查通过，但 PR 当前需要 rebase
-- [AgentIndex issue #3](https://github.com/agentidx/agentindex/issues/3) — 提议加入有来源依据的运行时索引，已补充 v0.3.8、安装/MCP、会话治理、审计/回放及依赖后端的隔离范围（[核验说明](https://github.com/agentidx/agentindex/issues/3#issuecomment-5473643330)）
-- [Agent Harness MCP preset issue #47](https://github.com/madebywild/agent-harness/issues/47) — 提议基于已发布 bridge 镜像和六个工具增加 MCP preset，等待项目维护者审核（[核验说明](https://github.com/madebywild/agent-harness/issues/47#issuecomment-5473643364)）
-- [Discussion #116 更新](https://github.com/sandbaseai/sandbase-harness/discussions/116#discussioncomment-18212016) — 发布 v0.3.8 安装与已合并集成状态，邀请用户反馈
-- [Discussion #116 最新更新](https://github.com/sandbaseai/sandbase-harness/discussions/116#discussioncomment-18212677) — 公布 Awesome Coding Agents 已合并收录，并重申当前安装入口与 TensorBlock 元数据问题
-- [Discussion #116 推广更新](https://github.com/sandbaseai/sandbase-harness/discussions/116#discussioncomment-18213014) — 双语汇总 DeepYard 审核提交与 BotMarket 人工审核队列状态
-- [Discussion #116 BotMarket 状态修正](https://github.com/sandbaseai/sandbase-harness/discussions/116#discussioncomment-18213051) — 记录来自官方 Registry 的 active MCP 条目，并与人工队列 `4` 分开说明
-- [Discussion #116 TensorBlock 更新](https://github.com/sandbaseai/sandbase-harness/discussions/116#discussioncomment-18213205) — 公布 TensorBlock MCP 条目已合并及公开 profile，并标注当前 v0.3.8 bridge
-- [AAE Agent Engineering issue #1](https://github.com/Lxcardoza993/AAE/issues/1) — 已提交至精选 Agent Harness 分类，等待策展审核
-- [HKUST-KnowComp Awesome Agent Harness Issue #8](https://github.com/HKUST-KnowComp/Awesome-Agent-Harness/issues/8) — 已提交为源链接 runtime 资源，已补充当前 v0.3.8 证据及依赖后端的隔离边界，等待策展审核
-- [Picrew Awesome Agent Harness issue #82](https://github.com/Picrew/awesome-agent-harness/issues/82) — 已在 `ddbf183` 准备 handbook 条目；因现有 fork 历史不相关，等待维护者应用变更
-- [Awesome AI Engineering PR #4](https://github.com/Eric-LLMs/awesome-ai-engineering/pull/4) — 已于 `0a308b0` 合并，SandBase Harness 已加入开源 Agent Engineering 项目表
-- [TensorBlock Awesome MCP Servers PR #2060](https://github.com/TensorBlock/awesome-mcp-servers/pull/2060) — 已于 `c88cedf` 合并，当前 v0.3.8 bridge 条目可通过 [TensorBlock profile](https://tensorblock.co/mcp/servers/github-sandbaseai-sandbase-harness-7a5986ca) 查看
-- [MCPVault 提交](https://mcpvault.io/submit) — 公开提交流程需要 GitHub 登录；正常提交返回 `401 not_signed_in`，因此当前不宣称已有收录
-- [Awesome Agentic MCP Security PR #28](https://github.com/mcp-security-project/awesome-agentic-mcp-security/pull/28) — 已加入 MCP hosting/runtime，完成 v0.3.8 核验；GitHub 当前为 `UNSTABLE`
-- [RoyalPinto Awesome MCP Security PR #4](https://github.com/royalpinto007/awesome-mcp-security/pull/4) — 已加入 permission 分类，完成 v0.3.8 与依赖后端的隔离边界核验，等待维护者审核
-- [Awesome AI Developer Tools PR #11](https://github.com/ayushrajdev9-cmyk/awesome-ai-developer-tools/pull/11) — 已加入 DevOps & Deployment，并核验当前 Registry/GHCR 与 v0.3.8，等待维护者审核
-- [LAS-WG Awesome Agent Infrastructure PR #10](https://github.com/las-wg/awesome-agent-infrastructure/pull/10) — 已加入 Open-Source Projects，并完成 v0.3.8 与依赖后端的隔离边界核验，等待维护者审核
-- [Awesome Agent Skills PR #79](https://github.com/philipbankier/awesome-agent-skills/pull/79) — 已加入 MCP runtime/infrastructure，完成 v0.3.8 核验；GitHub 当前为 `UNSTABLE`
-- [Awesome MCP List PR #409](https://github.com/MobinX/awesome-mcp-list/pull/409) — 已加入 AI Agents & Frameworks，完成 v0.3.8 与依赖后端的隔离边界核验，等待维护者审核
-- [Awesome Agent Sandboxes PR #59](https://github.com/msyvr/awesome-agent-sandboxes/pull/59) — 已加入生成式 sandbox 目录并刷新输出，明确非普适、依赖后端的隔离范围，等待维护者审核
-- [Awesome Agent Sandbox PR #2](https://github.com/vivy-yi/awesome-agent-sandbox/pull/2) — 已加入 self-hosted sandbox 条目并完成 v0.3.8 来源核验，等待维护者审核
-- [Awesome Agent Sandbox PR #4](https://github.com/fishman/awesome-agent-sandbox/pull/4) — 已加入容器 sandbox 条目并核验依赖后端的隔离边界，等待维护者审核
-- [Awesome CLI Coding Agents PR #314](https://github.com/bradAGI/awesome-cli-coding-agents/pull/314) — 已加入 Runtime & execution backends，完成 v0.3.8 来源核验，等待维护者审核
-- [Awesome Terminal Agents PR #5](https://github.com/EnigmaYYYY/awesome-terminal-agents/pull/5) — 已加入 Engineering-Practice-Tool runtime 参考，完成 v0.3.8 核验，等待维护者审核
-- [Awesome AI Agents 2026 PR #16](https://github.com/Supersynergy/awesome-ai-agents-2026/pull/16) — 已加入 agent runtimes/platforms，完成 v0.3.8 与依赖后端的隔离边界核验，等待维护者审核
-- [Awesome Agent Infra PR #6](https://github.com/shenli/awesome-agent-infra/pull/6) — 已加入 Runtime and Control Plane，完成 v0.3.8 来源核验；GitHub 当前为 `UNSTABLE`，等待维护者审核
-- [Curated MCP Servers PR #9](https://github.com/oxbshw/curated_mcp_servers/pull/9) — 已加入 Developer Tools & Infrastructure，并完成 v0.3.8 来源核验，等待维护者审核
-- [Awesome Agent Runtimes PR #1](https://github.com/dz3ai/awesome-agent-runtimes/pull/1) — 已加入 runtime 对比表，补充 v0.3.8 与依赖后端的隔离边界核验，等待维护者审核
-- [AI Agent Infrastructure List PR #4](https://github.com/chgaowei/ai-agent-infra-list/pull/4) — 已新增中英文 Runtime 条目并核验当前 v0.3.8，等待维护者审核
-- [Skyming Awesome AI Agent PR #19](https://github.com/skyming/awesome-ai-agent/pull/19) — 已新增中文 runtime 条目并补充 v0.3.8 来源核验，等待维护者审核
-- [Awesome Agent Harness PR #58](https://github.com/AutoJunjie/awesome-agent-harness/pull/58) — 已加入 Agent Runtimes，披露维护者关系并完成事实核验，等待维护者审核
-- [Awesome Agent Security PR #10](https://github.com/authora-dev/awesome-agent-security/pull/10) — 已加入 Sandboxed Execution，并明确目录收录不等于安全认证，等待维护者审核
-- [DevInsight Awesome MCP PR #6](https://github.com/devinsightdotio/awesome_mcp/pull/6) — 已加入 MCP Servers，补充当前 v0.3.8 与依赖后端的隔离边界核验，等待维护者审核
-
-这些页面由独立目录维护；仓库源码和 release metadata 仍是项目事实来源。
-
-### 在 Codespaces 中试用
-
-[![Open in GitHub Codespaces](https://github.com/codespaces/badge.svg)](https://codespaces.new/sandbaseai/sandbase-harness?quickstart=1)
-
-仓库内置的开发容器会自动安装依赖并构建运行时。终端准备完成后，在转发端口上启动服务：
-
-```bash
-node dist/index.js start --host 0.0.0.0
-```
-
-打开转发的 **SandBase Harness Console** 端口，然后在 **Settings > Setup**
-中配置模型。GitHub 可能会对 Codespaces 用量计费；下方的本地快速开始仍然免费，
-并会把全部运行时数据保存在你的机器上。
-
 ## 核心能力
 
 - Claude Managed Agents 风格的 /v1 API 和本地 Console
@@ -348,27 +135,15 @@ node dist/index.js start --host 0.0.0.0
 - TypeScript SDK：managed-agents/sdk
 - 发布门禁：npm run release:check
 
-## 从源码启动
+## 从使用场景开始
 
-npm 上未加 scope 的 managed-agents **不是**本项目。请使用带标签的
-GitHub 源码，不要运行 npx managed-agents 或 npm install managed-agents。
+参见[场景展示](docs/showcase.zh-CN.md)，了解可审计 Coding Agent、以 DeepSeek
+Harness 为交互前端，以及 Local、Docker、Kubernetes、自托管沙箱的受控代码执行。
 
-~~~bash
-git clone --branch v0.3.8 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
-cd sandbase-harness
-npm ci
-npm run build
+社区实践讨论：
 
-mkdir ../my-agents && cd ../my-agents
-node ../sandbase-harness/dist/index.js init
-node ../sandbase-harness/dist/index.js start
-~~~
-
-打开 http://127.0.0.1:3000/dashboard，在 **Settings > Setup** 上完成两步：
-先在提供者表单里保存 API Key，页面提示保存的配置尚未生效时重启 Runtime，
-再在 **Agent models** 面板里把每个 Agent 的模型 ID 改成你的提供者实际提供的
-那个（例如 DeepSeek 用 `deepseek-chat`）。模型 ID 属于 Agent 本身，`init`
-写入的 `gpt-4o` 并非每个提供者都能用。
+- [Codex、Claude Code 与 DSH 的 Memory 迁移](https://github.com/deepseek-ai/deepseek-harness/discussions/14#discussioncomment-18202967)
+- [第三方插件的沙箱与文件系统防护](https://github.com/deepseek-ai/deepseek-harness/discussions/5068#discussioncomment-18202943)
 
 ## 接入 DeepSeek Harness
 
@@ -489,19 +264,6 @@ my-agents/
 [Security 页面](https://github.com/sandbaseai/sandbase-harness/security)，
 不要在公开 Issue 中附带 API Key、工作区数据或会话产物。
 
-## 文档
-
-- [机器可读项目元数据](./llms.txt)
-- [Agent / MCP 安装指南](./llms-install.md)
-- [安装](./docs/installation.md)
-- [使用指南](./docs/usage.md)
-- [API](./docs/api.md)
-- [Skill](./docs/skills.md)
-- [部署示例](./docs/deployment.md)
-- [DeepSeek V4](./docs/deepseek-v4.md)
-- [MiniMax](./docs/minimax.md)
-- [系统设计](./docs/spec/design.md)
-
 ## 开发与验证
 
 ~~~bash
@@ -517,5 +279,9 @@ npm run release:check
 [Discussions](https://github.com/sandbaseai/sandbase-harness/discussions)
 反馈问题、分享集成经验或参与贡献。
 
-引用信息见 [Citation metadata](./CITATION.cff)。推广入口和审核状态见[推广状态台账](./docs/promotion.md)；可复用的事实型
-[推广联系模板](./docs/promotion-outreach.md)供维护者发送给人工审核渠道。
+## 点 Star 与分享
+
+如果它解决了你的真实 Agent 基础设施问题，欢迎
+[为仓库点 Star](https://github.com/sandbaseai/sandbase-harness)，帮助更多开发者发现它。
+
+生态目录、社区指南与相关项目见 [docs/ecosystem.md](docs/ecosystem.md)。
