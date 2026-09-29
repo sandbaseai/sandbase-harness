@@ -9,10 +9,11 @@
 import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { wrapLanguageModel, type LanguageModel, type LanguageModelMiddleware } from 'ai';
-import { resolveEnvVars } from '@/core/config/env-resolver.js';
+import { EnvVarNotFoundError, resolveEnvVars } from '@/core/config/env-resolver.js';
 import { MINIMAX_PROVIDER, miniMaxOpenAiBaseUrl } from '@/core/model/minimax.js';
 import {
   ModelConfigInvalidError,
+  ModelCredentialUnresolvedError,
   ModelNotFoundError,
   ModelProviderNotConfiguredError,
 } from '@/model/errors.js';
@@ -31,6 +32,7 @@ export {
   MODEL_NOT_FOUND_CODE,
   MODEL_PROVIDER_NOT_CONFIGURED_CODE,
   ModelConfigInvalidError,
+  ModelCredentialUnresolvedError,
   ModelNotFoundError,
   ModelProviderNotConfiguredError,
   ModelResolutionError,
@@ -145,6 +147,13 @@ export class ModelRegistry {
    *
    * Exists so a caller can resolve a reference once and build from exactly that
    * configuration rather than resolving a second time.
+   *
+   * A `${VAR}` reference is resolved **strictly** here, unlike the read
+   * projections: `resolveEnvVars(..., false)` leaves the placeholder in place, so
+   * a provider whose key comes from an unset variable used to be called with
+   * `${OPENAI_API_KEY}` as the literal credential and answer 401 — a message that
+   * names neither the variable nor the field. Failing before the request instead
+   * is what makes the first turn say which variable is missing.
    */
   createModelFromConfig(config: ModelConfig): LanguageModel {
     if (!config.model) {
@@ -154,11 +163,12 @@ export class ModelRegistry {
         'Agent model id is required.',
       );
     }
-    const resolvedApiKey = config.api_key ? resolveEnvVars(config.api_key, false) : undefined;
-    const resolvedBaseUrl = config.base_url ? resolveEnvVars(config.base_url, false) : undefined;
+    const provider = config.provider ?? 'openai';
+    const resolvedApiKey = this.resolveCredential(config.api_key, provider, config.name, 'api_key');
+    const resolvedBaseUrl = this.resolveCredential(config.base_url, provider, config.name, 'base_url');
 
     const base = createModelInstance(
-      config.provider,
+      provider,
       config.model,
       resolvedApiKey,
       resolvedBaseUrl,
@@ -176,6 +186,30 @@ export class ModelRegistry {
     // would report whichever turn resolved most recently.
     resolvedModelIds.set(wrapped as object, config.model);
     return wrapped;
+  }
+
+  /**
+   * Resolve one provider field, turning an unset `${VAR}` into a named error.
+   *
+   * Only the model client path is strict. `configState` and `publicBaseUrl` keep
+   * reading the same value leniently, which is what lets a caller report *which*
+   * variable is missing instead of failing to render the configuration at all.
+   */
+  private resolveCredential(
+    value: string | undefined,
+    provider: string,
+    modelName: string,
+    field: 'api_key' | 'base_url',
+  ): string | undefined {
+    if (!value) return undefined;
+    try {
+      return resolveEnvVars(value, true);
+    } catch (error) {
+      if (error instanceof EnvVarNotFoundError) {
+        throw new ModelCredentialUnresolvedError(provider, modelName, field, error.varName);
+      }
+      throw error;
+    }
   }
 
   /**

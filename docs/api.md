@@ -949,11 +949,11 @@ top-level `error` field:
   "id": "sevt_01J...",
   "seq": 12,
   "type": "session.error",
-  "content": [{ "type": "text", "text": "401 unauthorized" }],
+  "content": [{ "type": "text", "text": "Provider \"openai\" takes its api_key from environment variable OPENAI_API_KEY, which is not set in the runtime's environment. ..." }],
   "error": {
-    "type": "model_error",
-    "message": "401 unauthorized",
-    "retry_status": "unknown"
+    "type": "model_config_invalid",
+    "message": "Provider \"openai\" takes its api_key from environment variable OPENAI_API_KEY, which is not set in the runtime's environment. ...",
+    "retry_status": "not_retryable"
   }
 }
 ```
@@ -962,12 +962,34 @@ top-level `error` field:
 `internal_error` when the failure carries none. `content` still carries the
 message as a text block, so a client that only renders content keeps working.
 
+A provider credential or endpoint written as `${VAR}` is resolved before the
+request is built. When the variable is not set in the runtime's own environment
+the turn fails with `model_config_invalid` and a message naming the variable, the
+field (`api_key` or `base_url`), and the provider, and **no request is sent**:
+the alternative this replaced left the placeholder in place, so
+`${OPENAI_API_KEY}` travelled as the credential and the provider answered `401`
+with a message that named neither. The session is left resumable — the same
+message tells the operator to set the variable, paste the value in
+`Dashboard Settings > Setup` and restart the runtime once (a settings write is
+`restart_required` until the next start), or remove the reference — and a later
+turn on the same session runs once one of those is done.
+
+Which path can reach that failure is worth stating, because the two write paths
+differ. `PUT /v1/x/settings` refuses a document whose `model.api_key` (or another
+secret path) is an unresolved `${VAR}` before it is stored, answering `422` with
+the `missing_env` issue naming the variable; the workspace configuration file
+(`.managed-agents/config.yaml`, which `init` writes as
+`api_key: ${OPENAI_API_KEY}`) is read at start-up with no such check, and a
+variable that was set when settings were saved can also be gone from a later
+start's environment. Both are the case this refusal covers, and either way the
+turn is the first place the runtime can name what is missing.
+
 `retry_status` is derived from `type`, never guessed from the message:
 
 | Value | Meaning | Codes |
 | --- | --- | --- |
 | `retryable` | Transient; the same request may succeed. | `pi_session_busy`, `work_queue_timeout` |
-| `not_retryable` | The runtime will refuse this request again. | `pi_cleanup_pending`, `pi_timed_out`, `pi_rpc_gate_unavailable`, `pi_rpc_gate_lost`, `pi_rpc_approval_not_pending`, `pi_always_ask_not_supported`, `pi_tool_policy_not_supported`, `pi_sandbox_provider_not_supported`, `pi_user_event_not_supported`, `pi_message_content_not_supported`, `loop_engine_not_supported`, `loop_engine_invalid`, `unsupported_capability`, `work_outcome_unknown`, `work_lease_lost` |
+| `not_retryable` | The runtime will refuse this request again. | `pi_cleanup_pending`, `pi_timed_out`, `pi_rpc_gate_unavailable`, `pi_rpc_gate_lost`, `pi_rpc_approval_not_pending`, `pi_always_ask_not_supported`, `pi_tool_policy_not_supported`, `pi_sandbox_provider_not_supported`, `pi_user_event_not_supported`, `pi_message_content_not_supported`, `loop_engine_not_supported`, `loop_engine_invalid`, `unsupported_capability`, `work_outcome_unknown`, `work_lease_lost`, `outcome_evaluator_unavailable`, `outcome_rubric_file_not_found`, `model_not_found`, `model_provider_not_configured`, `model_config_invalid`, `model_auth_failed` |
 | `unknown` | Not classified. Treat as possibly retryable. | any other code, including a failure with no code |
 
 `pi_always_ask_not_supported` is retained in that table but is no longer produced:

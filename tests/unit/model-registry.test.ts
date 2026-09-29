@@ -3,6 +3,7 @@ import {
   MODEL_CONFIG_INVALID_CODE,
   MODEL_NOT_FOUND_CODE,
   MODEL_PROVIDER_NOT_CONFIGURED_CODE,
+  ModelCredentialUnresolvedError,
   ModelRegistry,
   resolvedModelIdOf,
 } from '@/model/registry.js';
@@ -381,5 +382,105 @@ describe('ModelRegistry reasoning effort wiring', () => {
     await (registry.createModel('deepseek-v4-pro') as any).doGenerate({ prompt });
 
     expect(fetchStub.url()).toBe('https://example.invalid/v1/chat/completions');
+  });
+});
+
+/**
+ * A `${VAR}` reference is the difference between "the operator pasted a key" and
+ * "the operator pasted a variable name". `init` writes the second into
+ * `config.yaml`, so this is the ordinary first-run shape, and leaving the
+ * placeholder in place sent `${OPENAI_API_KEY}` to the provider as the credential.
+ */
+describe('ModelRegistry unresolved environment references', () => {
+  const KEY_VAR = 'SANDBASE_TEST_CONFORMANCE_KEY';
+  const URL_VAR = 'SANDBASE_TEST_CONFORMANCE_URL';
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+  });
+
+  function registryWith(fields: Partial<{ api_key: string; base_url: string }>): ModelRegistry {
+    const registry = new ModelRegistry();
+    registry.register({
+      name: 'deepseek',
+      provider: 'openai_compatible',
+      api_key: fields.api_key,
+      base_url: fields.base_url ?? 'https://api.deepseek.invalid/v1',
+      is_default: true,
+    });
+    return registry;
+  }
+
+  it('refuses the turn instead of sending the placeholder, naming variable and field', () => {
+    const registry = registryWith({ api_key: `\${${KEY_VAR}}` });
+
+    let thrown: unknown;
+    try {
+      registry.createModel('deepseek-chat');
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(thrown).toBeInstanceOf(ModelCredentialUnresolvedError);
+    const error = thrown as ModelCredentialUnresolvedError;
+    // The three facts a provider's 401 cannot give: which variable, which field,
+    // and which provider configuration to edit.
+    expect(error.variable).toBe(KEY_VAR);
+    expect(error.field).toBe('api_key');
+    expect(error.provider).toBe('openai_compatible');
+    // The code is the existing configuration one, so a client that already
+    // renders `model_config_invalid` needs no new case and the session stays
+    // resumable.
+    expect(error.code).toBe(MODEL_CONFIG_INVALID_CODE);
+    expect(error.message).toContain(KEY_VAR);
+    expect(error.message).toContain('api_key');
+    expect(error.message).toContain('Dashboard Settings > Models');
+  });
+
+  it('names the endpoint field when the unset reference is the base URL', () => {
+    const registry = registryWith({ api_key: 'literal-key', base_url: `\${${URL_VAR}}` });
+
+    expect(() => registry.createModel('deepseek-chat')).toThrow(ModelCredentialUnresolvedError);
+    try {
+      registry.createModel('deepseek-chat');
+    } catch (error) {
+      expect((error as ModelCredentialUnresolvedError).field).toBe('base_url');
+      expect((error as Error).message).toContain(URL_VAR);
+    }
+  });
+
+  it('sends the resolved value, not the reference, once the variable is set', async () => {
+    vi.stubEnv(KEY_VAR, 'resolved-key-value');
+    let authorization = '';
+    vi.stubGlobal('fetch', async (_url: unknown, init: { headers?: Record<string, string> }) => {
+      authorization = init?.headers?.authorization ?? init?.headers?.Authorization ?? '';
+      return new Response(
+        JSON.stringify({
+          id: 'x',
+          created: 0,
+          model: 'm',
+          choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+          usage: { prompt_tokens: 1, completion_tokens: 1 },
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    });
+
+    const registry = registryWith({ api_key: `\${${KEY_VAR}}` });
+    const prompt = [{ role: 'user' as const, content: [{ type: 'text' as const, text: 'hi' }] }];
+    await (registry.createModel('deepseek-chat') as any).doGenerate({ prompt });
+
+    expect(authorization).toBe('Bearer resolved-key-value');
+    expect(authorization).not.toContain('${');
+  });
+
+  it('still reports the unresolved reference through runtime introspection', () => {
+    // The read path stays lenient on purpose: a Console cannot tell an operator
+    // which variable to set if reading the configuration is what fails.
+    const info = registryWith({ api_key: `\${${KEY_VAR}}` }).listRuntimeInfo();
+
+    expect(info[0]?.api_key_state).toBe('missing_env');
+    expect(info[0]?.api_key_state).not.toBe('configured');
   });
 });

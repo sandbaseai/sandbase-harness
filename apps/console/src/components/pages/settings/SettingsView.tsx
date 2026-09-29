@@ -29,7 +29,7 @@ export function SettingsView({
       setView={setView}
       renderSection={(active) => (
         <>
-          {active === 'general' ? <SettingsGeneral data={data} setView={setView} /> : null}
+          {active === 'general' ? <SettingsGeneral data={data} setView={setView} onRefresh={onRefresh} /> : null}
           {active === 'workspace' ? <SettingsWorkspace data={data} /> : null}
           {active === 'advanced' ? <SettingsAdvanced data={data} setView={setView} /> : null}
           {active === 'models' ? <RuntimeSettingsEditor data={data} section="models" onRefresh={onRefresh} /> : null}

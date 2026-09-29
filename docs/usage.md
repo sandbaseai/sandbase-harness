@@ -87,6 +87,26 @@ Open:
 http://127.0.0.1:3000/dashboard
 ```
 
+Setting up a first conversation takes two steps, both on `Settings > Setup`:
+
+1. **Save the model provider** — the vendor, its base URL when it is an
+   OpenAI-compatible endpoint, and the API key. The key may be a `${VAR}`
+   reference; the runtime resolves it from the environment it was started with.
+   A saved provider is not active until the runtime restarts (`restart_required`
+   is what the settings response reports), and the page offers the restart.
+2. **Set each agent's model** — the `Agent models` panel lists every agent and the
+   model id it currently names, and saves a change in place. This step is not
+   optional: an agent carries its own model id, and the one `init` writes
+   (`gpt-4o`) has to be replaced with an id the configured provider serves. DeepSeek
+   through an OpenAI-compatible endpoint, for example, uses `deepseek-chat`.
+
+If a saved key is a `${VAR}` reference the runtime cannot resolve, the panel names
+the variable and a turn sent before it is set fails with a message naming that
+same variable — never with a provider `401` that hides it. Saving the form itself
+refuses an unresolved reference before it is stored, so this is the state a
+variable leaves behind when it is unset in a later start, or when the reference
+came from `.managed-agents/config.yaml`.
+
 The Dashboard includes:
 
 - Workspace and local runtime status

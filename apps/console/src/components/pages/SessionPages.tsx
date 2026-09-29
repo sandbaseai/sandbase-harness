@@ -1,4 +1,4 @@
-import { Archive, ChevronDown, Clock, Cloud, Copy, Download, Keyboard, MessageSquare, Monitor, Plus, Search, Send, Square, X } from 'lucide-react';
+import { Archive, ChevronDown, Clock, Cloud, Copy, Download, Info, Keyboard, MessageSquare, Monitor, Plus, Search, Send, Square, X } from 'lucide-react';
 import { type Dispatch, type FormEvent, type ReactNode, type SetStateAction, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -6,6 +6,7 @@ import { deleteJson, getPage, postJson, readEventStream } from '../../api';
 import { EmptyState, FilterSelect, LoadingState, ResourceBadge, StatusPill, Toolbar } from '../Common';
 import { downloadJson, formatDateShort, formatDuration, formatUsage, relativeDate, shortId, titleCase, truncateMiddle } from '../../lib/format';
 import { safeMarkdownUrl } from '../../lib/markdown';
+import { modelErrorHint, sessionErrorCode } from '../../lib/modelErrorHints';
 import { contiguousSessionSequence, mergeOrderedSessionEvents } from '../../lib/ordered-session-events';
 import type { Agent, ConsoleData, Session, SessionEvent, ToolPermission } from '../../types';
 
@@ -634,6 +635,7 @@ export function SessionDetail({
                         )
                         : (entry.text || 'No message content.')}
                     </div>
+                    {entry.role === 'error' ? <ModelErrorHint event={entry.event} /> : null}
                   </article>
                 ))}
                 {Object.entries(streamingText).map(([messageId, text]) => (
@@ -1211,4 +1213,22 @@ function eventTime(event: SessionEvent) {
   const value = event.processed_at ?? event.created_at;
   if (!value) return '-';
   return new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(value));
+}
+
+/**
+ * The repair for a model failure, under the message that reported it.
+ *
+ * The runtime names what is wrong (the variable, the model id) but not where to go
+ * in this Console, so the hint is added here rather than in the message. A failure
+ * that is not about the model renders nothing at all.
+ */
+function ModelErrorHint({ event }: { event: SessionEvent }) {
+  const hint = modelErrorHint(sessionErrorCode(event));
+  if (!hint) return null;
+  return (
+    <div className="modelErrorHint">
+      <Info size={14} />
+      <span>{hint}</span>
+    </div>
+  );
 }

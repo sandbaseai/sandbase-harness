@@ -46,6 +46,9 @@
     // under vitest while the runtime program stays free of the Console's
     // pre-existing type errors.
     "tests/unit/console-agent-capabilities.test.tsx",
+    // Renders the Setup page's agent-model panel, so it belongs with the Console
+    // tests above rather than in the runtime program.
+    "tests/unit/setup-agent-models.test.tsx",
     "tests/unit/docs-api.test.ts",
     "tests/integration/console-api-e2e.test.ts"
   ]

@@ -1,12 +1,22 @@
 import { useEffect, useState } from 'react';
-import { Bot, Box, CheckCircle2, KeyRound, Layers, Play, Terminal } from 'lucide-react';
-import { putJson } from '../../../api';
+import { Bot, Box, CheckCircle2, KeyRound, Layers, Play, RotateCw, Terminal } from 'lucide-react';
+import { postJson, putJson } from '../../../api';
 import { pathName, workspaceConfigDir } from '../../../lib/format';
+import { pendingRestartNote, providerSavedMessage, setupModelProvider } from '../../../lib/modelSetupGuidance';
 import { KeyValuePanel, SummaryStrip } from '../../Common';
 import { FormField } from '../../FormPrimitives';
+import { SetupAgentModels } from './SetupAgentModels';
 import type { ConsoleData, RuntimeSettings, RuntimeSettingsConfig, ViewId, Workspace } from '../../../types';
 
-export function SettingsGeneral({ data, setView }: { data: ConsoleData; setView: (view: ViewId) => void }) {
+export function SettingsGeneral({
+  data,
+  setView,
+  onRefresh,
+}: {
+  data: ConsoleData;
+  setView: (view: ViewId) => void;
+  onRefresh: () => void;
+}) {
   const workspaceLabel = data.workspace?.name && data.workspace.name !== 'managed-agents'
     ? data.workspace.name
     : 'Default';
@@ -16,8 +26,12 @@ export function SettingsGeneral({ data, setView }: { data: ConsoleData; setView:
   const [baseUrl, setBaseUrl] = useState(savedModel?.base_url ?? defaultModelBaseUrl(savedModel?.vendor));
   const [apiKey, setApiKey] = useState('');
   const [saving, setSaving] = useState(false);
+  const [restarting, setRestarting] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
+  const [providerSaved, setProviderSaved] = useState(false);
   const baseUrlVendor = vendor === 'openai_compatible' || vendor === 'minimax';
+  const provider = setupModelProvider(settings);
+  const restartNote = pendingRestartNote(settings?.restart_required, settings?.activation_status);
 
   useEffect(() => {
     setVendor(savedModel?.vendor ?? 'openai');
@@ -44,12 +58,34 @@ export function SettingsGeneral({ data, setView }: { data: ConsoleData; setView:
         },
       };
       await putJson<RuntimeSettings>('/v1/x/settings', { revision: settings.revision, config: nextConfig });
-      setMessage('Model provider saved. You can now create an agent or start a session.');
+      // Saving the provider is only half of setup: the model id lives on the
+      // agent, and the saved provider is not the runtime's effective one until
+      // the next start, so the Console has to point at both remaining steps
+      // instead of reporting a finished setup.
+      setMessage(providerSavedMessage);
+      setProviderSaved(true);
       setApiKey('');
+      onRefresh();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'Could not save model provider');
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function restartRuntime() {
+    setRestarting(true);
+    setMessage(null);
+    try {
+      await postJson('/v1/x/restart', {});
+      // The runtime is going down, so this page's data is deliberately left as it
+      // is and the message asks for the reload, the same way the settings editors
+      // handle their own restart: refetching now would race the restart.
+      setMessage('Restart scheduled. Refresh this page once the runtime is ready, then send the first message.');
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'Could not restart the runtime.');
+    } finally {
+      setRestarting(false);
     }
   }
 
@@ -111,8 +147,14 @@ export function SettingsGeneral({ data, setView }: { data: ConsoleData; setView:
                 />
               </FormField>
               {message ? <div className="inlineStatus neutral">{message}</div> : null}
+              {restartNote ? <div className="setupProviderWarning">{restartNote}</div> : null}
               <div className="formActions">
                 <button className="primaryButton" type="submit" disabled={!canSave}>{saving ? 'Saving...' : 'Save provider'}</button>
+                {providerSaved || restartNote ? (
+                  <button className="secondaryButton" type="button" onClick={() => void restartRuntime()} disabled={restarting}>
+                    <RotateCw size={14} /> {restarting ? 'Restarting...' : 'Restart runtime'}
+                  </button>
+                ) : null}
               </div>
             </form>
           ) : (
@@ -160,6 +202,13 @@ export function SettingsGeneral({ data, setView }: { data: ConsoleData; setView:
             </div>
           </div>
         </div>
+        <SetupAgentModels
+          data={data}
+          provider={provider}
+          emphasize={providerSaved}
+          restartRequired={settings?.restart_required}
+          onRefresh={onRefresh}
+        />
       </div>
     </section>
   );

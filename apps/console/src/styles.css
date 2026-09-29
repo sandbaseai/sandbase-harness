@@ -7304,3 +7304,98 @@ label.searchBox input {
     font-size: 11px;
   }
 }
+
+/* Setup: the agent-model step between a saved provider and a first message. */
+.setupAgentModels {
+  grid-column: 1 / -1;
+  gap: 12px;
+}
+
+/* After the provider is saved this panel is the remaining step, so it is marked
+   rather than left to look like one more informational card. */
+.setupAgentModelsNext {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.setupAgentHint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.setupProviderWarning {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 9px 11px;
+  border-radius: var(--radius-sm);
+  background: var(--warning-soft);
+  color: var(--warning-text);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.setupAgentList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.setupAgentRow {
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.setupAgentIdentity {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.setupAgentIdentity strong {
+  font-size: 13.5px;
+}
+
+.setupAgentIdentity span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.setupAgentForm {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.setupAgentForm input {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+
+/* A model failure is repairable, so the transcript carries the destination
+   rather than leaving the operator with a provider's own wording. */
+.modelErrorHint {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--warning-soft);
+  color: var(--warning-text);
+  font-size: 12.5px;
+  line-height: 1.45;
+}

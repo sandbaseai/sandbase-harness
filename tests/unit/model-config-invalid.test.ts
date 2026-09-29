@@ -13,6 +13,7 @@ import { describe, expect, it } from 'vitest';
 import {
   MODEL_CONFIG_INVALID_CODE,
   ModelConfigInvalidError,
+  ModelCredentialUnresolvedError,
   ModelResolutionError,
   RESUMABLE_MODEL_FAILURE_CODES,
 } from '@/model/errors.js';
@@ -39,5 +40,19 @@ describe('model_config_invalid', () => {
 
     expect(error.message).toContain('missing-model');
     expect(error.message).toContain('available-model');
+  });
+
+  it('covers an unresolved environment reference, so that mistake is resumable too', () => {
+    // An unset `${VAR}` in a provider's credential is the same kind of mistake —
+    // the configuration is unusable and the operator can repair it — so it
+    // carries the same code instead of a new one, and inherits both the
+    // resumability above and the `not_retryable` disposition a client sees.
+    const error = new ModelCredentialUnresolvedError('openai', 'gpt-4o', 'api_key', 'OPENAI_API_KEY');
+
+    expect(error).toBeInstanceOf(ModelResolutionError);
+    expect(error.code).toBe(MODEL_CONFIG_INVALID_CODE);
+    expect(RESUMABLE_MODEL_FAILURE_CODES.has(error.code)).toBe(true);
+    expect(error.message).toContain('OPENAI_API_KEY');
+    expect(error.message).not.toContain('Model not found');
   });
 });

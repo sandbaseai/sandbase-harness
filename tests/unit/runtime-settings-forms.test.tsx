@@ -468,9 +468,10 @@ describe('Runtime Settings forms', () => {
       },
       sessions: [],
       apiKeys: [],
+      agents: [],
     } as unknown as ConsoleData;
 
-    const html = renderToStaticMarkup(<SettingsGeneral data={data} setView={() => {}} />);
+    const html = renderToStaticMarkup(<SettingsGeneral data={data} setView={() => {}} onRefresh={() => {}} />);
 
     expect(html).toContain('Setup');
     expect(html).toContain('Model provider');
@@ -480,6 +481,43 @@ describe('Runtime Settings forms', () => {
     expect(html).not.toContain('settingsOverviewCard');
     expect(html).not.toContain('One default model vendor');
     expect(html).not.toContain('HTTP endpoints, SDK snippets');
+  });
+
+  it('offers the restart the saved provider needs before the model id can be used', () => {
+    // Without this the Setup page reports a finished provider while the runtime
+    // is still built from the previous one: a settings write is `restart_required`
+    // until the next start.
+    const data = {
+      runtime: { status: 'running', models: [{ name: 'default' }], sandbox_providers: ['local'], auth_enabled: false },
+      workspace: { name: 'managed-agents', dataDir: '/tmp/managed-agents' },
+      sessions: [],
+      apiKeys: [],
+      agents: [],
+      settings: {
+        schema_version: 1,
+        revision: 2,
+        effective_revision: 1,
+        saved_config: config,
+        effective_config: config,
+        restart_required: true,
+        activation_status: 'pending',
+        activation_errors: [],
+        diagnostics: { metadata: { path: '/tmp/data.db', health: 'ok' } },
+        secret_states: { model: { api_key: 'configured' } },
+        adapters: {
+          model: [{ id: 'openai', label: 'OpenAI', version: '1', status: 'available', restart_policy: 'runtime', options_schema: {} }],
+          loop_engine: [{ id: 'builtin', label: 'Default', version: '1', status: 'available', restart_policy: 'runtime', options_schema: {} }],
+          storage: { metadata: [], artifacts: [] },
+          memory: [{ id: 'sqlite', label: 'SQLite', version: '1', status: 'available', restart_policy: 'runtime', options_schema: {} }],
+          sandbox: [{ id: 'local', label: 'Local', version: '1', status: 'available', restart_policy: 'runtime', options_schema: {} }],
+        },
+      } satisfies RuntimeSettings,
+    } as unknown as ConsoleData;
+
+    const html = renderToStaticMarkup(<SettingsGeneral data={data} setView={() => {}} onRefresh={() => {}} />);
+
+    expect(html).toContain('not active yet');
+    expect(html).toContain('Restart runtime');
   });
 
   it('renders Logs with an expanded console layout', () => {

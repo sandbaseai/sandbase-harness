@@ -646,6 +646,12 @@ Agents pick concrete model IDs (`gpt-4o`, `claude-sonnet-4-20250514`,
 `openai/gpt-5.5`). The workspace config only says how to reach the model
 service.
 
+`${OPENAI_API_KEY}` is read from the environment the runtime was started with. If
+it is not set, the first turn fails with a message naming that variable and sends
+no request: set it before starting the runtime, or paste a literal key under
+`Settings > Setup`, which also lists every agent's model so the ID can be set
+without editing these files.
+
 For DeepSeek V4 Pro/Flash configuration, including maximum reasoning effort,
 see [DeepSeek V4](docs/deepseek-v4.md).
 

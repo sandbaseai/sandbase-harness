@@ -98,3 +98,37 @@ export class ModelConfigInvalidError extends ModelResolutionError {
     this.name = 'ModelConfigInvalidError';
   }
 }
+
+/**
+ * A provider's credential or endpoint is written as `${VAR}` and that variable is
+ * not set in the runtime's environment.
+ *
+ * This is a configuration mistake, so it carries {@link MODEL_CONFIG_INVALID_CODE}
+ * rather than a code of its own: the session is left resumable, the request is
+ * classified `not_retryable`, and a Console that already knows how to render
+ * `model_config_invalid` needs no new case. What it adds over the generic message
+ * is the two facts an operator cannot guess from a provider's 401 — which
+ * variable is missing, and which field of which provider references it — plus the
+ * fixes that actually apply.
+ *
+ * The message deliberately does not use the shared `Model not found:` prefix. The
+ * model is not the problem here; sending the caller to look at the model id would
+ * be the same misdirection this error exists to remove.
+ */
+export class ModelCredentialUnresolvedError extends ModelResolutionError {
+  constructor(
+    public readonly provider: string,
+    public readonly modelName: string,
+    public readonly field: 'api_key' | 'base_url',
+    public readonly variable: string,
+  ) {
+    const fix = field === 'api_key'
+      ? `Set ${variable} in the environment the runtime was started from, paste a literal key in Dashboard Settings > Models, or remove the reference from the provider configuration.`
+      : `Set ${variable} in the environment the runtime was started from, write the endpoint literally in Dashboard Settings > Models, or remove the reference from the provider configuration.`;
+    super(
+      MODEL_CONFIG_INVALID_CODE,
+      `Provider "${provider}" takes its ${field} from environment variable ${variable}, which is not set in the runtime's environment. ${fix}`,
+    );
+    this.name = 'ModelCredentialUnresolvedError';
+  }
+}
