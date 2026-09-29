@@ -127,6 +127,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@anthropic-ai/sdk": "0.129.0",
     "@types/escape-html": "1.0.4",
     "@types/node": "^26.6.2",
     "@types/react": "^19.3.0",
