@@ -27,7 +27,7 @@ node ../sandbase-harness/dist/index.js init
 node ../sandbase-harness/dist/index.js start     # http://127.0.0.1:3000
 ```
 
-Then give the runtime a model provider, in the Console at **Settings > Models** or
+Then give the runtime a model provider, in the Console at **Settings > Setup** or
 in `.managed-agents/config.yaml`. Nothing here supplies a model: the stub provider
 the conformance suite uses lives in `tests/`, is registered by a test workspace,
 and is not a provider a user can select from Settings, the CLI, or these docs.

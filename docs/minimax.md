@@ -29,9 +29,11 @@ Keep the API key outside version control:
 export MINIMAX_API_KEY=your-key
 ```
 
-Start SandBase Harness, open **Settings > Models**, and select **MiniMax**.
-Choose the global or mainland China region, then click **Check configuration**
-before saving.
+Start SandBase Harness, open **Settings > Advanced** → **Model provider editor**,
+and select **MiniMax**.
+The region is an adapter option rather than a field on that form: on the **JSON**
+tab set `options.region` to `global_en` or `cn_zh` (it defaults to `global_en`),
+then click **Check configuration** before saving.
 
 The equivalent `.managed-agents/config.yaml` section is:
 

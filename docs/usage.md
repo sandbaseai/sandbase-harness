@@ -122,12 +122,13 @@ The Dashboard includes:
 
 ## Runtime Settings
 
-Open `Settings > Models`, `Loop engine`, `Storage`, `Memory`, or `Sandbox` to
-edit the workspace runtime configuration. Settings V2 stores one versioned JSON
-document in SQLite under the runtime data directory. Each Console page edits its
-own section of that document: `Models` edits `model`, `Loop engine` edits
-`loop_engine`, `Storage` edits `storage`, `Memory` edits `memory`, and
-`Sandbox` edits `sandbox`. The Form and JSON tabs are two views of that current
+Open `Settings > Advanced` and pick `Model provider editor`, `Loop engine
+editor`, `Storage editor`, `Memory editor`, or `Sandbox editor` to edit the
+workspace runtime configuration. Settings V2 stores one versioned JSON
+document in SQLite under the runtime data directory. Each editor owns one
+section of that document: `Model provider editor` edits `model`, `Loop engine
+editor` edits `loop_engine`, `Storage editor` edits `storage`, `Memory editor`
+edits `memory`, and `Sandbox editor` edits `sandbox`. The Form and JSON tabs are two views of that current
 section, and saving merges the section back into the versioned document.
 
 The usual sequence is:
@@ -217,7 +218,7 @@ Requires `kubectl` on `PATH` and a reachable cluster. Each session becomes one
 Pod running `sleep infinity`; commands run through `kubectl exec` and files move
 through `kubectl cp`.
 
-Configure it under `Settings > Sandbox`, or per Environment:
+Configure it under `Settings > Advanced` → `Sandbox editor`, or per Environment:
 
 ```json
 {

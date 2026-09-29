@@ -132,7 +132,7 @@ Acceptance:
 
 Current product decision:
 
-- Settings > Memory configures the context memory backend.
+- The Memory editor under Settings > Advanced configures the context memory backend.
 - Memory Stores remain resource objects outside Settings.
 - SQLite/in-memory are local implementations.
 - mem0, MemU, and external DB backends are adapters, not UI promises.
@@ -148,7 +148,7 @@ Acceptance:
 
 Current product decision:
 
-- Settings > Sandbox configures the active backend.
+- The Sandbox editor under Settings > Advanced configures the active backend.
 - Environments define reusable session templates/policies that run on that backend.
 - Local/Docker/self-hosted can be shown only when available/implemented.
 - Remote/cloud sandbox is roadmap.

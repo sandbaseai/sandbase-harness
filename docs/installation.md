@@ -151,7 +151,8 @@ uploaded resource state, and logs live inside the workspace state directory.
 
 ## Configure The Model Vendor
 
-Start the runtime, open the Dashboard, and go to `Settings > Models`.
+Start the runtime, open the Dashboard, and go to `Settings > Advanced`, then
+`Model provider editor`.
 
 ```text
 http://127.0.0.1:3000/dashboard#models
@@ -179,7 +180,7 @@ settings and becomes the effective configuration. On every later start the saved
 settings document is the single effective source, so editing this section
 afterwards changes nothing — the runtime warns at startup when the file and the
 effective settings differ, and says which source wins. Update the model provider
-in `Settings > Models`, or start from a new workspace to re-import the file.
+in `Settings > Setup`, or start from a new workspace to re-import the file.
 
 The `model` section supplies the provider, the base URL, and the API key. Two
 things placed there are not applied, and the runtime names them at startup rather
@@ -209,7 +210,7 @@ storage:
       base_path: files
 ```
 
-The same Settings page also configures the single active Loop engine, Storage
+The Settings area also configures the single active Loop engine, Storage
 backends, Memory backend, and default Sandbox. Docker appears as available only
 when the runtime detects Docker support. Planned adapters such as S3, mem0,
 MemU, Codex, Harness, and Claude are shown as unavailable until a real runtime

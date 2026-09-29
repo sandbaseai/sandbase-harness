@@ -13,7 +13,8 @@ Set your API key in the environment:
 export DEEPSEEK_API_KEY="<your DeepSeek API key>"
 ```
 
-In Dashboard **Settings > Models**, switch to JSON and configure:
+In Dashboard **Settings > Advanced** → **Model provider editor**, switch to JSON
+and configure:
 
 ```json
 {

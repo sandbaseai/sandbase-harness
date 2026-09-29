@@ -124,7 +124,7 @@ export function createCliProgram({ version, startServer }: CliProgramOptions): C
       console.log('  1. Build:   npm run build');
       console.log(`  2. Package: ship dist/ + agents/ + skills/ + ${WORKSPACE_STATE_DIR}/config.yaml`);
       console.log('  3. Run:     node dist/index.js start --port $PORT');
-      console.log('  4. Add model providers in Dashboard Settings > Models, or seed a new');
+      console.log('  4. Add model providers in Dashboard Settings > Setup, or seed a new');
       console.log(`     workspace from ${WORKSPACE_STATE_DIR}/config.yaml.`);
       console.log('  5. Or containerize with any Node 22+ base image.\n');
       console.log(`Runtime metadata, secrets, and logs are stored under ${WORKSPACE_STATE_DIR}/.`);
@@ -535,7 +535,7 @@ environments:
   console.log('  agents/assistant.yaml');
   console.log('  skills/');
   console.log(`  ${WORKSPACE_STATE_DIR}/config.yaml`);
-  console.log('\nNext: start the runtime, then add a model provider in Dashboard Settings > Models:');
+  console.log('\nNext: start the runtime, then add a model provider in Dashboard Settings > Setup:');
   console.log('  managed-agents start');
   if (process.argv[1]) {
     console.log(`  # source checkout: node ${process.argv[1]} start`);

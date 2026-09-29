@@ -182,7 +182,7 @@ describe('config.yaml model settings that will not take effect', () => {
     expect(warnings).toHaveLength(1);
     expect(warnings[0]).toContain('https://from-yaml.invalid/v1');
     expect(warnings[0]).toContain('https://in-effect.invalid/v1');
-    expect(warnings[0]).toContain('Settings > Models');
+    expect(warnings[0]).toContain('Settings > Setup');
   });
 
   it('warns when config.yaml declares a key that is not in effect', () => {

@@ -155,7 +155,7 @@ export function pendingRestartNote(
   activationStatus?: RuntimeSettings['activation_status'],
 ): string | undefined {
   if (activationStatus === 'failed') {
-    return 'The saved provider could not be activated. Fix what Settings > Models reports, save, then restart the runtime once.';
+    return 'The saved provider could not be activated. Fix the highlighted field in Settings > Advanced → Model provider editor, save, then restart the runtime once.';
   }
   if (!restartRequired) return undefined;
   return 'The saved provider is not active yet. Restart the runtime once, then send the first message.';

@@ -139,7 +139,7 @@ export function configModelWarnings(
   effective: RuntimeSettings['model'],
 ): string[] {
   const warnings: string[] = [];
-  const source = 'config.yaml only seeds a workspace on its first start. After that the saved Settings document (Settings > Models) is the single effective model configuration';
+  const source = 'config.yaml only seeds a workspace on its first start. After that the saved Settings document (Settings > Setup) is the single effective model configuration';
 
   for (const key of bootstrap.ignoredModelKeys) {
     warnings.push(`config.yaml "model.${key}" is not applied: the workspace model section supplies the provider, base URL and API key, while a concrete model id belongs to an Agent and the vendor options bag has no column in the model record this file seeds.`);

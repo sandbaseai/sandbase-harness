@@ -435,7 +435,7 @@ describe('ModelRegistry unresolved environment references', () => {
     expect(error.code).toBe(MODEL_CONFIG_INVALID_CODE);
     expect(error.message).toContain(KEY_VAR);
     expect(error.message).toContain('api_key');
-    expect(error.message).toContain('Dashboard Settings > Models');
+    expect(error.message).toContain('Dashboard Settings > Setup');
     expect(error.message).toContain('is not set in the runtime');
   });
 

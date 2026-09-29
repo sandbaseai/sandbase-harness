@@ -158,7 +158,8 @@ database. The current SQLite-backed runtime should run as a single writer.
 
 Running the runtime in Kubernetes and running session sandboxes as Pods are
 independent choices. The Deployment above does neither by itself: the sandbox
-backend is selected by `Settings > Sandbox` or by an Environment's
+backend is selected by `Settings > Advanced` → `Sandbox editor`, or by an
+Environment's
 `sandbox_provider`, and it works the same whether the runtime process sits
 inside the cluster or on a laptop pointed at one.
 

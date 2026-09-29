@@ -970,7 +970,8 @@ the alternative this replaced left the placeholder in place, so
 `${OPENAI_API_KEY}` travelled as the credential and the provider answered `401`
 with a message that named neither. The message carries the three repairs that
 apply — set the variable in the environment the runtime was started from, write
-the value literally in `Dashboard Settings > Models`, or remove the reference —
+the value literally in the model provider editor under `Dashboard Settings >
+Advanced`, or remove the reference —
 and the session is left resumable, so a later turn on it runs once one of them is
 done. Saving that literal value through `PUT /v1/x/settings` is only in effect
 after the runtime restarts (the write stays `restart_required` until the next

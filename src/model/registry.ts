@@ -379,8 +379,8 @@ function unserviceableNamespaceReason(
   if (!FIRST_PARTY_VENDOR_PROVIDERS.has(defaultProvider)) return undefined;
   if (providerFamily(namespace) === providerFamily(defaultProvider)) return undefined;
   return providerFamily(namespace) === 'anthropic'
-    ? `Provider "${namespace}" is not configured, and the configured provider "${defaultProvider}" speaks the OpenAI-compatible API rather than the Anthropic Messages API. Configure an Anthropic provider in Settings > Models, set the workspace model vendor to "openai_compatible" when the endpoint is a router, or reference the model without a vendor namespace.`
-    : `Provider "${namespace}" is not configured, and the configured provider "${defaultProvider}" cannot serve an OpenAI-compatible model id. Configure that provider in Settings > Models, or reference the model without a vendor namespace.`;
+    ? `Provider "${namespace}" is not configured, and the configured provider "${defaultProvider}" speaks the OpenAI-compatible API rather than the Anthropic Messages API. Configure an Anthropic provider in Settings > Setup, set the workspace model vendor to "openai_compatible" when the endpoint is a router, or reference the model without a vendor namespace.`
+    : `Provider "${namespace}" is not configured, and the configured provider "${defaultProvider}" cannot serve an OpenAI-compatible model id. Configure that provider in Settings > Setup, or reference the model without a vendor namespace.`;
 }
 
 function configState(value?: string): RuntimeConfigState {

@@ -190,7 +190,7 @@ describe('providerSavedMessage', () => {
     const note = pendingRestartNote(true, 'failed');
 
     expect(note).toContain('could not be activated');
-    expect(note).toContain('Settings > Models');
+    expect(note).toContain('Settings > Advanced');
     expect(note).not.toContain('Restart the runtime once, then send');
   });
 });

@@ -14,7 +14,7 @@
  *
  *   1. Start a runtime and give it a model provider, following the repository
  *      Quick Start (`dist/index.js init`, then `dist/index.js start`), then
- *      configure a provider in Settings > Models. See the README beside this
+ *      configure a provider in Settings > Setup. See the README beside this
  *      file for the exact commands.
  *   2. Run this script, pointing at the runtime:
  *        ANTHROPIC_BASE_URL=http://127.0.0.1:3000 ANTHROPIC_API_KEY=local \

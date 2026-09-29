@@ -62,7 +62,7 @@ export class ModelResolutionError extends Error {
 function resolutionMessage(modelName: string, available: string[], detail?: string): string {
   const suggestion = available.length > 0
     ? `Available models: ${available.join(', ')}`
-    : 'No models registered. Add a model provider in Dashboard Settings > Models';
+    : 'No models registered. Add a model provider in Dashboard Settings > Setup';
   return `Model not found: "${modelName}". ${detail ? `${detail} ` : ''}${suggestion}`;
 }
 
@@ -135,8 +135,8 @@ export class ModelCredentialUnresolvedError extends ModelResolutionError {
       ? `is set to an empty value in the runtime's environment`
       : `is not set in the runtime's environment`;
     const fix = field === 'api_key'
-      ? `Set ${variable} in the environment the runtime was started from, paste a literal key in Dashboard Settings > Models, or remove the reference from the provider configuration.`
-      : `Set ${variable} in the environment the runtime was started from, write the endpoint literally in Dashboard Settings > Models, or remove the reference from the provider configuration.`;
+      ? `Set ${variable} in the environment the runtime was started from, paste a literal key in Dashboard Settings > Setup, or remove the reference from the provider configuration.`
+      : `Set ${variable} in the environment the runtime was started from, write the endpoint literally in the model provider editor under Dashboard Settings > Advanced, or remove the reference from the provider configuration.`;
     super(
       MODEL_CONFIG_INVALID_CODE,
       `Provider "${provider}" takes its ${field} from environment variable ${variable}, which ${state}. ${fix}`,

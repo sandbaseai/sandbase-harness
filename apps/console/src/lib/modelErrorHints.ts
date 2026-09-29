@@ -26,13 +26,14 @@ export function sessionErrorCode(event: SessionEvent): string | undefined {
 const HINTS: Record<string, string> = {
   model_not_found:
     'The provider does not serve this model id. Give the agent a model id this provider offers in Settings > Setup, '
-    + 'or point the runtime at a provider that serves it in Settings > Models.',
+    + 'or point the runtime at a provider that serves it in Settings > Setup.',
   model_provider_not_configured:
-    'This workspace has no provider for that model reference. Configure it in Settings > Models, or reference the '
+    'This workspace has no provider for that model reference. Configure it in Settings > Setup, or reference the '
     + 'model without its vendor prefix.',
   model_config_invalid:
     'The provider configuration cannot be used as stored. The message above names what is missing: set that variable '
-    + 'in the environment the runtime was started from, or paste the value in Settings > Setup and restart the runtime.',
+    + 'in the environment the runtime was started from, or store the value in the model provider editor under Settings > '
+    + 'Advanced and restart the runtime.',
   model_auth_failed:
     'The provider refused the credential. Re-enter the API key in Settings > Setup — and if the stored key is a '
     + '`${VAR}` reference, set that variable in the environment the runtime was started from. A key saved here is '
