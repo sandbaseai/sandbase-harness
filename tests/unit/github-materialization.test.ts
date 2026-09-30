@@ -75,6 +75,7 @@ function fakeDeps(options: {
 } = {}) {
   const calls: FakeGitCall[] = [];
   const removed: string[] = [];
+  const removedAfterWrite: Array<{ path: string; written: number }> = [];
   const written = new Map<string, string>();
   const files = options.files ?? REPO_FILES;
   const caches = options.existingCaches ?? new Set<string>();
@@ -96,6 +97,10 @@ function fakeDeps(options: {
     },
     removeDir: (path) => {
       removed.push(path);
+      // `written.size` at the moment of the removal is what tells a pre-clone
+      // cleanup apart from one that ran after the tree had been copied into the
+      // sandbox — the difference between "clear the way" and "clean up after".
+      removedAfterWrite.push({ path, written: written.size });
     },
     listFiles: async (path) => {
       // The only listing that can miss is the cache probe, which the
@@ -128,7 +133,7 @@ function fakeDeps(options: {
     async cleanup() {},
   };
 
-  return { deps, sandbox, calls, removed, written };
+  return { deps, sandbox, calls, removed, removedAfterWrite, written };
 }
 
 function makeResource(overrides: Partial<GithubRepositoryResource> = {}): GithubRepositoryResource {
@@ -306,6 +311,85 @@ describe('github materialization', () => {
     if (result.ok) return;
     expect(result.message).toContain('git clone failed');
     expect(removed.length).toBeGreaterThan(0);
+  });
+
+  it('removes the staging clone after a successful mount', async () => {
+    // A resource with no checkout has no cache key, so its clone lands in a
+    // `tmp-` directory that exists only to be copied into the sandbox. Nothing
+    // reads it afterwards, and the cleanup used to run on failure only: every
+    // successful mount of an un-pinned repository left a complete clone — `.git`
+    // and all — in the cache root. Five unpinned mounts left five of them in the
+    // workspace this was found in.
+    const { deps, sandbox, removedAfterWrite, calls, written } = fakeDeps();
+    const result = await materializeGithubRepository(makeResource({ checkout: undefined }), sandbox, deps);
+
+    expect(result.ok).toBe(true);
+    const cloneCwd = calls.find((call) => call.args[0] === 'clone')?.cwd ?? '';
+    expect(cloneCwd).toContain('/tmp-');
+    // The tree was read before it was removed: the mount still got its files.
+    const copied = written.size;
+    expect(copied).toBeGreaterThan(0);
+    // And the removal happens *after* the copy. Asserting only that the path was
+    // removed says nothing here, because the materializer clears the staging path
+    // before the clone as well; the pre-clone removal is why the previous
+    // behaviour looked clean while leaving the clone behind.
+    const staging = removedAfterWrite.filter((entry) => entry.path === cloneCwd);
+    expect(staging.some((entry) => entry.written === copied)).toBe(true);
+  });
+
+  it('keeps a cache entry a successful mount just cloned, because the next session reuses it', async () => {
+    const cacheKey = githubCacheKey(URL, { type: 'commit', sha: 'abc123' })!;
+    const cachePath = `/cache/${GITHUB_CACHE_DIRNAME}/${cacheKey}`;
+    const { deps, sandbox, removed, calls } = fakeDeps();
+
+    const result = await materializeGithubRepository(
+      makeResource({ checkout: { type: 'commit', sha: 'abc123' } }),
+      sandbox,
+      deps,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(calls.find((call) => call.args[0] === 'clone')?.cwd).toBe(cachePath);
+    // Exactly one removal at the cache path: the pre-clone cleanup of whatever a
+    // previous run left there. A second one would mean the cleanup deleted the
+    // entry this clone just produced.
+    expect(removed.filter((path) => path === cachePath).length).toBe(1);
+  });
+
+  it('removes nothing at all when the mount reused a cache entry', async () => {
+    const cacheKey = githubCacheKey(URL, { type: 'commit', sha: 'abc123' })!;
+    const cachePath = `/cache/${GITHUB_CACHE_DIRNAME}/${cacheKey}`;
+    const { deps, sandbox, removed } = fakeDeps({ existingCaches: new Set([cachePath]) });
+
+    const result = await materializeGithubRepository(
+      makeResource({ checkout: { type: 'commit', sha: 'abc123' } }),
+      sandbox,
+      deps,
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.cached).toBe(true);
+    expect(removed).toEqual([]);
+  });
+
+  it('removes a cache entry whose clone failed, so the next session does not reuse it', async () => {
+    const cacheKey = githubCacheKey(URL, { type: 'commit', sha: 'abc123' })!;
+    const cachePath = `/cache/${GITHUB_CACHE_DIRNAME}/${cacheKey}`;
+    const { deps, sandbox, removed } = fakeDeps({
+      cloneResult: { exitCode: 128, stderr: 'fatal: repository not found' },
+    });
+
+    const result = await materializeGithubRepository(
+      makeResource({ checkout: { type: 'commit', sha: 'abc123' } }),
+      sandbox,
+      deps,
+    );
+
+    expect(result.ok).toBe(false);
+    // The pre-clone cleanup and the failure cleanup: the second one is what keeps
+    // a half-populated entry from looking valid to the next session.
+    expect(removed.filter((path) => path === cachePath).length).toBeGreaterThan(1);
   });
 
   it('never writes a partially mounted tree when the clone fails', async () => {

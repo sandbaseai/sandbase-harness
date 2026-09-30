@@ -359,11 +359,22 @@ export async function materializeGithubRepository(
 
     return { ok: true, mountPath, skills, cached };
   } catch (err) {
-    // A failed materialization must not leave a staged tree behind for the next
-    // session to mistake for a valid cache entry.
-    if (staging && !cached) await ignoreFailure(deps.removeDir(staging));
+    // A clone that never finished must not leave a half-populated cache entry for
+    // the next session to mistake for a valid one.
+    if (staging && !cached && staging === cachePath) await ignoreFailure(deps.removeDir(staging));
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, message: sanitizeGitOutput(message, token.token) };
+  } finally {
+    // `staging` is one of two things, and only one of them may be deleted here.
+    // A cache entry is the artifact: `staging === cachePath` means the tree is
+    // what the next session reuses, so it stays. A `tmp-` directory is
+    // scaffolding for the copy into the sandbox — a resource with no cache key is
+    // cloned there — and it has no reader after this function returns, so it goes
+    // on every exit path. It used to go only when something failed, which left a
+    // complete clone of the repository behind for every successful mount of an
+    // un-pinned resource: a full copy of the tree, `.git` included, that nothing
+    // would ever read again.
+    if (staging && staging !== cachePath) await ignoreFailure(deps.removeDir(staging));
   }
 }
 

@@ -70,8 +70,16 @@ sequence, and every phase has a defined failure disposition:
 
 Failure disposition is the part that is easy to get wrong:
 
-- A failed phase deletes the staging directory. Nothing is left behind on disk
-  for a session that never started.
+- A staging directory is deleted on **every** exit path, success included. The
+  directory is one of two things, and the rule names both. A `tmp-` clone exists
+  only to be copied into the sandbox — a resource with no cache key always clones
+  into one — and it is removed once it has been read, because nothing reaches for
+  it after the mount. A cache entry is the artifact a later session reuses, so it
+  stays, and only a cache entry is deleted when a phase fails: that is what keeps
+  a clone which never finished from being mistaken for a valid entry. Success used
+  to be the one path that skipped the cleanup, so every mount of an un-pinned
+  repository left a complete clone of it — `.git` included — in the cache root,
+  one per materialization.
 - Token hygiene is enforced by `sanitizeGitOutput(text, token)`, which strips the
   token from git's own stdout/stderr before the message is turned into an error.
   `skillPathsAreTokenFree(paths, token)` asserts the discovered skill paths do
@@ -249,13 +257,19 @@ creation rather than served, so no claim is made that they mount a repository.
   cached revision), clone argument construction (including that an absent
   checkout is a plain default-branch clone with no `--branch`), token-bearing
   environment rather than argv, output sanitization, skill discovery, mount
-  identity comparison, and the failure paths that must clean up staging. It also
-  drives the `SandboxLifecycle` mount path with an injected materializer.
+  identity comparison, and the cleanup rule for both kinds of staging directory:
+  a failed clone or checkout removes either kind, a successful mount removes the
+  `tmp-` clone *after* the tree was copied into the sandbox, and a successful
+  mount keeps a cache entry it just cloned while reusing one removes nothing at
+  all. It also drives the `SandboxLifecycle` mount path with an injected
+  materializer.
 - `tests/integration/github-materialization-real.test.ts` — the host-side
   primitives against a real `git` binary: clone, checkout, cache reuse, timeout
-  behaviour, that the token never appears in the captured output, and that both
-  the default-branch clone command and a resource with no checkout materialize a
-  real repository rather than failing the clone.
+  behaviour, that the token never appears in the captured output, that both the
+  default-branch clone command and a resource with no checkout materialize a real
+  repository rather than failing the clone, and that the staging clone of the
+  latter is gone from the cache root once the mount returns — the directory the
+  clone ran in no longer exists, and the cache root holds nothing.
 - `tests/unit/github-git-output.test.ts` — the retention rule itself, at and past
   the cap: an output that fits is untouched, and a stream — one chunk or many —
   keeps its last `MAX_OUTPUT_CHARS` characters.

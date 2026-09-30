@@ -269,9 +269,11 @@ describe.skipIf(!hasGit)('github host primitives (real git + real filesystem)', 
     // spelled `--branch HEAD` again.
     const deps = createGithubMaterializeDeps({ cacheRoot });
     const cloned: string[][] = [];
+    const cloneDirs: string[] = [];
     const runGit: MaterializeDeps['runGit'] = async (args, opts) => {
       const local = args.map((arg) => (arg === 'https://github.com/acme/widget' ? fileUrl(repoPath) : arg));
       cloned.push(local);
+      if (args[0] === 'clone' && opts.cwd) cloneDirs.push(opts.cwd);
       return deps.runGit(local, opts);
     };
     const written = new Map<string, string>();
@@ -311,5 +313,16 @@ describe.skipIf(!hasGit)('github host primitives (real git + real filesystem)', 
     expect(clone).not.toContain('--branch');
     expect(result.skills).toEqual(['code-review']);
     expect(written.has('/workspace/widget/README.md')).toBe(true);
+
+    // This resource has no cache key, so the clone went into a `tmp-` staging
+    // directory rather than into a cache entry. The tree it produced has been
+    // copied into the sandbox and has no reader afterwards, so the directory is
+    // gone — and with it the only copy of the clone on this host. The success
+    // path used to leave the whole tree, `.git` included, in the cache root: one
+    // per materialization, for every repository resource that names no revision.
+    expect(cloneDirs.length).toBe(1);
+    expect(cloneDirs[0]).toContain('tmp-');
+    expect(existsSync(cloneDirs[0]!)).toBe(false);
+    expect(readdirSync(join(cacheRoot, 'github-repositories'))).toEqual([]);
   });
 });
