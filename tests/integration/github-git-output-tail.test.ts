@@ -61,6 +61,12 @@ describe.skipIf(!hasGit)('git output retention (real git)', { timeout: 60_000 },
     // last line names the last file — the same shape a failure message has.
     const config = spawnSync('git', ['config', 'core.autocrlf', 'true'], { cwd: repo, encoding: 'utf8' });
     expect(config.status).toBe(0);
+    // The warnings only exist while `core.safecrlf` keeps its default. An ambient
+    // `core.safecrlf=false` (a developer's or a runner's global config) silences
+    // the stream entirely and fails this case for a reason unrelated to the code:
+    // pinned explicitly, so the fixture depends on nothing but this file.
+    const safecrlf = spawnSync('git', ['config', 'core.safecrlf', 'warn'], { cwd: repo, encoding: 'utf8' });
+    expect(safecrlf.status).toBe(0);
 
     for (let i = 0; i < WIDE_FILE_COUNT; i += 1) {
       writeFileSync(join(repo, `f${String(i).padStart(4, '0')}.txt`), 'line one\nline two\n');
