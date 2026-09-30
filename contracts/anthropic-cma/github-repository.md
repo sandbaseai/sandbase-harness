@@ -70,16 +70,18 @@ sequence, and every phase has a defined failure disposition:
 
 Failure disposition is the part that is easy to get wrong:
 
-- A staging directory is deleted on **every** exit path, success included. The
-  directory is one of two things, and the rule names both. A `tmp-` clone exists
-  only to be copied into the sandbox — a resource with no cache key always clones
-  into one — and it is removed once it has been read, because nothing reaches for
-  it after the mount. A cache entry is the artifact a later session reuses, so it
-  stays, and only a cache entry is deleted when a phase fails: that is what keeps
-  a clone which never finished from being mistaken for a valid entry. Success used
-  to be the one path that skipped the cleanup, so every mount of an un-pinned
-  repository left a complete clone of it — `.git` included — in the cache root,
-  one per materialization.
+- Every `tmp-` staging directory is deleted on **every** exit path, success
+  included, and the rule has two halves because `staging` is one of two things.
+  A `tmp-` clone exists only to be copied into the sandbox — a resource with no
+  cache key always clones into one — and it is removed once it has been read,
+  because nothing reaches for it after the mount. A cache entry is the artifact a
+  later session reuses, so it stays on success, and it is deleted when a phase
+  fails: that is what keeps a clone which never finished from being mistaken for
+  a valid entry. A cache hit is the one success path that deletes nothing, since
+  its staging directory *is* the entry. Success used to be among the paths that
+  skipped the cleanup, and so did the one failure that returns early without
+  asking for one, so a mount of an un-pinned repository could leave a complete
+  clone of it — `.git` included — in the cache root, one per materialization.
 - Token hygiene is enforced by `sanitizeGitOutput(text, token)`, which strips the
   token from git's own stdout/stderr before the message is turned into an error.
   `skillPathsAreTokenFree(paths, token)` asserts the discovered skill paths do

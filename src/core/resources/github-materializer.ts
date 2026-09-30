@@ -360,8 +360,9 @@ export async function materializeGithubRepository(
     return { ok: true, mountPath, skills, cached };
   } catch (err) {
     // A clone that never finished must not leave a half-populated cache entry for
-    // the next session to mistake for a valid one.
-    if (staging && !cached && staging === cachePath) await ignoreFailure(deps.removeDir(staging));
+    // the next session to mistake for a valid one. A `tmp-` directory needs no
+    // branch here: the `finally` below runs on this path too.
+    if (staging && !cached) await ignoreFailure(deps.removeDir(staging));
     const message = err instanceof Error ? err.message : String(err);
     return { ok: false, message: sanitizeGitOutput(message, token.token) };
   } finally {
@@ -370,10 +371,11 @@ export async function materializeGithubRepository(
     // what the next session reuses, so it stays. A `tmp-` directory is
     // scaffolding for the copy into the sandbox — a resource with no cache key is
     // cloned there — and it has no reader after this function returns, so it goes
-    // on every exit path. It used to go only when something failed, which left a
-    // complete clone of the repository behind for every successful mount of an
-    // un-pinned resource: a full copy of the tree, `.git` included, that nothing
-    // would ever read again.
+    // on every exit path. Cleanup used to run only where a path called it
+    // explicitly, which left a complete clone of the repository behind after
+    // every successful mount of an un-pinned resource, and on the one failure
+    // that returned early without calling it: a full copy of the tree, `.git`
+    // included, that nothing would ever read again.
     if (staging && staging !== cachePath) await ignoreFailure(deps.removeDir(staging));
   }
 }
