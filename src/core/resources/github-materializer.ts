@@ -140,7 +140,13 @@ export function cloneArgs(url: string, checkout: GithubCheckout | undefined): st
  * No tracing switch is set here, and none may be: git reads `GIT_CURL_VERBOSE`
  * for its *presence*, so the `GIT_CURL_VERBOSE: ''` an earlier revision set to
  * "keep the header out of any config dump" did the opposite and turned curl
- * tracing on. Where that guarantee lives now is `gitChildEnv` in
+ * tracing on for every invocation — that is, it wrote transport metadata and the
+ * `Authorization` header's presence to stderr on every clone, and it pushed the
+ * `fatal:` line past the bounded output this module keeps. The header itself is
+ * redacted by default (`Authorization: Basic <redacted>`, measured on git 2.55)
+ * and unredacted once `GIT_TRACE_REDACT=false` is exported alongside it, so the
+ * trace was one host variable away from the token and the mechanism cannot rest
+ * on redaction. Where that guarantee lives now is `gitChildEnv` in
  * `github-runtime.ts`, which removes every tracing switch from the child
  * environment whether it was inherited or passed in.
  */

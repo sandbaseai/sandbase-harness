@@ -8,9 +8,14 @@
  *
  * The defect this covers: the child environment used to carry
  * `GIT_CURL_VERBOSE: ''`, and git reads that variable for its *presence*, so the
- * empty string turned tracing on for every invocation — a trace that prints the
- * `Authorization: Basic` header, whose base64 form `sanitizeGitOutput` does not
- * replace.
+ * empty string turned tracing on for every invocation. What that trace wrote is
+ * narrower than the first revision of this comment claimed: git redacts the
+ * `Authorization` header by default, so the token was not printed as base64 by
+ * the empty value alone — the header's presence and the transport metadata were,
+ * and the trace became credential-bearing once a host also exported
+ * `GIT_TRACE_REDACT=false` (measured on git 2.55). This file therefore proves
+ * *no trace*, which is the property the guard provides; it cannot prove "no
+ * credential" on its own, because a refused connection sends no header at all.
  *
  * The first case is the control. Without it the second could pass on a git build
  * that simply cannot trace, which would make it prove nothing; it also documents
@@ -78,6 +83,7 @@ describe.skipIf(!hasGit)('git tracing (real git, no network)', { timeout: 60_000
     // neighborhood: no trace, so nothing carried the credential out.
     expect(result.exitCode).not.toBe(0);
     expect(result.stderr).not.toContain(TRACE_LINE);
+    expect(result.stderr).not.toContain('Authorization');
   });
 
   it('cannot be traced by a host variable either, in any casing', async () => {
@@ -96,6 +102,7 @@ describe.skipIf(!hasGit)('git tracing (real git, no network)', { timeout: 60_000
 
       expect(result.exitCode).not.toBe(0);
       expect(result.stderr).not.toContain(TRACE_LINE);
+      expect(result.stderr).not.toContain('Authorization');
     } finally {
       if (saved === undefined) delete process.env.GIT_CURL_VERBOSE;
       else process.env.GIT_CURL_VERBOSE = saved;

@@ -60,36 +60,48 @@ export function retainTail(current: string, chunk: string): string {
 }
 
 /**
- * Environment variables that make git write a trace.
+ * The families of environment variables that make git write a trace.
  *
- * Every one of these is read for its *presence* or its value, and every one of
- * them makes git print something it otherwise would not. With the token sitting
- * in the same child environment, that output is a credential exposure: a curl
- * trace prints `Authorization: Basic <base64>`, and the base64 form is not the
- * string `sanitizeGitOutput` replaces. `GIT_TRACE_REDACT` is on this list for the
- * opposite reason — setting it to `false` turns tracing's own redaction *off*, so
- * removing it restores the safe default.
+ * git reads each of these for its *presence*, and each one makes git print
+ * something it otherwise would not, from the same child environment that carries
+ * the repository token. The rule is the family rather than the member names
+ * because the member names are not a closed set: git 2.55 documents
+ * `GIT_TRACE_REFS`, `GIT_TRACE_PACKFILE`, `GIT_TRACE_FSMONITOR`,
+ * `GIT_TRACE2_BRIEF`, `GIT_TRACE2_EVENT_BRIEF`, `GIT_TRACE2_EVENT_NESTING` and
+ * `GIT_TRACE2_PERF_BRIEF` beyond the handful an earlier revision of this code
+ * listed, and two of those were measured to write output — `GIT_TRACE_REFS=1`
+ * produced 52 trace lines for a local clone and `GIT_TRACE_PACKFILE=<file>`
+ * wrote a pack file (git 2.55.0.windows.5). A list of names this code happened
+ * to know about would leave the next one git adds in the child environment.
+ *
+ * What the trace would carry is a separate question, and the answer is narrower
+ * than an earlier revision of this comment claimed. The switches that dump the
+ * request are `GIT_CURL_VERBOSE`, `GIT_TRACE_CURL` and
+ * `GIT_TRACE_CURL_NO_DATA`, and git redacts the `Authorization` header by
+ * default: the baseline environment printed `=> Send header: Authorization:
+ * Basic <redacted>`, not the base64 form of the token (measured on git 2.55).
+ * The base64 appears once `GIT_TRACE_REDACT=false` is exported as well, and
+ * trace2's `configparams` dump writes it unredacted whenever
+ * `GIT_TRACE2_CONFIG_PARAMS` names the header's config key. `GIT_TRACE_REDACT`
+ * is therefore in the family for the opposite reason to the rest — its `false`
+ * turns tracing's own redaction off — and redaction being a *default* that the
+ * child environment can disable is exactly why the strip is unconditional and
+ * covers the whole family.
  */
-export const GIT_TRACE_ENV_VARS = [
-  'GIT_TRACE',
-  'GIT_TRACE_PACKET',
-  'GIT_TRACE_PACK_ACCESS',
-  'GIT_TRACE_PERFORMANCE',
-  'GIT_TRACE_SETUP',
-  'GIT_TRACE_SHALLOW',
-  'GIT_TRACE_CURL',
-  'GIT_TRACE_CURL_NO_DATA',
-  'GIT_TRACE_REDACT',
-  'GIT_TRACE2',
-  'GIT_TRACE2_EVENT',
-  'GIT_TRACE2_PERF',
-  'GIT_TRACE2_CONFIG_PARAMS',
-  'GIT_TRACE2_DST',
-  'GIT_CURL_VERBOSE',
-] as const;
+export const GIT_TRACE_ENV_PREFIXES = ['GIT_TRACE', 'GIT_TRACE2', 'GIT_CURL_VERBOSE'] as const;
 
-/** {@link GIT_TRACE_ENV_VARS} upper-cased, for a case-insensitive match. */
-const GIT_TRACE_ENV_KEYS = new Set<string>(GIT_TRACE_ENV_VARS.map((name) => name.toUpperCase()));
+/**
+ * Whether an environment variable name belongs to a family git traces with.
+ *
+ * The comparison ignores case because the Windows child environment does:
+ * `git_curl_verbose=1` and `Git_Curl_Verbose=1` both trace there (measured on
+ * git 2.55.0.windows.5), so an exact-name match would leave a variable that
+ * differs by one character as a way to defeat the strip.
+ */
+export function isGitTraceEnvName(name: string): boolean {
+  const upper = name.toUpperCase();
+  return GIT_TRACE_ENV_PREFIXES.some((prefix) => upper.startsWith(prefix));
+}
 
 /**
  * The environment a git child gets.
@@ -98,22 +110,19 @@ const GIT_TRACE_ENV_KEYS = new Set<string>(GIT_TRACE_ENV_VARS.map((name) => name
  * Windows its own installation variables — so the child inherits it. What does
  * not reach it is any tracing switch, whether it came from the host or was
  * passed in: a deployment that exports `GIT_CURL_VERBOSE=1` for its own
- * debugging must not thereby print this runtime's repository credentials, and
- * an empty string is not the safe value it looks like, because git reads that
+ * debugging must not thereby print this runtime's repository credentials, and an
+ * empty string is not the safe value it looks like, because git reads that
  * variable for its presence (`GIT_CURL_VERBOSE=''` traces, measured on git
  * 2.55).
  *
- * The name comparison ignores case because the Windows child environment does:
- * `git_curl_verbose=1` and `Git_Curl_Verbose=1` both trace there (measured on git
- * 2.55.0.windows.5), so an exact-name match would leave a variable that differs
- * by one character as a way to defeat the strip. The copy has to be walked by its
- * own keys rather than by the list, because those spellings are distinct keys on
- * the plain object even though Windows treats them as one variable.
+ * The copy has to be walked by its own keys rather than by a comparison against
+ * the parent, because mixed-case spellings are distinct keys on the plain object
+ * even though Windows treats them as one variable.
  */
 export function gitChildEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = { ...process.env, ...(extra ?? {}) };
   for (const name of Object.keys(env)) {
-    if (GIT_TRACE_ENV_KEYS.has(name.toUpperCase())) delete env[name];
+    if (isGitTraceEnvName(name)) delete env[name];
   }
   return env;
 }

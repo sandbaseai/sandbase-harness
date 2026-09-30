@@ -77,15 +77,30 @@ Failure disposition is the part that is easy to get wrong:
   `skillPathsAreTokenFree(paths, token)` asserts the discovered skill paths do
   not embed the token.
 - The credential never reaches a trace either, because the child environment git
-  is given carries no tracing switch: `gitChildEnv` deletes `GIT_TRACE*`,
-  `GIT_TRACE2*`, `GIT_CURL_VERBOSE`, and `GIT_TRACE_REDACT` from it, whether the
-  host exported them or a caller passed them. `GIT_CURL_VERBOSE` is the one that
-  matters — git reads it for its **presence**, so an empty value traces — and a
-  curl trace prints the `Authorization: Basic` header in base64, which
-  `sanitizeGitOutput` does not replace, because it strips the token and not its
-  encoding. `GIT_TRACE_REDACT` is removed for the opposite reason: setting it to
-  `false` turns tracing's own redaction off, so removing it restores the safe
-  default.
+  is given carries no tracing switch: `gitChildEnv` deletes every variable whose
+  name belongs to the `GIT_TRACE`, `GIT_TRACE2`, or `GIT_CURL_VERBOSE` family,
+  whatever its casing, whether the host exported it or a caller passed it. The
+  rule is the family and not a list of names because git documents more tracing
+  switches than a list would hold — `GIT_TRACE_REFS=1` wrote 52 trace lines for a
+  local clone and `GIT_TRACE_PACKFILE=<file>` wrote a pack file on git
+  2.55.0.windows.5, and neither belonged to the list an earlier revision shipped.
+  `GIT_CURL_VERBOSE` is the one that matters — git reads it for its **presence**,
+  so an empty value traces — and it was the defect: the empty value an earlier
+  revision set to "keep the header out of a config dump" turned curl tracing on
+  for every invocation. What such a trace carries is narrower than it looks and
+  still not a guarantee: git redacts the `Authorization` header by default
+  (`Authorization: Basic <redacted>`, measured on git 2.55), so the empty value
+  alone printed the transport metadata and the header's presence rather than the
+  token's base64 form, which appears once `GIT_TRACE_REDACT=false` joins the same
+  environment — and trace2's `configparams` dump writes it unredacted whenever
+  `GIT_TRACE2_CONFIG_PARAMS` names the header's key. `sanitizeGitOutput` could not
+  have covered that form, because it strips the token and not its encoding.
+  `GIT_TRACE_REDACT` is removed for the opposite reason: its `false` turns
+  tracing's own redaction off, so removing it keeps the default in place. The
+  strip is about switches in the child environment; a host whose **git config**
+  enables trace2 (`trace2.eventTarget` plus `configparams` in a file reached
+  through `GIT_CONFIG_GLOBAL`) can still write an unredacted trace, and defending
+  that would mean config isolation rather than environment hygiene.
 - Output is capped at `MAX_OUTPUT_CHARS = 4_000` before it reaches an error
   message, and the characters that survive the cap are the **last** 4 000 of each
   stream (`retainTail`), not the first: the line that explains a failure is the
@@ -212,14 +227,22 @@ creation rather than served, so no claim is made that they mount a repository.
   `GIT_TRACE_REDACT=false` are all gone from the child environment, a caller
   cannot reintroduce one, a non-tracing variable still arrives, a differently
   cased name is matched too, and the credential header, `GIT_TERMINAL_PROMPT=0`,
-  and the empty `GIT_ASKPASS` survive the strip.
+  and the empty `GIT_ASKPASS` survive the strip. It also holds the case that
+  decides whether the rule is a family or a list: the switches git 2.55 documents
+  beyond the names the first revision shipped (`GIT_TRACE_REFS`,
+  `GIT_TRACE_PACKFILE`, `GIT_TRACE_FSMONITOR`, `GIT_TRACE2_BRIEF`,
+  `GIT_TRACE2_EVENT_BRIEF`, `GIT_TRACE2_EVENT_NESTING`, `GIT_TRACE2_PERF_BRIEF`)
+  are passed in and must not survive, which fails against a guard that names
+  switches one at a time.
 - `tests/integration/github-git-trace.test.ts` — the same rule against real git,
   with no network and no credential: a refused connection to a closed loopback
   port still makes curl write its `== Info:` trace when tracing is on, so the
   first case is a control that pins that (an empty `GIT_CURL_VERBOSE` traces), and
   the others assert that an invocation carrying the authorization header prints no
-  trace — not from the header itself, and not when the host exports the switch in
-  any casing.
+  trace and no `Authorization` line — not from the header itself, and not when the
+  host exports the switch in any casing. It proves *no trace*, which is the
+  property the guard provides; it cannot prove "no credential", because a refused
+  connection never sends the header.
 - `tests/unit/github-materialization.test.ts` — decision logic: the URL grammar,
   cache-key scope (commit only; a branch and an absent checkout both name no
   cached revision), clone argument construction (including that an absent
