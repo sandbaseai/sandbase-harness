@@ -380,6 +380,18 @@ export interface StreamedEvent {
    * what the documented client loop reads (`docs/api.md`).
    */
   stop_reason?: string | { type: 'end_turn' | 'requires_action'; event_ids?: string[] };
+  /**
+   * Structured failure of a `session.error`, projected from the event's metadata
+   * carrier. Always carries all three keys; a client must treat an unrecognized
+   * `retry_status` as `unknown`. Absent on the transient frame the message route
+   * emits when the stream itself breaks, which carries the text in `content`
+   * instead — a client that only reads this field would miss that one.
+   */
+  error?: {
+    type: string;
+    message: string;
+    retry_status: string;
+  };
   /** The event's own metadata carrier, as persisted and published. */
   metadata?: Record<string, unknown>;
 }

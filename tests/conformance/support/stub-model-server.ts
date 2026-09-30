@@ -84,6 +84,25 @@ export interface StubModelServerOptions {
    * two calls at once (`confirmation_group_id`).
    */
   toolCalls?: StubToolCall[];
+  /**
+   * Ordinals of requests to refuse instead of answering, 1-based.
+   *
+   * A turn that fails is as much a wire shape as one that succeeds, and it has to
+   * be scripted per request: a test that needs the failure on the *resumed*
+   * request (after a tool ran) or on the first turn only cannot get it from a
+   * server that always fails. A refusal the runtime retries consumes one ordinal
+   * per attempt, so a list writes the whole retry: `[2, 3, 4]` fails the three
+   * attempts of the resumed request and nothing else.
+   */
+  failRequests?: number[];
+  /**
+   * Status for the requests in `failRequests` (default `500`).
+   *
+   * `500` is an internal error the runtime treats as terminal for the session;
+   * `401` is a credential failure it does not retry and the session can continue
+   * from, which is the pair a client's two failure paths need.
+   */
+  failStatus?: number;
 }
 
 export async function startStubModelServer(options: StubModelServerOptions = {}): Promise<StubModelServer> {
@@ -99,6 +118,12 @@ export async function startStubModelServer(options: StubModelServerOptions = {})
     void readJson(req).then((body) => {
       const request = body as StubModelRequest;
       requests.push(request);
+      if (options.failRequests?.includes(requests.length)) {
+        const status = options.failStatus ?? 500;
+        res.writeHead(status, { 'content-type': 'application/json' });
+        res.end(JSON.stringify({ error: { message: `scripted ${status}`, type: 'invalid_request_error' } }));
+        return;
+      }
       if (wantToolCall(request)) {
         const scripted = options.toolCalls;
         if (scripted?.length) {

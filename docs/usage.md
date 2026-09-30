@@ -552,6 +552,20 @@ for it, so it waits for a `user.custom_tool_result` that only your own client ca
 produce: the command prints the exact request that would resume the turn and exits
 non-zero, leaving the call parked and the tool unrun.
 
+A turn can also **fail**: the provider refuses the credential, the endpoint is not
+reachable, or the model id is not one it serves. The runtime records a
+`session.error` naming the cause and ends the turn there — either as a failure the
+session continues from, or, when the runtime treats it as terminal, as a session
+in the `failed` state. `chat` prints that recorded message and exits non-zero, so a
+script that only reads the exit code can tell a failed turn from an agent that had
+nothing to say; the printed line also names the session, which is the one to send
+the next message to once the cause is fixed. A failure on the resumed half of a
+turn — after an approval was answered and the tool ran — is reported the same way
+instead of leaving the command on a stream that never closes. Interactive use keeps
+its prompt: the next line you type starts a new turn on the same session, and that
+turn is reported on its own, while the command still exits non-zero because the run
+did contain a failure.
+
 `environments create` requires `--name`; `--hosting-type` is one of `cloud`,
 `local`, or `self_hosted`, and `--config-json` supplies the backend config as a
 JSON object. A `--config-json` value that is not valid JSON, or that parses to

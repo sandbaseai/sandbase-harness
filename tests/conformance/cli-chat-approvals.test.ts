@@ -410,3 +410,120 @@ describe('chat with a turn that waits for approval', () => {
     }
   });
 });
+
+/**
+ * The acceptance gate for "`managed-agents chat` reports a turn that failed".
+ *
+ * A turn that cannot reach its provider, or whose credential the provider
+ * refuses, is recorded as a `session.error` and ends there — either as a failure
+ * the session continues from or as one the runtime treats as terminal. The
+ * command used to print nothing and exit `0`, which reads exactly like an agent
+ * that answered with silence, on the terminal path the README recommends for the
+ * first message; and a terminal failure, which the runtime reports as
+ * `session.status_terminated` rather than `session.status_idle`, left it waiting
+ * on a stream that never closes.
+ */
+describe('chat with a turn that fails', () => {
+  it('reports the recorded failure and exits non-zero', { timeout: 90_000 }, async () => {
+    // Port 1 on the loopback interface has no listener: the turn fails before a
+    // request can leave the process, without needing a provider to misbehave.
+    const runtime = await startRuntimeHarness({ modelBaseUrl: 'http://127.0.0.1:1/v1' });
+
+    try {
+      const run = await runChat(runtime, { message: 'hello' });
+      const context = `${run.stdout}\n${run.stderr}\n--- runtime ---\n${runtime.output()}`;
+
+      expect(run.sessionId, context).toMatch(/^sess_/);
+      expect(run.code, context).toBe(1);
+      expect(run.stdout).toContain('the turn failed');
+      // The session is not gone: the usual cause is a credential the operator
+      // can fix and then use again, so the command names it.
+      expect(run.stdout).toContain(run.sessionId);
+
+      // What the CLI printed has to be what the runtime recorded, not a second
+      // story invented at the prompt.
+      const state = await sessionState(runtime, run.sessionId);
+      const failure = state.events.find((event) => event.type === 'session.error');
+      expect(failure, context).toBeDefined();
+      const message = failure?.error?.message ?? '';
+      expect(message, context).not.toBe('');
+      expect(run.stdout).toContain(message);
+      expect(state.status).toBe('failed');
+      // The failure is not an approval, so nothing is parked and nothing runs.
+      expect(run.stdout).not.toContain('waiting for approval');
+    } finally {
+      await runtime.stop();
+    }
+  });
+
+  it('reports a failure on the resumed half of a turn', { timeout: 90_000 }, async () => {
+    // The half that used to hang: after an approval is answered the runtime
+    // finishes the tool and asks the model again, and a failure there is terminal
+    // — it ends the session with `session.status_terminated`, which the tail
+    // stream stays open after. Waiting for that socket to close is a command that
+    // never returns and never says why.
+    const stub = await startStubModelServer({
+      toolCalls: [{ name: 'bash', arguments: { command: 'echo conformance' } }],
+      // The first request asks for the tool; the resumed request is refused on
+      // each of the runtime's three attempts, so the failure is the terminal kind
+      // rather than one the session continues from.
+      failRequests: [2, 3, 4],
+    });
+    const runtime = await startRuntimeHarness({ modelBaseUrl: stub.baseUrl, agentTools: GATED_BASH_TOOLS });
+
+    try {
+      const run = await runChat(runtime, { message: 'run the command', toolApproval: 'allow' });
+      const context = `${run.stdout}\n${run.stderr}\n--- runtime ---\n${runtime.output()}`;
+
+      expect(run.sessionId, context).toMatch(/^sess_/);
+      expect(run.code, context).toBe(1);
+      expect(run.stdout).toContain('Allowing bash');
+      expect(run.stdout).toContain('the turn failed');
+      expect(run.stdout).toContain(run.sessionId);
+
+      const state = await sessionState(runtime, run.sessionId);
+      const failure = state.events.find((event) => event.type === 'session.error');
+      expect(failure, context).toBeDefined();
+      expect(run.stdout).toContain(failure?.error?.message ?? 'no message');
+      // The tool the operator allowed really ran, and the failure came after it.
+      expect(state.events.filter((event) => event.type === 'agent.tool_result')).toHaveLength(1);
+      expect(state.status).toBe('failed');
+    } finally {
+      await runtime.stop();
+      await stub.close();
+    }
+  });
+
+  it('does not report a later turn with an earlier turn failure', { timeout: 90_000 }, async () => {
+    // A resumable failure leaves the session usable, so the operator's next line
+    // is a new turn. That turn must be reported on its own: the failure belongs to
+    // the turn that recorded it, and re-printing it makes a successful turn look
+    // like a failed one.
+    const stub = await startStubModelServer({ failRequests: [1], failStatus: 401 });
+    const runtime = await startRuntimeHarness({ modelBaseUrl: stub.baseUrl });
+
+    try {
+      // The second line is written only once the prompt is back, after the
+      // failure report: the command reads a line when it asks for one, so a line
+      // that arrives earlier is read as the answer to something else (or dropped).
+      const run = await runChat(runtime, {
+        stdin: [{ send: 'first\n' }, { send: 'second\n', after: 'once the cause is fixed.\nyou> ' }],
+      });
+      const context = `${run.stdout}\n${run.stderr}\n--- runtime ---\n${runtime.output()}`;
+
+      expect(run.sessionId, context).toMatch(/^sess_/);
+      // The first turn failed; the second answered, and the run says so once.
+      expect(run.stdout.match(/the turn failed/g) ?? [], context).toHaveLength(1);
+      expect(run.stdout, context).toContain(STUB_REPLY_TEXT);
+      expect(stub.requests.length, context).toBeGreaterThanOrEqual(2);
+      // The run contained a failure, so the exit code stays non-zero.
+      expect(run.code, context).toBe(1);
+
+      const state = await sessionState(runtime, run.sessionId);
+      expect(state.status, context).toBe('idle');
+    } finally {
+      await runtime.stop();
+      await stub.close();
+    }
+  });
+});

@@ -710,6 +710,10 @@ ext_page as well as on the first page. No runtime behaviour changes.
   projection, resource selection, safe Markdown rendering, tool confirmation
   states, and event metadata needed by the Console.
 
+### Changed
+
+- **`managed-agents chat` reports a turn that failed instead of printing nothing and exiting `0`.** A turn whose provider refuses the credential, whose endpoint is unreachable, or whose model id is not served is recorded as a `session.error` carrying the runtime's own code and message, and the session is left resumable (or `failed`, for a failure the runtime treats as terminal). The command read that event nowhere, so it printed nothing after the session banner and exited `0` — indistinguishable, from a script or a terminal, from an agent that answered with silence, on the exact path the README recommends for the first message. It now prints the recorded message with its code and the session id, and exits `1`; interactive use keeps its prompt, and a run that contained a failure stays non-zero at exit. The failure is not an approval, so nothing is parked and no tool runs. The same change closes the other half of that path: a failure the runtime treats as terminal ends the session with `session.status_terminated` rather than `session.status_idle`, and the tail stream stays open after that frame, so the command waited on a socket that never closes and never reported anything — measured to hang indefinitely after an answered approval, and now ended by that frame. A failure is also reported for the turn that recorded it: the next line in an interactive session is a new turn, and a turn that succeeds no longer re-prints an earlier turn's failure. `StreamedEvent` in the SDK declares the `error` object the runtime projects onto that event (`type`, `message`, `retry_status`), which is what a client needs to tell a failed turn from an empty one.
+
 ## 0.3.8 - 2026-08-30
 
 ### Fixes

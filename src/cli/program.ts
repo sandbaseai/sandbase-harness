@@ -594,15 +594,21 @@ async function chatCommand(
   // from: `tail` without one is live-only, and the events between the idle frame
   // and the restart would be missed.
   let lastSeq = 0;
+  // The failure a `session.error` recorded for the turn being streamed, if any.
+  // A failed turn is not a parked one: it cannot be answered, and reporting it as
+  // a finished turn is what made the terminal path look like an agent that said
+  // nothing.
+  let turnError: TurnError | undefined;
 
   /**
    * Stream one turn and report what it parked on.
    *
    * A turn that waits for approval ends in an ordinary `session.status_idle`
    * whose `stop_reason` is `requires_action`; an ended turn ends in the same
-   * event without that reason. Both end the read: a `tail` stream stays open
-   * afterwards (that is what makes it a tail), so waiting for the socket to close
-   * would hang the prompt instead of returning to it.
+   * event without that reason. A failure the runtime considers terminal ends it
+   * with `session.status_terminated` instead. All three end the read: a `tail`
+   * stream stays open afterwards (that is what makes it a tail), so waiting for
+   * the socket to close would hang the prompt instead of returning to it.
    */
   const runTurn = async (events: AsyncIterable<import('../sdk/client.js').StreamedEvent>) => {
     // A replayed turn carries the persisted `agent.message` and none of the
@@ -625,6 +631,16 @@ async function chatCommand(
         process.stdout.write(`\n  -> tool: ${b?.name ?? '?'}\n`);
         const call = parkedCallFromEvent(ev);
         if (call) seen.set(call.eventId, call);
+      } else if (ev.type === 'session.error') {
+        // Reported where the turn settles, so the text and the exit code are
+        // written once no matter which stream carried the failure.
+        turnError = readTurnError(ev);
+      } else if (ev.type === 'session.status_terminated') {
+        // A failure the runtime considers terminal ends the session rather than
+        // parking it, and this stream stays open after that frame, so a tail read
+        // that waited for the socket would hang here forever. What gets reported
+        // is the `session.error` that arrived just before this frame.
+        return parkedCalls(parkedEventIds(ev), seen);
       } else if (ev.type === 'session.status_idle') {
         return parkedCalls(parkedEventIds(ev), seen);
       }
@@ -681,6 +697,10 @@ async function chatCommand(
    * this one.
    */
   const runUntilSettled = async (input: string) => {
+    // A failure belongs to the turn that recorded it: the next line the operator
+    // types is a new turn with its own report, and a turn that succeeds must not
+    // re-print an earlier turn's failure.
+    turnError = undefined;
     let parked = await runTurn(client.sessions.chat(session.id, input));
     while (parked.length > 0) {
       const outcome = await answerParkedCalls(parked, { client: client.sessions, sessionId: session.id, io });
@@ -711,6 +731,22 @@ async function chatCommand(
       process.stdout.write('agent> ');
       parked = await runTurn(client.sessions.tail(session.id, { lastEventId: String(lastSeq) }));
     }
+    // The cast is what lets the check through: the only assignment narrowed here
+    // is the reset at the top of this call, while the value itself is set inside
+    // `runTurn`.
+    const failure = turnError as TurnError | undefined;
+    if (failure) {
+      // The turn failed and cannot continue: say what the runtime recorded, and
+      // say it non-zero, so a script that only reads the exit code still learns
+      // that nothing answered. The session is named because the usual cause is a
+      // credential the operator can fix, and the runtime accepts another message
+      // on a failed session.
+      const label = failure.type ? ` (${failure.type})` : '';
+      process.stdout.write(`\nError: [CHAT] the turn failed${label}: ${failure.message}\n`);
+      process.stdout.write(`The session is still there: ${session.id} — send it another message once the cause is fixed.\n`);
+      process.exitCode = 1;
+      return;
+    }
     process.stdout.write('\n');
   };
 
@@ -737,6 +773,32 @@ async function chatCommand(
     });
   };
   ask();
+}
+
+/**
+ * The failure a `session.error` reports.
+ *
+ * A recorded failure carries the structured error the runtime projected onto the
+ * event; the message route also emits a bare `session.error` carrying only a text
+ * block when the stream itself breaks, so the content block is the fallback
+ * rather than the primary source.
+ */
+function readTurnError(ev: import('../sdk/client.js').StreamedEvent): TurnError {
+  const text = (ev.content ?? [])
+    .filter((block): block is { type: 'text'; text: string } => block.type === 'text')
+    .map((block) => block.text)
+    .join('');
+  const error = ev.error as { type?: string; message?: string } | undefined;
+  return {
+    ...(error?.type ? { type: error.type } : {}),
+    message: error?.message ?? (text || 'the turn failed and the runtime recorded no message'),
+  };
+}
+
+interface TurnError {
+  /** The runtime's error code, when the recorded event carried one. */
+  type?: string;
+  message: string;
 }
 
 async function listAgents(opts: { port: string }) {
