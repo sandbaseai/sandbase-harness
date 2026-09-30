@@ -37,8 +37,27 @@ export interface GithubRuntimeOptions {
 /** Directories never copied into a sandbox from a checkout. */
 const EXCLUDED_DIRS = new Set(['.git']);
 
-/** How many bytes of git output to retain before truncating a message. */
-const MAX_OUTPUT_CHARS = 4_000;
+/**
+ * How many characters of each git stream are retained for an error message.
+ *
+ * The cap is a security property — a message that reaches an event or a log line
+ * must be bounded — but *which* characters survive is a diagnostic one: the line
+ * that explains a failure is the last one git wrote, so the cap keeps the tail.
+ */
+export const MAX_OUTPUT_CHARS = 4_000;
+
+/**
+ * Append a chunk to a bounded buffer, keeping the tail.
+ *
+ * Retaining the first `MAX_OUTPUT_CHARS * 2` characters and then slicing the last
+ * `MAX_OUTPUT_CHARS` out of them keeps the *middle* of a long output. A clone
+ * that fails after 8 KiB of progress or trace output then reported none of the
+ * `fatal: …` line, which is the only actionable line in the whole stream.
+ */
+export function retainTail(current: string, chunk: string): string {
+  const next = current + chunk;
+  return next.length > MAX_OUTPUT_CHARS ? next.slice(-MAX_OUTPUT_CHARS) : next;
+}
 
 /**
  * Run git with the token in the environment.
@@ -70,18 +89,21 @@ function runGit(
       if (settled) return;
       settled = true;
       child.kill('SIGKILL');
+      const timedOut = `git command timed out after ${opts.timeoutMs ?? GIT_TIMEOUT_MS}ms`;
       resolve({
         exitCode: 124,
-        stdout: stdout.slice(-MAX_OUTPUT_CHARS),
-        stderr: `${stderr.slice(-MAX_OUTPUT_CHARS)}\ngit command timed out after ${opts.timeoutMs ?? GIT_TIMEOUT_MS}ms`,
+        stdout,
+        // The timeout line is appended inside the same cap, so the reason the
+        // command ended is never what the cap trims away.
+        stderr: retainTail(stderr, `\n${timedOut}`),
       });
     }, opts.timeoutMs ?? GIT_TIMEOUT_MS);
 
     child.stdout?.on('data', (chunk: Buffer) => {
-      if (stdout.length < MAX_OUTPUT_CHARS * 2) stdout += chunk.toString('utf8');
+      stdout = retainTail(stdout, chunk.toString('utf8'));
     });
     child.stderr?.on('data', (chunk: Buffer) => {
-      if (stderr.length < MAX_OUTPUT_CHARS * 2) stderr += chunk.toString('utf8');
+      stderr = retainTail(stderr, chunk.toString('utf8'));
     });
 
     child.on('error', (err) => {
@@ -96,8 +118,8 @@ function runGit(
       clearTimeout(timer);
       resolve({
         exitCode: code ?? 1,
-        stdout: stdout.slice(-MAX_OUTPUT_CHARS),
-        stderr: stderr.slice(-MAX_OUTPUT_CHARS),
+        stdout,
+        stderr,
       });
     });
   });

@@ -77,8 +77,12 @@ Failure disposition is the part that is easy to get wrong:
   `skillPathsAreTokenFree(paths, token)` asserts the discovered skill paths do
   not embed the token.
 - Output is capped at `MAX_OUTPUT_CHARS = 4_000` before it reaches an error
-  message, and every git invocation has a timeout of `GIT_TIMEOUT_MS = 120_000`;
-  a timed-out git reports exit code `124`.
+  message, and the characters that survive the cap are the **last** 4 000 of each
+  stream (`retainTail`), not the first: the line that explains a failure is the
+  last one git wrote, so a cap that keeps the middle of a long output reports
+  everything except the reason. Every git invocation has a timeout of
+  `GIT_TIMEOUT_MS = 120_000`; a timed-out git reports exit code `124` and its
+  message names the timeout inside the same cap.
 - `mountIdentityChanged(prev, next)` reports whether a running session's
   repository identity has moved. Changing the URL, the checkout, or the
   mount path requires a **new session**: the skills that were registered and the
@@ -202,6 +206,13 @@ creation rather than served, so no claim is made that they mount a repository.
   behaviour, that the token never appears in the captured output, and that both
   the default-branch clone command and a resource with no checkout materialize a
   real repository rather than failing the clone.
+- `tests/unit/github-git-output.test.ts` — the retention rule itself, at and past
+  the cap: an output that fits is untouched, and a stream — one chunk or many —
+  keeps its last `MAX_OUTPUT_CHARS` characters.
+- `tests/integration/github-git-output-tail.test.ts` — that rule against a real
+  `git` and a real stream: `core.autocrlf` warnings about a 400-file fixture write
+  tens of thousands of characters to stderr, and the message that comes back
+  contains the last file and not the first.
 - `tests/integration/session-resource-wiring.test.ts` — the mount path through
   the composition root: a repository URL outside the published grammar is
   answered by the default materializer rather than by a missing dependency, a
