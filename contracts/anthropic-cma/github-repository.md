@@ -98,9 +98,10 @@ Failure disposition is the part that is easy to get wrong:
   `GIT_TRACE_REDACT` is removed for the opposite reason: its `false` turns
   tracing's own redaction off, so removing it keeps the default in place. The
   strip is about switches in the child environment; a host whose **git config**
-  enables trace2 (`trace2.eventTarget` plus `configparams` in a file reached
-  through `GIT_CONFIG_GLOBAL`) can still write an unredacted trace, and defending
-  that would mean config isolation rather than environment hygiene.
+  enables trace2 (`trace2.eventTarget` plus `configparams`, in the host's own git
+  config or in a file reached through `GIT_CONFIG_GLOBAL`) can still write an
+  unredacted trace, and defending that would mean config isolation rather than
+  environment hygiene.
 - Output is capped at `MAX_OUTPUT_CHARS = 4_000` before it reaches an error
   message, and the characters that survive the cap are the **last** 4 000 of each
   stream (`retainTail`), not the first: the line that explains a failure is the
