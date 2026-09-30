@@ -99,11 +99,12 @@ export interface MaterializeDeps {
  * Cache key for a repository at a fixed revision.
  *
  * A branch has no fixed revision, so it never gets a cache key and is always
- * re-resolved. The key includes the URL so two repositories that happen to
- * share a commit id cannot collide.
+ * re-resolved. So does an absent checkout, which resolves to the remote's own
+ * default branch and therefore names no revision at all. The key includes the
+ * URL so two repositories that happen to share a commit id cannot collide.
  */
-export function githubCacheKey(url: string, checkout: GithubCheckout): string | undefined {
-  if (checkout.type !== 'commit') return undefined;
+export function githubCacheKey(url: string, checkout: GithubCheckout | undefined): string | undefined {
+  if (!checkout || checkout.type !== 'commit') return undefined;
   return createHash('sha256').update(`${url}\n${checkout.sha}`).digest('hex').slice(0, 32);
 }
 
@@ -114,6 +115,11 @@ export function githubCacheKey(url: string, checkout: GithubCheckout): string | 
  * header injection instead, so it cannot appear in argv. `--depth 1` is used
  * for a branch (the head is all the contract promises) and omitted for a commit,
  * where a full fetch is needed to reach an arbitrary revision.
+ *
+ * An absent checkout is the remote's default branch, which is what a clone
+ * without `--branch` already produces: `HEAD` is a local ref name, not a branch
+ * a remote serves, so spelling the default as `--branch HEAD` makes git refuse
+ * the clone with `fatal: Remote branch HEAD not found in upstream origin`.
  */
 export function cloneArgs(url: string, checkout: GithubCheckout | undefined): string[] {
   const args = ['clone', '--no-tags', '--quiet'];
@@ -251,7 +257,13 @@ export async function materializeGithubRepository(
   const token = resolveGithubToken(resource, deps.dataDir);
   if (!token.ok) return { ok: false, message: token.message };
 
-  const revision: GithubCheckout = checkoutCheck.value ?? { type: 'branch', name: 'HEAD' };
+  // An absent checkout is the remote's default branch, not a branch named
+  // `HEAD`: the clone below follows the default branch when no `--branch` is
+  // passed. Synthesizing `{ type: 'branch', name: 'HEAD' }` here made every
+  // un-pinned resource clone with `--branch HEAD`, which a real remote refuses
+  // (`fatal: Remote branch HEAD not found in upstream origin`), so the mount
+  // failed for exactly the resources that asked for no revision in particular.
+  const revision = checkoutCheck.value;
   const cacheKey = githubCacheKey(parsedUrl.value.url, revision);
   const cachePath = cacheKey ? `${deps.cacheRoot}/${GITHUB_CACHE_DIRNAME}/${cacheKey}` : undefined;
 
@@ -285,7 +297,7 @@ export async function materializeGithubRepository(
       // A clone follows the default branch unless `--branch` said otherwise, so
       // an explicit commit still needs a checkout (and, for a shallow clone, a
       // fetch of that revision).
-      if (revision.type === 'commit') {
+      if (revision?.type === 'commit') {
         const checkedOut = await deps.runGit(['checkout', '--quiet', revision.sha], {
           cwd: staging,
           env: gitAuthEnv(token.token),

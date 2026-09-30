@@ -162,6 +162,16 @@ describe('github clone argument construction', () => {
     expect(args).not.toContain('--depth');
     expect(args).not.toContain('--branch');
   });
+
+  it('follows the remote default branch when no checkout was asked for', () => {
+    const args = cloneArgs(URL, undefined);
+    expect(args).toContain('--depth');
+    // `HEAD` is a local ref, not a branch a remote serves: passing
+    // `--branch HEAD` makes git refuse the clone outright.
+    expect(args).not.toContain('--branch');
+    expect(args).not.toContain('HEAD');
+    expect(args.at(-1)).toBe('.');
+  });
 });
 
 describe('github git environment', () => {
@@ -205,6 +215,10 @@ describe('github cache keying', () => {
   it('does not cache a branch, whose head moves', () => {
     expect(githubCacheKey(URL, { type: 'branch', name: 'main' })).toBeUndefined();
   });
+
+  it('does not cache an absent checkout, which names no revision at all', () => {
+    expect(githubCacheKey(URL, undefined)).toBeUndefined();
+  });
 });
 
 describe('github materialization', () => {
@@ -229,6 +243,21 @@ describe('github materialization', () => {
 
     const checkout = calls.find((call) => call.args[0] === 'checkout');
     expect(checkout?.args).toEqual(['checkout', '--quiet', 'abc123']);
+  });
+
+  it('clones the default branch for a resource that names no checkout', async () => {
+    // The published resource makes `checkout` optional, and the mount the agent
+    // is told about is "the repository's default branch". A clone follows that
+    // branch only when no `--branch` is passed, so the materializer must not
+    // invent one: a real remote refuses `--branch HEAD`, which is how every
+    // un-pinned repository resource failed to mount.
+    const { deps, sandbox, calls } = fakeDeps();
+    const result = await materializeGithubRepository(makeResource({ checkout: undefined }), sandbox, deps);
+
+    expect(result.ok).toBe(true);
+    const clone = calls.find((call) => call.args[0] === 'clone');
+    expect(clone?.args).not.toContain('--branch');
+    expect(calls.some((call) => call.args[0] === 'checkout')).toBe(false);
   });
 
   it('fetches a commit the shallow clone could not reach', async () => {

@@ -367,7 +367,7 @@
       {
         "name": "checkout",
         "type": "object",
-        "description": "Optional {type:branch,name} or {type:commit,sha}."
+        "description": "Optional {type:branch,name} or {type:commit,sha}. Omit it to clone the repository's default branch."
       }
     ],
     "response": [

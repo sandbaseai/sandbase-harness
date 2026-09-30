@@ -44,7 +44,8 @@ sequence, and every phase has a defined failure disposition:
    returns a key only for a `commit` checkout: `sha256(url\nsha)` truncated to 32
    characters. A branch or tag cannot be cached, because the same name resolves
    to a different commit over time and a cached checkout would silently serve a
-   stale tree. A cache entry is reused only when its directory can actually be
+   stale tree; an absent checkout names no revision at all, so it is not cached
+   either. A cache entry is reused only when its directory can actually be
    listed: a path that does not exist is a miss, not an empty checkout, so a
    pinned commit always clones at least once.
 3. **Clone and check out.** `cloneArgs(url, checkout)` builds the argument list;
@@ -53,7 +54,12 @@ sequence, and every phase has a defined failure disposition:
    argv element. The header value is base64-encoded, so the plaintext token is
    not present in the child process environment either. `GIT_TERMINAL_PROMPT=0`
    and an empty `GIT_ASKPASS` ensure git cannot block on or fall back to an
-   interactive prompt.
+   interactive prompt. An absent checkout is the remote's **default branch**,
+   which a clone already follows when no `--branch` is passed; `HEAD` is a local
+   ref name, not a branch a remote serves. The default is therefore never spelled
+   as `--branch HEAD`: a real remote refuses that with `fatal: Remote branch HEAD
+   not found in upstream origin`, which failed the mount for exactly the
+   resources that asked for no revision in particular.
 4. **Discover skills before copying.** `discoverRepositorySkills(repoRoot, deps)`
    scans `.claude/skills/<name>/SKILL.md`. The scan runs against the staging
    clone rather than the mounted copy so a skill that must not be exposed cannot
@@ -185,13 +191,17 @@ creation rather than served, so no claim is made that they mount a repository.
 ## 6. Corresponding tests
 
 - `tests/unit/github-materialization.test.ts` — decision logic: the URL grammar,
-  cache-key scope (commit only), clone argument construction, token-bearing
+  cache-key scope (commit only; a branch and an absent checkout both name no
+  cached revision), clone argument construction (including that an absent
+  checkout is a plain default-branch clone with no `--branch`), token-bearing
   environment rather than argv, output sanitization, skill discovery, mount
   identity comparison, and the failure paths that must clean up staging. It also
   drives the `SandboxLifecycle` mount path with an injected materializer.
 - `tests/integration/github-materialization-real.test.ts` — the host-side
   primitives against a real `git` binary: clone, checkout, cache reuse, timeout
-  behaviour, and that the token never appears in the captured output.
+  behaviour, that the token never appears in the captured output, and that both
+  the default-branch clone command and a resource with no checkout materialize a
+  real repository rather than failing the clone.
 - `tests/integration/session-resource-wiring.test.ts` — the mount path through
   the composition root: a repository URL outside the published grammar is
   answered by the default materializer rather than by a missing dependency, a

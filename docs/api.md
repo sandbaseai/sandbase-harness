@@ -571,7 +571,7 @@ Supported session resources:
     "type": "github_repository",
     "url": "https://github.com/owner/repo",
     "authorization_token": "ghp_example",
-    "checkout": "main",
+    "checkout": { "type": "branch", "name": "main" },
     "mount_path": "/workspace/repo"
   },
   {
@@ -583,6 +583,14 @@ Supported session resources:
   }
 ]
 ```
+
+A `github_repository` resource's `checkout` is a typed reference —
+`{ "type": "branch", "name": "<branch>" }` or
+`{ "type": "commit", "sha": "<sha>" }`; a bare string such as `"main"`, an
+unknown type, or an empty name or sha is a `400` rather than a value carried
+forward. Omitting `checkout` clones the repository's own default branch, which is
+also what the agent is told it is mounted at. Only a `commit` checkout is cached
+between sessions; a branch and a default-branch clone are re-resolved every time.
 
 A `memory_store` resource defaults to `/mnt/memory/<slugged-store-name>` when `mount_path` is omitted. Mounted paths are whole-segment paths; traversal and duplicate mount paths are rejected, and a session may attach at most eight stores. The `read`, `write`, `edit`, `glob`, and `grep` tools address mounted content through `memory_records`; read-only mounts reject writes, and shell access is refused while any memory mount is attached because arbitrary shell changes cannot be persisted safely. Updates to existing mounted files require a `precondition_sha256` value so stale content cannot overwrite a newer version.
 
