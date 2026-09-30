@@ -117,11 +117,12 @@ function shellHint(canonicalPath: string, shellPaths: boolean): string {
 /**
  * Describe the revision a mounted repository is at, or nothing at all.
  *
- * An absent checkout is not an unknown: the materializer resolves it to the
- * repository's default branch (`HEAD`), and saying so is more useful to an agent
- * than omitting the field. A checkout that is present but not a shape this
- * runtime writes is a different case — it is dropped rather than reported as the
- * default branch, which would describe a revision the session never asked for.
+ * An absent checkout is not an unknown: it means the repository's default branch,
+ * which is what the materializer mounts — it hands git no revision at all, so the
+ * clone follows that branch — and saying so is more useful to an agent than
+ * omitting the field. A checkout that is present but not a shape this runtime
+ * writes is a different case — it is dropped rather than reported as the default
+ * branch, which would describe a revision the session never asked for.
  */
 function describeCheckout(value: unknown): string | undefined {
   if (value === undefined || value === null) return "the repository's default branch";

@@ -82,7 +82,9 @@ function fileUrl(path: string): string {
  * the 5s default is not enough once the full suite is running in parallel and
  * git invocations queue up. A generous ceiling is set at the suite level rather
  * than per test, so a slow machine fails loudly on a genuine hang instead of on
- * scheduling contention.
+ * scheduling contention. The fixture hook gets the same ceiling: it runs three
+ * git commands of its own, and under the global `hookTimeout` a cold machine
+ * failed the hook rather than a test, which reports as an unrelated failure.
  */
 const REAL_GIT_TIMEOUT_MS = 60_000;
 
@@ -97,7 +99,7 @@ describe.skipIf(!hasGit)('github host primitives (real git + real filesystem)', 
     cacheRoot = join(root, 'cache');
     mkdirSync(cacheRoot, { recursive: true });
     ({ repoPath, sha } = createFixtureRepo(root));
-  });
+  }, REAL_GIT_TIMEOUT_MS);
 
   afterEach(() => {
     rmSync(root, { recursive: true, force: true });

@@ -42,7 +42,7 @@ sequence, and every phase has a defined failure disposition:
    than the resource.
 2. **Reuse the cache when the ref allows it.** `githubCacheKey(url, checkout)`
    returns a key only for a `commit` checkout: `sha256(url\nsha)` truncated to 32
-   characters. A branch or tag cannot be cached, because the same name resolves
+   characters. A branch cannot be cached, because the same name resolves
    to a different commit over time and a cached checkout would silently serve a
    stale tree; an absent checkout names no revision at all, so it is not cached
    either. A cache entry is reused only when its directory can actually be
@@ -150,7 +150,7 @@ creation rather than served, so no claim is made that they mount a repository.
 | Repository skills reach the prompt only as text | `discoveredRepositorySkills` has a caller now, and each discovered `SKILL.md` is read out of the sandbox into the system prompt. Pi's `--skill` flag is not given a directory for them: skill packages live inside the guest filesystem and Pi takes host paths, so a Pi session reads them from the prompt rather than loading them as packages. |
 | Dead identity helper | `mountIdentityChanged` implements the freeze decision and is unit-tested, while the route enforces the same rule through a field allowlist. The rule a caller observes is enforced; the helper is not the enforcement point. |
 | URL grammar | Only `https://github.com/<owner>/<repo>` is accepted. A self-hosted GitHub Enterprise host, an SSH remote, and a `.git` suffix are rejected rather than silently normalized. |
-| Cache scope | Only a `commit` checkout is cacheable. A branch or tag checkout always clones fresh, trading time for the guarantee that the tree matches the ref. |
+| Cache scope | Only a `commit` checkout is cacheable. A branch checkout, and an absent checkout, always clone fresh, trading time for the guarantee that the tree matches the ref. |
 | Mount path | The canonical mount path is produced and validated locally; see [`files.md`](./files.md) for the path form itself. |
 | Skill discovery path | `.claude/skills/<name>/SKILL.md` is the discovery convention. A repository using a different layout exposes no skills, which is reported rather than guessed at. A discovered file whose frontmatter carries no name and description is reported and skipped: that is the repository's own content, not a runtime failure. |
 | Live mutation | Changing URL, checkout, or mount path mid-session is refused; a new session is required. |
