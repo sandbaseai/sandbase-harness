@@ -76,6 +76,16 @@ Failure disposition is the part that is easy to get wrong:
   token from git's own stdout/stderr before the message is turned into an error.
   `skillPathsAreTokenFree(paths, token)` asserts the discovered skill paths do
   not embed the token.
+- The credential never reaches a trace either, because the child environment git
+  is given carries no tracing switch: `gitChildEnv` deletes `GIT_TRACE*`,
+  `GIT_TRACE2*`, `GIT_CURL_VERBOSE`, and `GIT_TRACE_REDACT` from it, whether the
+  host exported them or a caller passed them. `GIT_CURL_VERBOSE` is the one that
+  matters — git reads it for its **presence**, so an empty value traces — and a
+  curl trace prints the `Authorization: Basic` header in base64, which
+  `sanitizeGitOutput` does not replace, because it strips the token and not its
+  encoding. `GIT_TRACE_REDACT` is removed for the opposite reason: setting it to
+  `false` turns tracing's own redaction off, so removing it restores the safe
+  default.
 - Output is capped at `MAX_OUTPUT_CHARS = 4_000` before it reaches an error
   message, and the characters that survive the cap are the **last** 4 000 of each
   stream (`retainTail`), not the first: the line that explains a failure is the
@@ -190,10 +200,26 @@ creation rather than served, so no claim is made that they mount a repository.
   would leave the prompt describing something that is no longer there.
 - Passing the token through the environment rather than argv is not a stylistic
   choice: on many systems argv is world-readable through the process table, so an
-  argv token is a token disclosed to every local process.
+  argv token is a token disclosed to every local process. That is also why the
+  environment it goes into is stripped of every tracing switch first: the same
+  argument applies to the encoding of the token, and a trace prints the header it
+  was placed in.
 
 ## 6. Corresponding tests
 
+- `tests/unit/git-child-env.test.ts` — the stripping rule itself: an inherited
+  `GIT_TRACE`, `GIT_TRACE2_EVENT`, empty `GIT_CURL_VERBOSE`, and
+  `GIT_TRACE_REDACT=false` are all gone from the child environment, a caller
+  cannot reintroduce one, a non-tracing variable still arrives, a differently
+  cased name is matched too, and the credential header, `GIT_TERMINAL_PROMPT=0`,
+  and the empty `GIT_ASKPASS` survive the strip.
+- `tests/integration/github-git-trace.test.ts` — the same rule against real git,
+  with no network and no credential: a refused connection to a closed loopback
+  port still makes curl write its `== Info:` trace when tracing is on, so the
+  first case is a control that pins that (an empty `GIT_CURL_VERBOSE` traces), and
+  the others assert that an invocation carrying the authorization header prints no
+  trace — not from the header itself, and not when the host exports the switch in
+  any casing.
 - `tests/unit/github-materialization.test.ts` — decision logic: the URL grammar,
   cache-key scope (commit only; a branch and an absent checkout both name no
   cached revision), clone argument construction (including that an absent

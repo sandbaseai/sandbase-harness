@@ -60,6 +60,65 @@ export function retainTail(current: string, chunk: string): string {
 }
 
 /**
+ * Environment variables that make git write a trace.
+ *
+ * Every one of these is read for its *presence* or its value, and every one of
+ * them makes git print something it otherwise would not. With the token sitting
+ * in the same child environment, that output is a credential exposure: a curl
+ * trace prints `Authorization: Basic <base64>`, and the base64 form is not the
+ * string `sanitizeGitOutput` replaces. `GIT_TRACE_REDACT` is on this list for the
+ * opposite reason — setting it to `false` turns tracing's own redaction *off*, so
+ * removing it restores the safe default.
+ */
+export const GIT_TRACE_ENV_VARS = [
+  'GIT_TRACE',
+  'GIT_TRACE_PACKET',
+  'GIT_TRACE_PACK_ACCESS',
+  'GIT_TRACE_PERFORMANCE',
+  'GIT_TRACE_SETUP',
+  'GIT_TRACE_SHALLOW',
+  'GIT_TRACE_CURL',
+  'GIT_TRACE_CURL_NO_DATA',
+  'GIT_TRACE_REDACT',
+  'GIT_TRACE2',
+  'GIT_TRACE2_EVENT',
+  'GIT_TRACE2_PERF',
+  'GIT_TRACE2_CONFIG_PARAMS',
+  'GIT_TRACE2_DST',
+  'GIT_CURL_VERBOSE',
+] as const;
+
+/** {@link GIT_TRACE_ENV_VARS} upper-cased, for a case-insensitive match. */
+const GIT_TRACE_ENV_KEYS = new Set<string>(GIT_TRACE_ENV_VARS.map((name) => name.toUpperCase()));
+
+/**
+ * The environment a git child gets.
+ *
+ * The parent environment still has to reach git — it needs `PATH`, and on
+ * Windows its own installation variables — so the child inherits it. What does
+ * not reach it is any tracing switch, whether it came from the host or was
+ * passed in: a deployment that exports `GIT_CURL_VERBOSE=1` for its own
+ * debugging must not thereby print this runtime's repository credentials, and
+ * an empty string is not the safe value it looks like, because git reads that
+ * variable for its presence (`GIT_CURL_VERBOSE=''` traces, measured on git
+ * 2.55).
+ *
+ * The name comparison ignores case because the Windows child environment does:
+ * `git_curl_verbose=1` and `Git_Curl_Verbose=1` both trace there (measured on git
+ * 2.55.0.windows.5), so an exact-name match would leave a variable that differs
+ * by one character as a way to defeat the strip. The copy has to be walked by its
+ * own keys rather than by the list, because those spellings are distinct keys on
+ * the plain object even though Windows treats them as one variable.
+ */
+export function gitChildEnv(extra?: Record<string, string>): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, ...(extra ?? {}) };
+  for (const name of Object.keys(env)) {
+    if (GIT_TRACE_ENV_KEYS.has(name.toUpperCase())) delete env[name];
+  }
+  return env;
+}
+
+/**
  * Run git with the token in the environment.
  *
  * Resolves rather than rejects on a non-zero exit: a failed clone is an
@@ -77,7 +136,7 @@ function runGit(
       cwd: opts.cwd,
       // A caller-supplied env is additive: PATH and the rest of the parent
       // environment still have to reach git for it to find its own helpers.
-      env: { ...process.env, ...(opts.env ?? {}) },
+      env: gitChildEnv(opts.env),
       windowsHide: true,
     });
 
