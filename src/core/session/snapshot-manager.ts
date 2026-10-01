@@ -10,9 +10,9 @@
  * (universally available on macOS/Linux) to avoid a native/npm tar dependency.
  */
 
-import { spawnSync } from 'node:child_process';
-import { mkdirSync, existsSync, statSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { spawnSync, type SpawnSyncOptionsWithStringEncoding } from 'node:child_process';
+import { mkdirSync, existsSync, statSync, openSync, closeSync } from 'node:fs';
+import { join, dirname, relative, isAbsolute } from 'node:path';
 import { nanoid } from 'nanoid';
 import type { Database } from '@/core/db/database.js';
 
@@ -22,6 +22,46 @@ export interface SnapshotRecord {
   path: string;
   sizeBytes: number;
   createdAt: Date;
+}
+
+const TAR_SPAWN_BASE: SpawnSyncOptionsWithStringEncoding = {
+  encoding: 'utf-8',
+  timeout: 60_000,
+};
+
+/**
+ * Plan a tar invocation that never passes a drive-letter path on the command
+ * line. GNU tar (the `tar` on the PATH in Git Bash) reads `C:\...` as
+ * `<remote-host>:<file>` and fails on "Cannot connect to C:", and it is not
+ * the only tar in play on a Windows host (bsdtar has no `--force-local`), so
+ * neither argument may rely on tar-specific remote-host escape hatches.
+ *
+ * When the archive and the working directory share a drive, both are passed
+ * relative to the working directory. When they sit on different drives
+ * (`path.relative` returns an absolute path), the archive is piped through
+ * tar's stdin/stdout instead — the command line never mentions the other
+ * drive, and the file descriptor carries the bytes across drives.
+ */
+function planTar(
+  workDir: string,
+  archivePath: string,
+  direction: 'create' | 'extract',
+): { cwd: string; args: string[]; stdio?: SpawnSyncOptionsWithStringEncoding['stdio'] } {
+  const archiveRel = relative(workDir, archivePath);
+  if (!isAbsolute(archiveRel)) {
+    return {
+      cwd: workDir,
+      args:
+        direction === 'create'
+          ? ['-czf', archiveRel, '-C', '.', '.']
+          : ['-xzf', archiveRel, '-C', '.'],
+    };
+  }
+  // Cross-drive: pipe the archive through stdin/stdout.
+  if (direction === 'create') {
+    return { cwd: workDir, args: ['-czf', '-', '-C', '.', '.'] };
+  }
+  return { cwd: workDir, args: ['-xzf', '-', '-C', '.'] };
 }
 
 export class SnapshotManager {
@@ -41,11 +81,15 @@ export class SnapshotManager {
     const outPath = join(this.snapshotDir, sessionId, `${id}.tar.gz`);
     mkdirSync(dirname(outPath), { recursive: true });
 
-    // tar -czf <out> -C <workDir> .
-    const r = spawnSync('tar', ['-czf', outPath, '-C', workDir, '.'], {
-      encoding: 'utf-8',
-      timeout: 60_000,
-    });
+    const plan = planTar(workDir, outPath, 'create');
+    let fd: number | undefined;
+    let stdio: SpawnSyncOptionsWithStringEncoding['stdio'];
+    if (plan.args[1] === '-') {
+      fd = openSync(outPath, 'w');
+      stdio = ['ignore', fd, 'pipe'];
+    }
+    const r = spawnSync('tar', plan.args, { ...TAR_SPAWN_BASE, cwd: plan.cwd, stdio });
+    if (fd !== undefined) closeSync(fd);
     if (r.status !== 0) {
       throw new Error(`tar failed: ${r.stderr || 'unknown error'}`);
     }
@@ -69,10 +113,15 @@ export class SnapshotManager {
     if (!row || !existsSync(row.path)) return false;
 
     mkdirSync(workDir, { recursive: true });
-    const r = spawnSync('tar', ['-xzf', row.path, '-C', workDir], {
-      encoding: 'utf-8',
-      timeout: 60_000,
-    });
+    const plan = planTar(workDir, row.path, 'extract');
+    let fd: number | undefined;
+    let stdio: SpawnSyncOptionsWithStringEncoding['stdio'];
+    if (plan.args[1] === '-') {
+      fd = openSync(row.path, 'r');
+      stdio = [fd, 'ignore', 'pipe'];
+    }
+    const r = spawnSync('tar', plan.args, { ...TAR_SPAWN_BASE, cwd: plan.cwd, stdio });
+    if (fd !== undefined) closeSync(fd);
     return r.status === 0;
   }
 

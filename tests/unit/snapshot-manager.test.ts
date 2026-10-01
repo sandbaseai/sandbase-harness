@@ -2,12 +2,26 @@
  * Unit tests for the Workspace Snapshot Manager (R9.11).
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { join } from 'node:path';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { join, relative, isAbsolute } from 'node:path';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { spawnSync } from 'node:child_process';
 import { Database } from '@/core/db/database.js';
 import { SnapshotManager } from '@/core/session/snapshot-manager.js';
+
+const tarCalls = vi.hoisted(() => ({ invocations: [] as Array<{ args: string[]; cwd: string | undefined }> }));
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return {
+    ...actual,
+    spawnSync: ((cmd: string, args: readonly string[], opts: { cwd?: string }) => {
+      tarCalls.invocations.push({ args: [...args], cwd: opts?.cwd });
+      return (actual.spawnSync as typeof spawnSync)(cmd, args, { ...opts, encoding: 'utf-8' });
+    }) as typeof actual.spawnSync,
+  };
+});
 
 describe('SnapshotManager', () => {
   let db: Database;
@@ -80,5 +94,58 @@ describe('SnapshotManager', () => {
 
   it('throws when snapshotting a nonexistent directory', () => {
     expect(() => mgr.create('sess_1', join(root, 'nope'))).toThrow(/does not exist/);
+  });
+
+  it('never passes a drive-letter path in the tar command line', () => {
+    // GNU tar (the `tar` on the PATH in Git Bash) reads `C:\...` as
+    // `<remote-host>:<file>` and fails; bsdtar has no `--force-local`. Every
+    // tar argument must therefore be relative to the working directory, or
+    // `-` when the archive is piped through a file descriptor.
+    const workDir = join(root, 'work');
+    mkdirSync(workDir, { recursive: true });
+    writeFileSync(join(workDir, 'file.txt'), 'contents');
+
+    const invocations = tarCalls.invocations;
+    invocations.length = 0;
+
+    const restoreDir = join(root, 'restored');
+    mgr.create('sess_1', workDir);
+    mgr.restoreLatest('sess_1', restoreDir);
+
+    const calls: Array<{ args: string[]; cwd: string | undefined }> = invocations;
+    expect(calls.length).toBeGreaterThanOrEqual(2);
+    for (const call of calls) {
+      // Every tar invocation runs with a cwd that holds no drive-letter path
+      // in its arguments — the create pass from the working directory, the
+      // extract pass from the restore target.
+      expect([workDir, restoreDir]).toContain(call.cwd);
+      for (const arg of call.args) {
+        expect(isAbsolute(arg) || /^[A-Za-z]:[\\/]/.test(arg)).toBe(false);
+      }
+    }
+  });
+
+  it('archives and restores across drives', () => {
+    if (process.platform !== 'win32') return; // multiple drives only exist on Windows
+    // Probe for a drive other than the one the temp directory lives on; the
+    // machine may have no second drive at all, in which case there is nothing
+    // cross-drive to cover here.
+    const otherDrive = ['D:\\', 'E:\\', 'F:\\'].find((d) => d[0] !== root[0].toUpperCase() && existsSync(d));
+    if (!otherDrive) return;
+    const workDir = join(root, 'work');
+    mkdirSync(workDir, { recursive: true });
+    writeFileSync(join(workDir, 'a.txt'), 'alpha');
+
+    const crossMgr = new SnapshotManager(db, join(otherDrive, 'ma-snap-xdrive'));
+    const snap = crossMgr.create('sess_1', workDir);
+    // path.relative goes absolute exactly when the two paths are on
+    // different drives, which is the case this test exists for.
+    expect(isAbsolute(relative(workDir, snap.path))).toBe(true);
+    expect(existsSync(snap.path)).toBe(true);
+
+    const restoreDir = join(root, 'restored');
+    expect(crossMgr.restoreLatest('sess_1', restoreDir)).toBe(true);
+    expect(readFileSync(join(restoreDir, 'a.txt'), 'utf-8')).toBe('alpha');
+    rmSync(join(otherDrive, 'ma-snap-xdrive'), { recursive: true, force: true });
   });
 });
