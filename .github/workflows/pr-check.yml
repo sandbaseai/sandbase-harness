@@ -1,8 +1,12 @@
 name: PR Check
 
+# This workflow runs on pull_request_target so the size labeler gets a writable
+# token on pull requests from forks. Never add actions/checkout or any step that
+# runs code from the pull request to this file: every job here holds write
+# permissions and repository secrets.
 on:
-  pull_request:
-    types: [opened, synchronize, reopened]
+  pull_request_target:
+    types: [opened, synchronize, reopened, edited]
 
 permissions: read-all
 
@@ -12,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check PR title format
-        uses: amannn/action-semantic-pull-request@v6
+        uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -35,7 +39,7 @@ jobs:
     permissions:
       pull-requests: write
     steps:
-      - uses: codelytv/pr-size-labeler@v1
+      - uses: codelytv/pr-size-labeler@4e3aa0f77f348c8066513d453515316ffa01a607 # v1
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           xs_label: 'size/xs'
