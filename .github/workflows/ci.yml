@@ -29,14 +29,12 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
+  # Tests run on Ubuntu only. Windows compatibility is checked locally with
+  # `npm run release:check`; see CONTRIBUTING.md#required-checks.
   test:
-    name: Test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
+    name: Test
+    runs-on: ubuntu-latest
     needs: [quality]
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v7
 

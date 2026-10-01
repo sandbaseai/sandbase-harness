@@ -767,8 +767,8 @@ describe('worker poll CLI', () => {
   });
 
   // `execShell` runs `/bin/sh`, so the kill can only be observed where that shell exists. CI
-  // runs this suite on ubuntu-latest as well as windows-latest, so the behaviour is exercised
-  // there; on Windows the result would measure the absence of a shell rather than the abort.
+  // runs this suite on ubuntu-latest, so the behaviour is exercised there; on Windows the
+  // result would measure the absence of a shell rather than the abort.
   it.skipIf(process.platform === 'win32')('kills the shell of an exec item when its lease is lost', async () => {
     const { queue, port, workdir } = await startRuntime();
     // Thirty seconds of work that only ends early if it is signalled.

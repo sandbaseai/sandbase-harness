@@ -147,6 +147,12 @@ The component commands are:
 | `npm run package:check` | published-package contents |
 | `npm run smoke:release` | packaged CLI and example startup smoke checks |
 
+CI runs the test suite on Ubuntu only. Windows compatibility is not checked in
+CI; it is checked by running `npm run release:check` locally on Windows, so a
+change that can behave differently on Windows must be validated there before
+review and the PR must say so. The rules in
+[Cross-platform expectations](#cross-platform-expectations) still apply.
+
 `tsconfig.tests.json` must type-check the complete test suite, including tests
 that import Console components. Do not hide errors by excluding a test group;
 repair the fixture, type, or configuration instead.
