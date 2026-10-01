@@ -116,7 +116,7 @@ export type ToolPermission = 'always_allow' | 'always_ask' | 'never_allow';
 
 export type SessionResourceDraft =
   | { type: 'file'; file_id: string; mount_path: string }
-  | { type: 'github_repository'; url: string; authorization_token: string; checkout: string; mount_path: string }
+  | { type: 'github_repository'; url: string; authorization_token: string; checkout: { mode: 'default' | 'branch' | 'commit'; value: string }; mount_path: string }
   | { type: 'memory_store'; memory_store_id: string; access: 'read_write' | 'read_only'; instructions: string };
 
 export type WorkspaceFile = {

@@ -203,13 +203,37 @@ function SessionResourceEditor({
         </label>
         <label className="shortField">
           Checkout
-          <select value={resource.checkout} onChange={(event) => onChange({ ...resource, checkout: event.target.value })}>
-            <option value="">None</option>
-            <option value="default_branch">Default branch</option>
-            <option value="commit">Commit SHA</option>
+          <select value={resource.checkout.mode} onChange={(event) => onChange({ ...resource, checkout: { ...resource.checkout, mode: event.target.value as 'default' | 'branch' | 'commit' } })}>
+            <option value="default">Default branch</option>
             <option value="branch">Branch</option>
+            <option value="commit">Commit SHA</option>
           </select>
         </label>
+        {resource.checkout.mode === 'branch' ? (
+          <label className="shortField">
+            Branch name <RequiredMark />
+            <input
+              value={resource.checkout.value}
+              onChange={(event) => onChange({ ...resource, checkout: { ...resource.checkout, value: event.target.value } })}
+              placeholder="release-1.2"
+              required
+            />
+          </label>
+        ) : null}
+        {resource.checkout.mode === 'commit' ? (
+          <label className="shortField">
+            Commit SHA <RequiredMark />
+            <input
+              value={resource.checkout.value}
+              onChange={(event) => onChange({ ...resource, checkout: { ...resource.checkout, value: event.target.value } })}
+              placeholder="9fca646b4a4ce9cdd3e1e8b3cd20e7b7c5e4b0c3"
+              pattern="[0-9a-fA-F]{7,40}"
+              title="A commit SHA is 7 to 40 hexadecimal characters."
+              required
+            />
+            <small>7–40 hexadecimal characters</small>
+          </label>
+        ) : null}
         <label>
           Mount path
           <input value={resource.mount_path} onChange={(event) => onChange({ ...resource, mount_path: event.target.value })} placeholder="/workspace/repo-name (default)" />
@@ -259,11 +283,11 @@ function ResourceEditorHeader({ title, onRemove }: { title: string; onRemove: ()
 
 function createResourceDraft(type: SessionResourceDraft['type']): SessionResourceDraft {
   if (type === 'file') return { type, file_id: '', mount_path: '' };
-  if (type === 'github_repository') return { type, url: '', authorization_token: '', checkout: '', mount_path: '' };
+  if (type === 'github_repository') return { type, url: '', authorization_token: '', checkout: { mode: 'default', value: '' }, mount_path: '' };
   return { type, memory_store_id: '', access: 'read_write', instructions: '' };
 }
 
-function toSessionResourcePayload(resource: SessionResourceDraft): Record<string, unknown> {
+export function toSessionResourcePayload(resource: SessionResourceDraft): Record<string, unknown> {
   if (resource.type === 'file') {
     return {
       type: 'file',
@@ -272,11 +296,15 @@ function toSessionResourcePayload(resource: SessionResourceDraft): Record<string
     };
   }
   if (resource.type === 'github_repository') {
+    const checkout =
+      resource.checkout.mode === 'branch' ? { type: 'branch', name: resource.checkout.value.trim() } :
+      resource.checkout.mode === 'commit' ? { type: 'commit', sha: resource.checkout.value.trim() } :
+      undefined;
     return {
       type: 'github_repository',
       url: resource.url,
       authorization_token: resource.authorization_token,
-      ...(resource.checkout ? { checkout: resource.checkout } : {}),
+      ...(checkout ? { checkout } : {}),
       ...(resource.mount_path ? { mount_path: resource.mount_path } : {}),
     };
   }
