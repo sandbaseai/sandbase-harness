@@ -58,8 +58,12 @@ export function fileRoutes(deps: ServerDeps) {
 
   app.get('/files/:id/content', (c) => {
     const row = deps.db.prepare('SELECT * FROM files WHERE id = ? AND archived_at IS NULL').get(c.req.param('id')) as FileRow | undefined;
+    // Answer a missing row before resolving the store: without a workspace the
+    // store cannot be resolved at all, and that throw would turn a plain 404
+    // into a 500.
+    if (!row) return notFound(c, 'File not found');
     const store = artifactStore(deps);
-    if (!row || !store.exists(row.storage_path)) return notFound(c, 'File not found');
+    if (!store.exists(row.storage_path)) return notFound(c, 'File not found');
     // Uint8Array rather than the Buffer itself: Buffer is not a BodyInit in the
     // DOM/undici typings even though it works at runtime.
     return new Response(new Uint8Array(store.readFile(row.storage_path)), {

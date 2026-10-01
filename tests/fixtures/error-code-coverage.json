@@ -27,7 +27,7 @@
     "model_config_invalid": ["tests/integration/unresolved-model-credential.test.ts", "tests/unit/model-config-invalid.test.ts", "tests/unit/model-error-hints.test.ts"],
     "model_not_found": ["tests/integration/model-qualified-reference.test.ts", "tests/unit/model-auth-failed.test.ts", "tests/unit/model-error-hints.test.ts"],
     "model_provider_not_configured": ["tests/integration/model-qualified-reference.test.ts", "tests/unit/model-error-hints.test.ts", "tests/unit/model-error.test.ts"],
-    "not_found": ["tests/conformance/unserved-route-envelope.test.ts",
+    "not_found": ["tests/conformance/file-content-not-found.test.ts", "tests/conformance/unserved-route-envelope.test.ts",
         "tests/integration/agent-versions-pagination.test.ts", "tests/integration/deployment-archived-event.test.ts", "tests/integration/deployment-path-aliases.test.ts", "tests/integration/deployment-runs-collection.test.ts", "tests/integration/sdk-error-envelope.test.ts", "tests/integration/self-hosted.test.ts", "tests/integration/session-artifacts-query-admission.test.ts", "tests/integration/unrouted-path-404.test.ts", "tests/integration/vault-path-aliases.test.ts", "tests/unit/orchestrator.test.ts", "tests/unit/session-resource-instances.test.ts"],
     "outcome_evaluator_unavailable": ["tests/integration/outcome-grading.test.ts", "tests/unit/outcome-evaluation.test.ts"],
     "outcome_grader_unavailable": ["tests/integration/outcome-loop.test.ts"],
