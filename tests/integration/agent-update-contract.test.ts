@@ -274,13 +274,10 @@ describe('PUT /v1/agents/:id partial update', () => {
     const ctx = context();
     const agent = await seedAgent(ctx);
 
-    // Clearing `system` maps to the empty string per the update contract, but
-    // the merged definition is revalidated against the full schema, which
-    // requires a non-empty system prompt. The clear is therefore refused
-    // rather than the schema being relaxed to allow a prompt-less agent.
     const clearedSystem = await request(ctx.app, 'PUT', `/v1/agents/${agent.id}`, { system: null });
-    expect(clearedSystem.res.status).toBe(400);
-    expect((await request(ctx.app, 'GET', `/v1/agents/${agent.id}`)).body.system).toBe('Original system.');
+    expect(clearedSystem.res.status).toBe(200);
+    expect(clearedSystem.body.system).toBe('');
+    expect((await request(ctx.app, 'GET', `/v1/agents/${agent.id}`)).body.system).toBe('');
 
     const emptySystem = await request(ctx.app, 'PUT', `/v1/agents/${agent.id}`, { system: 'Back to work.' });
     expect(emptySystem.body.system).toBe('Back to work.');

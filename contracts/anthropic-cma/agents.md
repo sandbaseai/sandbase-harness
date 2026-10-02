@@ -21,6 +21,7 @@ local-delegation-subagent: supported
 
 - An agent is a named, versioned definition: model, system prompt, tools, and
   the resources it may use.
+- The pinned official SDK declares `system` optional and nullable on create.
 - `model` may be a plain string, or an object carrying `id` plus optional
   `speed`, `effort`, and `inference_geo`.
 - An agent may declare a `multiagent` roster describing other agents it can
@@ -45,6 +46,9 @@ the model profile is `src/core/agent/model-object.ts`, and the routes are
 - `model` normalizes to a string for execution. The object form is parsed field
   by field by `normalizeModelField`, and each field is either honoured or
   refused by name (see §4).
+- On create, omitted, `null`, or empty `system` normalizes to an empty string.
+  Updates keep an omitted prompt and clear it for `null` or an empty string.
+  Other non-string values are refused; reads return the normalized string.
 - The stored model profile is returned on every read — the agent read, the
   version listing, and a session's frozen snapshot — as `model_config`
   (`id`, `speed`, and `effort` when one was set). It is omitted for the ordinary
@@ -122,6 +126,10 @@ field the runtime cannot honour instead of dropping it.
   how to reach the one delegation mechanism this runtime has.
 
 ## 6. Corresponding tests
+
+- `tests/conformance/agent-optional-system.test.ts` — the pinned official SDK
+  creates and reads agents with omitted, null, and empty prompts over HTTP;
+  updates retain an omitted prompt and clear it explicitly.
 
 - `tests/integration/api.test.ts` — agent create/list/read/version behaviour and
   toolset rejection cases.

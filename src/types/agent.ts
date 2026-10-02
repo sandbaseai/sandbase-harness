@@ -13,7 +13,7 @@ export interface AgentDefinition {
   name: string;
   /** Model registry reference (required). Public/config field follows Claude's string model id shape. */
   model: string;
-  /** System instructions (required). Public/config field follows Claude's `system`. */
+  /** Normalized system instructions. Public/config input may omit or clear `system`. */
   system: string;
   /** Human-readable description */
   description?: string;

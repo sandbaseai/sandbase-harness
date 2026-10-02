@@ -125,7 +125,7 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
     area: 'agents',
     id: 'agent-crud',
     status: 'supported',
-    reason: 'Canonical agent definitions are created, listed, read, and version-archived through /v1/agents.',
+    reason: 'Canonical agent definitions are created, listed, read, and version-archived through /v1/agents. An omitted or null system prompt on create normalizes to an empty string; updates preserve an omitted prompt and allow explicit clearing.',
     contract: 'contracts/anthropic-cma/agents.md',
   },
   {

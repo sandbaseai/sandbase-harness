@@ -89,8 +89,14 @@ describe('Agent Definition Schema Validation', () => {
       expect(result.errors).toContainEqual(expect.objectContaining({ path: 'model' }));
     });
 
-    it('rejects missing system', () => {
-      const result = validateAgentDefinition({ name: 'test', model: 'gpt-4o' });
+    it.each([undefined, null, ''])('normalizes an absent system prompt (%s) to an empty string', (system) => {
+      const result = validateAgentDefinition({ name: 'test', model: 'gpt-4o', system });
+      expect(result.valid).toBe(true);
+      expect(result.data?.system).toBe('');
+    });
+
+    it.each([42, {}, []])('rejects a non-string system prompt (%s)', (system) => {
+      const result = validateAgentDefinition({ name: 'test', model: 'gpt-4o', system });
       expect(result.valid).toBe(false);
       expect(result.errors).toContainEqual(expect.objectContaining({ path: 'system' }));
     });
@@ -141,7 +147,7 @@ describe('Agent Definition Schema Validation', () => {
     it('rejects completely empty object', () => {
       const result = validateAgentDefinition({});
       expect(result.valid).toBe(false);
-      expect(result.errors!.length).toBeGreaterThanOrEqual(3);
+      expect(result.errors!.length).toBeGreaterThanOrEqual(2);
     });
 
     it('rejects null input', () => {

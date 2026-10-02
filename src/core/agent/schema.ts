@@ -188,7 +188,7 @@ export const agentDefinitionSchema = z.object({
   name: agentNameSchema,
   model: agentModelInputSchema,
   model_config: agentModelConfigSchema.optional(),
-  system: z.string().min(1, 'System instructions are required'),
+  system: z.string().nullish().transform((system) => system ?? ''),
   description: z.string().optional(),
   skills: z.array(skillRefSchema).optional(),
   mcp_servers: z.array(mcpServerConfigSchema).optional(),

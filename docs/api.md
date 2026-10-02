@@ -410,8 +410,9 @@ The merged definition is revalidated against the full agent schema before it is
 persisted, so a request that changes one side of a coupled pair is judged on the
 pair it produces. Replacing `model` without an explicit `model_config` drops the
 stale config rather than leaving a previous id and speed pointing at the old model.
-Clearing `system` is refused, because the runtime requires a non-empty system
-prompt.
+On create, omitted, `null`, or empty `system` normalizes to an empty string.
+On update, an omitted `system` keeps the existing prompt; `null` or an empty
+string clears it. Non-string, non-null values are rejected on both write paths.
 
 The optimistic-lock precondition is accepted as either `expected_version` or the
 published `version`: absent means no precondition, and a malformed value is a `400`

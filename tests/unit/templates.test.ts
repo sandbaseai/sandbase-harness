@@ -67,7 +67,7 @@ describe('Templates', () => {
       const tpl = join(root, 'bad-agent');
       mkdirSync(join(tpl, 'agents'), { recursive: true });
       writeFileSync(join(tpl, 'manifest.yaml'), 'name: bad-agent\ndescription: bad\n');
-      writeFileSync(join(tpl, 'agents', 'bad.yaml'), 'name: bad\nmodel: m\n');
+      writeFileSync(join(tpl, 'agents', 'bad.yaml'), 'name: bad\nmodel: ""\n');
 
       const result = validateTemplate(tpl);
       expect(result.valid).toBe(false);
