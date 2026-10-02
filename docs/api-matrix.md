@@ -64,6 +64,47 @@ that every Claude hosted capability exists locally.
 | Custom client tools | Session events and SDK helpers | Partial | Custom tool result submission is supported; first-class tool registration/discovery is planned. |
 | Hosted cloud deployment | N/A | Missing | The open-source runtime runs locally or in user-owned infrastructure. |
 
+## Unsupported Official Routes
+
+Known operations in these official SDK resource families return HTTP 400
+`unsupported_capability`, with a capability id and reason in
+`error.details.capabilities`. Refusals run after authentication, rate limiting,
+and compatibility-header admission, and perform no persistence or execution.
+The mounted method/path inventory is listed in
+[`contracts/anthropic-cma/routes.md`](../contracts/anthropic-cma/routes.md);
+unknown methods or paths are not broadly intercepted.
+
+Dreams, tunnels, and user profiles recognize the SDK's native
+`dreaming-2026-04-21`, `mcp-tunnels-2026-06-22`, and
+`user-profiles-2026-08-18` betas respectively, as well as the canonical
+managed-agents beta. These native betas are scoped to their refusal resource
+families and do not admit a supported resource or bypass version validation.
+
+| Official resource | Capability id | Reason |
+| --- | --- | --- |
+| `/v1/dreams` and its official actions | `dreams` | The memory-consolidation pipeline is unavailable in this phase; this is not a claim that it cannot exist locally. |
+| `/v1/tunnels` and certificate/token actions | `mcp-tunnel` | Hosted connectivity is outside the local-first scope. |
+| `/v1/user_profiles` and enrollment actions | `user-profiles` | Hosted user management is outside the single-tenant scope. |
+| `/v1/environments/{id}/work` and its official actions | `environment-work` | The hosted Work API is not the local `/work-items` and `/v1/x/worker` queue API. |
+| `POST /v1/vaults/{id}/credentials/{credential_id}/mcp_oauth_validate` | `mcp-oauth-validation` | No MCP OAuth refresh or validation service is implemented. |
+
+### Route Coverage Guard
+
+`npm run test:official-routes` extracts routes at test time from the installed,
+pinned official SDK's `resources/beta/**/*.js`. Messages, models, and
+organization administration are excluded from this managed-agent inventory.
+Unrecognized SDK request syntax fails rather than silently losing routes.
+
+Verified on October 2, 2026 with SDK `0.129.0`: 110 distinct method/path pairs,
+56 existing resource mounts, 29 explicit refusals, and 25 exact deferred mounts.
+The deferrals (including multi-agent threads) are tracked in
+[issue #706](https://github.com/sandbaseai/sandbase-harness/issues/706) and in
+`PENDING_OFFICIAL_ROUTES`. Each entry has a reason and follow-up; stale,
+overlapping, or already-mounted deferrals fail the guard. Implementing a route
+requires removing its entry in the same PR. An unlisted missing route fails with
+one method/path per line. Route presence is not a claim of full response-shape,
+lifecycle, or provider conformance.
+
 ## SDK Coverage
 
 | SDK resource | Coverage |

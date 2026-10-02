@@ -3,6 +3,14 @@
 ## Unreleased
 
 ### Added
+- **An official SDK route coverage guard** extracts managed-agent methods and
+  paths from the pinned SDK, detects missing mounts and stale exceptions, and
+  tracks exact deferred routes in a public follow-up. Known Dreams, tunnels,
+  user-profile, environment Work, and MCP OAuth validation operations now return
+  HTTP 400 `unsupported_capability` with a compatibility-table reference instead
+  of a generic route-not-found 404, without bypassing admission or executing work.
+  Native SDK betas for the three hosted preview resource families are recognized
+  only on their refusal paths; supported resources retain their header policy.
 - **A documentation-driven conformance harness** runs the initial Console,
   tools, and permission-policy TypeScript examples through the pinned official
   SDK against a real local runtime and stub model provider. Reviewed SHA-256

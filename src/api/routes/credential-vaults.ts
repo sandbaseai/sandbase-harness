@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { nanoid } from 'nanoid';
 import type { ServerDeps } from '../server.js';
+import { unsupportedMcpOAuthValidation } from './unsupported-official.js';
 import { cursorPageOf, cursorQueryMismatch, decodeCursor, encodeCursor, normalizeCollectionFilter } from '../standard.js';
 import { encryptSecret } from '@/core/security/secrets.js';
 import { normalizeCredentialNetworkPolicy } from '@/core/credentials/policy.js';
@@ -57,6 +58,7 @@ type ResourceKind = 'credential_vault';
 
 export function credentialVaultRoutes(deps: ServerDeps) {
   const app = new Hono();
+  app.post('/:id/credentials/:credentialId/mcp_oauth_validate', unsupportedMcpOAuthValidation);
 
   // Paths in this router are **relative to its mount**, because the resource is
   // served under two prefixes: the published `/v1/vaults` the contract addresses

@@ -68,6 +68,7 @@
     "test:watch": "vitest",
     "test:property": "vitest run tests/property",
     "test:docs-examples": "vitest run tests/conformance/docs-examples",
+    "test:official-routes": "vitest run tests/conformance/official-route-coverage.test.ts tests/unit/official-routes.test.ts",
     "test:docs-examples:update-snapshots": "node --import tsx tests/conformance/docs-examples/update-snapshots.ts",
     "lint": "npm run typecheck",
     "typecheck": "npm run typecheck:src && npm run typecheck:tests && npm run typecheck:console",

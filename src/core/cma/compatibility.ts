@@ -16,3 +16,9 @@ export const CMA_MANAGED_AGENTS_BETA = 'managed-agents-2026-04-01';
 
 /** `anthropic-beta` for memory-store resources. Mutually exclusive with the above. */
 export const CMA_AGENT_MEMORY_BETA = 'agent-memory-2026-07-22';
+
+export const CMA_REFUSED_RESOURCE_BETAS: Readonly<Record<string, string>> = {
+  '/v1/dreams': 'dreaming-2026-04-21',
+  '/v1/tunnels': 'mcp-tunnels-2026-06-22',
+  '/v1/user_profiles': 'user-profiles-2026-08-18',
+};

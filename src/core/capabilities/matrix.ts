@@ -342,7 +342,7 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
     area: 'credentials',
     id: 'oauth-refresh',
     status: 'unavailable',
-    reason: 'No refresh loop, refresh-failure event, or validate endpoint exists, and none is scheduled. A supplied refresh block is parsed, stored, and answered with an explicit warning that it will not be executed, so a caller never assumes a token was renewed.',
+    reason: 'No refresh loop or refresh-failure event exists, and none is scheduled. The official MCP OAuth validation endpoint explicitly refuses the capability with unsupported_capability. A supplied refresh block is parsed, stored, and answered with an explicit warning that it will not be executed, so a caller never assumes a token was renewed.',
     contract: 'contracts/anthropic-cma/credentials.md',
   },
   {
@@ -412,7 +412,7 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
     area: 'unsupported',
     id: 'dreams',
     status: 'unavailable',
-    reason: 'Dreams are a memory-consolidation pipeline: they read memory stores and historical sessions and produce new, reorganized stores. This phase deliberately does not implement it, and no route or field accepts one. Unavailable rather than not_applicable because the feature belongs in a local-first runtime — what it needs is a scheduled background worker and archived-session corpora, not a hosted service.',
+    reason: 'Dreams are a memory-consolidation pipeline: they read memory stores and historical sessions and produce new, reorganized stores. This phase deliberately does not implement it; official SDK routes explicitly refuse it with unsupported_capability. Unavailable rather than not_applicable because the feature belongs in a local-first runtime — what it needs is a scheduled background worker and archived-session corpora, not a hosted service.',
     contract: 'contracts/anthropic-cma/unsupported.md',
   },
   {

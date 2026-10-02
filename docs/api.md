@@ -75,6 +75,13 @@ Memory-store resources (`/v1/memory_stores` and descendants) instead require:
 anthropic-beta: agent-memory-2026-07-22
 ```
 
+The explicitly refused SDK resources also recognize their native beta:
+`dreaming-2026-04-21` for `/v1/dreams`, `mcp-tunnels-2026-06-22` for
+`/v1/tunnels`, and `user-profiles-2026-08-18` for `/v1/user_profiles`.
+This lets unmodified SDK methods reach `unsupported_capability`; it does not
+enable these capabilities or admit these betas on other resources. The canonical
+managed-agents beta remains accepted on the refusal paths.
+
 Do not combine that beta with `managed-agents-2026-04-01` on a memory-store
 request: admission rejects the pair with `400 invalid_request_error`. The documented
 read-only exception, `GET /v1/memory_stores/{id}/memories`, accepts either of
@@ -159,6 +166,50 @@ resource is missing or the route is. The message for an unrouted path is
 resource's own message such as `Agent not found: <id>`. Authentication,
 throttling, and compatibility admission run before routing, so an unmatched
 `/v1/*` path still answers `401`, `429`, or an admission `400` when those apply.
+
+Known unsupported official SDK operations instead return HTTP 400 with
+`error.type: "unsupported_capability"`, a message pointing to
+`docs/api-matrix.md#unsupported-official-routes`, and
+`error.details.capabilities` containing the capability id and reason. These
+explicit refusals cover Dreams, MCP tunnels, hosted user profiles, the hosted
+environment Work API, and MCP OAuth validation; they do not create resources or
+execute work. Authentication, throttling, and compatibility admission still run
+first. Only the documented official methods and paths are registered; unrelated
+paths or verbs keep the normal not-found behavior. See the
+[compatibility table](./api-matrix.md#unsupported-official-routes).
+
+### Unsupported Official Operations
+
+All operations in this table return HTTP 400 `unsupported_capability`, not a
+resource response. The MCP OAuth refusal is mounted through the shared vault
+router, so both vault spellings preserve the same behavior.
+
+| Method | Path |
+| --- | --- |
+| GET, POST | `/v1/dreams` |
+| GET | `/v1/dreams/{id}` |
+| POST | `/v1/dreams/{id}/archive` |
+| POST | `/v1/dreams/{id}/cancel` |
+| GET, POST | `/v1/tunnels` |
+| GET | `/v1/tunnels/{id}` |
+| POST | `/v1/tunnels/{id}/archive` |
+| POST | `/v1/tunnels/{id}/reveal_token` |
+| POST | `/v1/tunnels/{id}/rotate_token` |
+| GET, POST | `/v1/tunnels/{id}/certificates` |
+| GET | `/v1/tunnels/{id}/certificates/{certificate_id}` |
+| POST | `/v1/tunnels/{id}/certificates/{certificate_id}/archive` |
+| GET, POST | `/v1/user_profiles` |
+| GET, POST | `/v1/user_profiles/{id}` |
+| POST | `/v1/user_profiles/{id}/enrollment_url` |
+| GET | `/v1/environments/{id}/work` |
+| GET | `/v1/environments/{id}/work/poll` |
+| GET | `/v1/environments/{id}/work/stats` |
+| GET, POST | `/v1/environments/{id}/work/{work_id}` |
+| POST | `/v1/environments/{id}/work/{work_id}/ack` |
+| POST | `/v1/environments/{id}/work/{work_id}/heartbeat` |
+| POST | `/v1/environments/{id}/work/{work_id}/stop` |
+| POST | `/v1/vaults/{id}/credentials/{credential_id}/mcp_oauth_validate` |
+| POST | `/v1/credential-vaults/{id}/credentials/{credential_id}/mcp_oauth_validate` |
 
 A query parameter a route does not implement is refused rather than ignored:
 

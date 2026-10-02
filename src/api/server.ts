@@ -18,6 +18,7 @@ import { skillsRoutes } from './routes/skills.js';
 import { apiKeysRoutes } from './routes/api-keys.js';
 import { extendedRoutes } from './routes/extended.js';
 import { sessionResourceRoutes } from './routes/session-resources.js';
+import { unsupportedOfficialRoutes } from './routes/unsupported-official.js';
 import { streamRoutes } from './routes/stream.js';
 import { createAuthMiddleware } from './auth.js';
 import { createCmaRequestAdmissionMiddleware } from './cma-admission.js';
@@ -177,6 +178,7 @@ app.route('/v1/runs', runsRoutes(deps));
   app.route('/v1', resourceRoutes(deps));
   app.route('/v1/skills', skillsRoutes(deps));
   app.route('/v1/api-keys', apiKeysRoutes(deps));
+  app.route('/v1', unsupportedOfficialRoutes());
 
   // SSE streaming
   app.route('/v1/sessions', streamRoutes(deps));

@@ -11,7 +11,8 @@ Source: `src/api/server.ts`, `src/api/routes/agents.ts`,
 `src/api/routes/runtime.ts`, `src/api/routes/session-resources.ts`,
 `src/api/routes/sessions.ts`, `src/api/routes/settings.ts`,
 `src/api/routes/skills.ts`, `src/api/routes/stream.ts`,
-`src/api/routes/templates.ts`, `src/api/routes/worker.ts`.
+`src/api/routes/templates.ts`, `src/api/routes/worker.ts`,
+`src/api/routes/unsupported-official.ts`.
 
 <!-- capability-status
 documented-route-surface: supported
@@ -195,6 +196,46 @@ Reading the table:
   the same row mean two different parameters, not a repeated one.
 - The third column is the module that registers the handler, so a documented
   route can be traced to code without searching the router tree.
+
+### Explicit Unsupported Official Operations
+
+These mounts are refusals, not implemented resource operations. Each returns
+HTTP 400 `unsupported_capability` with a compatibility-table reference after
+authentication, throttling, and header admission. Unknown verbs or descendants
+remain unserved. See [`unsupported.md`](./unsupported.md).
+
+| Method | Path | Registered by |
+| --- | --- | --- |
+| GET | `/v1/dreams` | `src/api/routes/unsupported-official.ts` |
+| GET | `/v1/dreams/{id}` | `src/api/routes/unsupported-official.ts` |
+| GET | `/v1/environments/{id}/work` | `src/api/routes/unsupported-official.ts` |
+| GET | `/v1/environments/{id}/work/{workId}` | `src/api/routes/unsupported-official.ts` |
+| GET | `/v1/environments/{id}/work/poll` | `src/api/routes/unsupported-official.ts` |
+| GET | `/v1/environments/{id}/work/stats` | `src/api/routes/unsupported-official.ts` |
+| GET | `/v1/tunnels` | `src/api/routes/unsupported-official.ts` |
+| GET | `/v1/tunnels/{id}` | `src/api/routes/unsupported-official.ts` |
+| GET | `/v1/tunnels/{id}/certificates` | `src/api/routes/unsupported-official.ts` |
+| GET | `/v1/tunnels/{id}/certificates/{certificateId}` | `src/api/routes/unsupported-official.ts` |
+| GET | `/v1/user_profiles` | `src/api/routes/unsupported-official.ts` |
+| GET | `/v1/user_profiles/{id}` | `src/api/routes/unsupported-official.ts` |
+| POST | `/v1/dreams` | `src/api/routes/unsupported-official.ts` |
+| POST | `/v1/dreams/{id}/archive` | `src/api/routes/unsupported-official.ts` |
+| POST | `/v1/dreams/{id}/cancel` | `src/api/routes/unsupported-official.ts` |
+| POST | `/v1/environments/{id}/work/{workId}` | `src/api/routes/unsupported-official.ts` |
+| POST | `/v1/environments/{id}/work/{workId}/ack` | `src/api/routes/unsupported-official.ts` |
+| POST | `/v1/environments/{id}/work/{workId}/heartbeat` | `src/api/routes/unsupported-official.ts` |
+| POST | `/v1/environments/{id}/work/{workId}/stop` | `src/api/routes/unsupported-official.ts` |
+| POST | `/v1/tunnels` | `src/api/routes/unsupported-official.ts` |
+| POST | `/v1/tunnels/{id}/archive` | `src/api/routes/unsupported-official.ts` |
+| POST | `/v1/tunnels/{id}/certificates` | `src/api/routes/unsupported-official.ts` |
+| POST | `/v1/tunnels/{id}/certificates/{certificateId}/archive` | `src/api/routes/unsupported-official.ts` |
+| POST | `/v1/tunnels/{id}/reveal_token` | `src/api/routes/unsupported-official.ts` |
+| POST | `/v1/tunnels/{id}/rotate_token` | `src/api/routes/unsupported-official.ts` |
+| POST | `/v1/user_profiles` | `src/api/routes/unsupported-official.ts` |
+| POST | `/v1/user_profiles/{id}` | `src/api/routes/unsupported-official.ts` |
+| POST | `/v1/user_profiles/{id}/enrollment_url` | `src/api/routes/unsupported-official.ts` |
+| POST | `/v1/vaults/{id}/credentials/{credentialId}/mcp_oauth_validate` | `src/api/routes/credential-vaults.ts` |
+| POST | `/v1/credential-vaults/{id}/credentials/{credentialId}/mcp_oauth_validate` | `src/api/routes/credential-vaults.ts` |
 
 ## 3. Alignment
 

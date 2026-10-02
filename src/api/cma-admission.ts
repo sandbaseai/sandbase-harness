@@ -12,6 +12,7 @@ import {
   CMA_AGENT_MEMORY_BETA,
   CMA_ANTHROPIC_VERSION,
   CMA_MANAGED_AGENTS_BETA,
+  CMA_REFUSED_RESOURCE_BETAS,
 } from '@/core/cma/compatibility.js';
 
 // The three literals are owned by `@/core/cma/compatibility.js` so the SDK can
@@ -102,11 +103,13 @@ export function createCmaRequestAdmissionMiddleware(): MiddlewareHandler {
     }
 
     const requiredBeta = memoryStorePath ? CMA_AGENT_MEMORY_BETA : CMA_MANAGED_AGENTS_BETA;
-    if (!betas.includes(requiredBeta)) {
+    const refusedResourceBeta = Object.entries(CMA_REFUSED_RESOURCE_BETAS)
+      .find(([prefix]) => c.req.path === prefix || c.req.path.startsWith(`${prefix}/`))?.[1];
+    if (!betas.includes(requiredBeta) && (!refusedResourceBeta || !betas.includes(refusedResourceBeta))) {
       return invalidRequest(
         c,
         CMA_ADMISSION_CODES.unsupportedBeta,
-        `Unsupported anthropic-beta. Expected "${requiredBeta}".`,
+        `Unsupported anthropic-beta. Expected "${requiredBeta}"${refusedResourceBeta ? ` or "${refusedResourceBeta}"` : ''}.`,
       );
     }
 

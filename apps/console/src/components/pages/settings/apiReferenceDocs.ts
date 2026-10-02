@@ -16,6 +16,7 @@ import webhooks from './api-reference/webhooks.json';
 import scheduled_deployments from './api-reference/scheduled-deployments.json';
 import deployment_runs from './api-reference/deployment-runs.json';
 import outcomes from './api-reference/outcomes.json';
+import unsupported_official from './api-reference/unsupported-official.json';
 
 const CANONICAL_VAULT_PREFIX = '/v1/credential-vaults';
 const PUBLISHED_VAULT_PREFIX = '/v1/vaults';
@@ -68,4 +69,5 @@ export const API_REFERENCE_DOCS: ApiReferenceEndpoint[] = [
   ...publishedAliasDocs(scheduled_deployments as unknown as ApiReferenceEndpoint[], CANONICAL_DEPLOYMENT_PREFIX, PUBLISHED_DEPLOYMENT_PREFIX, 'Deployments (published path)'),
   ...(deployment_runs as unknown as ApiReferenceEndpoint[]),
   ...(outcomes as unknown as ApiReferenceEndpoint[]),
+  ...(unsupported_official as unknown as ApiReferenceEndpoint[]),
 ];

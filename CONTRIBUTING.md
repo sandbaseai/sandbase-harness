@@ -157,6 +157,12 @@ review and the PR must say so. The rules in
 that import Console components. Do not hide errors by excluding a test group;
 repair the fixture, type, or configuration instead.
 
+`npm run test:official-routes` derives the managed-agent route inventory from
+the pinned official SDK at test time. Unsupported operations must stay explicit
+refusals. A deferred mount must have an exact method/path, reason, and public
+follow-up in `PENDING_OFFICIAL_ROUTES`; remove the entry in the PR that mounts
+it. An SDK upgrade must not hide new routes behind a broad pending pattern.
+
 Some integration suites intentionally skip when their backing service is not
 available: Docker tests require a daemon and image, Kubernetes tests require a
 reachable cluster, and Windows symlink cases require the appropriate privilege.

@@ -41,11 +41,18 @@ them is a local caller and falls back to the local API contract.
 | both `managed-agents-2026-04-01` and `agent-memory-2026-07-22` on a memory-store path | 400 `conflicting_memory_store_beta` |
 | memory-store path, beta lacks `agent-memory-2026-07-22` | 400 `unsupported_anthropic_beta` |
 | `GET /v1/memory_stores/:id/memories`, beta is either recognized value | allowed (sole documented exception) |
+| refused Dreams, tunnels, or user-profile path, beta is its native SDK beta or `managed-agents-2026-04-01` | admitted to an explicit `unsupported_capability` refusal |
 | other canonical path, beta lacks `managed-agents-2026-04-01` | 400 `unsupported_anthropic_beta` |
 | `/v1/x/*` | never enters CMA admission, not gated |
 
 The local Console and first-party SDK send the canonical headers by default
 rather than relying on the header-free local path.
+
+The native betas recognized only for refused resource families are
+`dreaming-2026-04-21` for `/v1/dreams`, `mcp-tunnels-2026-06-22` for
+`/v1/tunnels`, and `user-profiles-2026-08-18` for `/v1/user_profiles`.
+Version, missing/malformed beta, authentication, and rate-limit checks still
+apply. No supported resource is admitted under one of these native betas.
 
 ## 3. Alignment
 
@@ -81,6 +88,8 @@ request that omits them entirely, as described in §4.
   beta mutual-exclusion case.
 - `tests/unit/canonical-credential.test.ts` — credential-side shape rules that
   apply once admission has passed.
+- `tests/conformance/official-route-coverage.test.ts` — unmodified SDK refusal
+  calls, native-beta confinement, and version/beta validation before refusal.
 
 ## 7. Status
 
