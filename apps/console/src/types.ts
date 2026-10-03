@@ -119,7 +119,7 @@ export type SessionEvent = {
   model_used?: string;
   tokens_in?: number;
   tokens_out?: number;
-  stop_reason?: string;
+  stop_reason?: string | { type: string; event_ids?: string[] };
   duration_ms?: number;
   created_at: string | null;
   processed_at: string | null;

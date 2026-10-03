@@ -70,6 +70,9 @@ The append path and the row shape are `src/core/session/session-manager.ts` and
   keeps it too; a model-derived event keeps the provider's `stop_reason`
   **string** from the `events.stop_reason` column, and the two shapes are
   distinguished by event type. [`sessions.md`](./sessions.md) records both.
+  `stop_reason.type` is `requires_action` while a call is parked,
+  `budget_reached` when the session's spending ceiling stopped the turn (a
+  `requires_action` reason outranks it), and `end_turn` otherwise.
 - The listed calls are exactly the ones still holding the turn back: while
   `event_ids` is non-empty no resume turn starts, and the turn starts when the
   last one is answered. Both the array and that gate read one definition
@@ -191,6 +194,10 @@ lifecycle, structured `session.error`, and usage-before-idle ordering.
   projection: the object readable at the top level for both `requires_action` and
   `end_turn`, the metadata carrier kept and agreeing, the model-event string
   untouched, and the field omitted rather than `null` when there is no reason.
+- `tests/unit/session-budget-pause.test.ts` — the `budget_reached` value of that
+  object: `session.usage` immediately before the idle event, `requires_action`
+  outranking it, and the resumed turn after a budget raise or removal carrying
+  no synthetic `user.message`.
 - `tests/integration/approval-event-id.test.ts` — the event-id address: the
   pending call's own event id reported in `event_ids` and not the block id, a
   decision naming it executed, the block-id spelling still accepted, and every

@@ -315,7 +315,7 @@ export type AgentEvent =
 export interface SessionStatusIdleEvent extends EventBase {
   type: 'session.status_idle';
   stop_reason?: {
-    type: 'end_turn' | 'requires_action';
+    type: 'end_turn' | 'requires_action' | 'budget_reached';
     event_ids?: string[];
   };
 }

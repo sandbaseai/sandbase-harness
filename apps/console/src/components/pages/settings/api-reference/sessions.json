@@ -176,7 +176,7 @@
     "title": "Update session",
     "method": "POST",
     "path": "/v1/sessions/{session_id}",
-    "summary": "Patch a session in place: agent admits only tools/mcp_servers (full replacement, materialized as the session's own snapshot), metadata merges per key with null removing a key, title replaces with null clearing, and budget moves the ceiling under the budget rules (budget_create_only, budget_not_raised, model_not_budgetable) in any non-terminal state. An agent change needs an idle session; vault_ids is a named refusal. One session.updated event reports the fields that changed.",
+    "summary": "Patch a session in place: agent admits only tools/mcp_servers (full replacement, materialized as the session's own snapshot), metadata merges per key with null removing a key, title replaces with null clearing, and budget moves the ceiling under the budget rules (budget_create_only, budget_not_raised, model_not_budgetable) in any non-terminal state — a raise or removal also resumes a session parked on stop_reason budget_reached without a new message. An agent change needs an idle session; vault_ids is a named refusal. One session.updated event reports the fields that changed.",
     "response": [
       {
         "name": "session",

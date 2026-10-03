@@ -19,6 +19,17 @@
 - The local `status` query parameter on `GET /v1/sessions` is removed in favour of the published repeatable `statuses` (and the SDK's `statuses[]` spelling): every value must be one of `idle`, `running`, `rescheduling`, or `terminated` and selects all internal states in that public group — a filter on internally `failed` sessions is expressed as `statuses=terminated`, and any other value is a `400` naming it. `GET /v1/sessions` also now takes the rest of the published parameter set: `order=asc|desc` by `created_at`, `include_archived` (archived sessions are excluded by default), `agent_id` with `agent_version` applying only beside it, `memory_store_id`, `deployment_id`, and `created_at[gt|gte|lt|lte]` bounds. A `page` cursor now binds only the `order` and `created_at[*]` window it was issued under — replaying either differently is a `400` — while the remaining filters may change freely across a replay, matching the published rule.
 
 ### Added
+- A session that crosses its `max_list_cost` ceiling inside a turn now stops
+  after the step that crossed it instead of only refusing the next event: the
+  session idles with `stop_reason: {"type": "budget_reached"}` —
+  `session.usage` immediately before it, `requires_action` still outranking the
+  ceiling when a call is parked — and a tool call the loop dispatched but never
+  executed is settled with an interrupted-outcome result so the event log stays
+  paired. An accepted budget update or removal through `POST /v1/sessions/{id}`
+  then resumes the session on its own: the turn loop re-enters from the event
+  log without a `user.message`. A `requires_action` session at its ceiling is
+  never ended by the parked-wait timeout, because the answer it waits on is a
+  settlement event the budget still accepts.
 - Sessions can now be updated in place with `POST /v1/sessions/{id}`. `agent`
   admits only `tools` and `mcp_servers` (full replacement, validated like an
   agent definition, and materialized as the session's own snapshot without

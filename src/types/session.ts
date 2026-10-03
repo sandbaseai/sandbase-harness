@@ -4,7 +4,7 @@
  * Core session state machine types and event log types.
  */
 
-import type { CMAEventType, ContentBlock, SessionBudget } from './cma-protocol.js';
+import type { CMAEventType, ContentBlock, SessionBudget, UserEvent } from './cma-protocol.js';
 import type { AgentDefinition, AgentOverrides } from './agent.js';
 
 // ============================================================
@@ -207,3 +207,17 @@ export interface PaginatedResult<T> {
   pageSize: number;
   hasMore: boolean;
 }
+
+/**
+ * Internal trigger that re-enters the turn loop after a budget update lifts a
+ * session's spending ceiling. It is deliberately not a `UserEvent`: nothing is
+ * appended to the log for it, so a `user.message` carrier would fabricate a
+ * user utterance into context projection, memory extraction, and the event
+ * contract the log is published under.
+ */
+export interface ResumeAfterBudgetTrigger {
+  type: 'internal.resume_after_budget';
+}
+
+/** What the executor's turn loop may be entered with: a wire event, or an internal resume. */
+export type TurnTrigger = UserEvent | ResumeAfterBudgetTrigger;

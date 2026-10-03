@@ -50,7 +50,9 @@ import type {
   CreateSessionParams,
   ListSessionsParams,
   PaginatedResult,
+  ResumeAfterBudgetTrigger,
   SessionAgentUpdate,
+  TurnTrigger,
   UpdateSessionParams,
 } from '@/types/session.js';
 import type {
@@ -134,11 +136,19 @@ export interface ExecuteOptions {
   broadcast?: (event: SessionEvent) => void;
   /** Called when the turn suspends awaiting user tool confirmation (A5). */
   onRequiresAction?: () => void;
+  /**
+   * Read after each model step so a turn stops at the session's spending
+   * ceiling instead of only discovering it when the next event is refused.
+   */
+  budgetExhausted?: () => boolean;
 }
+
+/** The one internal trigger this runtime re-enters a turn on. See `TurnTrigger`. */
+export const RESUME_AFTER_BUDGET: ResumeAfterBudgetTrigger = { type: 'internal.resume_after_budget' };
 
 export interface SessionExecutor {
   /** Called when a user event is received — runs the engine loop */
-  execute(session: Session, event: UserEvent, options?: ExecuteOptions): AsyncIterable<SessionEvent>;
+  execute(session: Session, event: TurnTrigger, options?: ExecuteOptions): AsyncIterable<SessionEvent>;
   /** Destroy resources (sandbox) bound to a session on terminal state */
   cleanupSession?(sessionId: string): Promise<void>;
   /**
@@ -547,7 +557,44 @@ export class SessionManager {
     if (agentChange !== undefined) {
       await this.executor?.resetSessionMcpConnections?.(sessionId);
     }
+    if (budgetChange !== undefined) {
+      this.resumeAfterBudget(sessionId);
+    }
     return updated.session;
+  }
+
+  /**
+   * Re-enter the turn loop for a session parked on `budget_reached` once an
+   * accepted update lifts its ceiling.
+   *
+   * An accepted change is always enough headroom to resume — `resolveBudgetUpdate`
+   * refuses a cap below the spend already committed, and `null` removes the
+   * ceiling entirely — so this checks *why* the session is waiting, not whether
+   * the new budget admits work. The trigger stays internal: the resume's
+   * context is rebuilt from the event log, and no `user.message` is appended
+   * for an update the model was never told about.
+   *
+   * Pi sessions report the same idle reason but are not re-entered: a Pi turn
+   * needs a `user.message` or `user.tool_confirmation` carrier the resume
+   * deliberately is not, so a Pi session waits for the client's next event.
+   */
+  private resumeAfterBudget(sessionId: string): void {
+    if (!this.executor) return;
+    const session = this.get(sessionId);
+    if (!session || session.loopEngine === 'pi') return;
+    if (!this.lastIdleStopReasonIs(sessionId, 'budget_reached')) return;
+    this.enqueueTurnForEvent(sessionId, RESUME_AFTER_BUDGET);
+  }
+
+  /**
+   * Read the `stop_reason` of the most recent `session.status_idle`, so a
+   * resume decision names the same projection a client saw.
+   */
+  private lastIdleStopReasonIs(sessionId: string, reason: string): boolean {
+    const events = this.eventLogger.getEvents(sessionId);
+    const lastIdle = [...events].reverse().find((event) => event.type === 'session.status_idle');
+    const stopReason = (lastIdle?.metadata as { stop_reason?: { type?: string } } | undefined)?.stop_reason;
+    return stopReason?.type === reason;
   }
 
   /**
@@ -1250,7 +1297,7 @@ export class SessionManager {
   }
 
   /** Queue the turn for one initial event, serialized per session. */
-  private enqueueTurnForEvent(sessionId: string, event: UserEvent): void {
+  private enqueueTurnForEvent(sessionId: string, event: TurnTrigger): void {
     if (!this.executor) return;
     const prev = this.executionChains.get(sessionId) ?? Promise.resolve();
     const next = prev
@@ -1591,7 +1638,7 @@ export class SessionManager {
     }
   }
 
-  private updateStatus(sessionId: string, newStatus: SessionStatus): void {
+  private updateStatus(sessionId: string, newStatus: SessionStatus, idleStopReason?: 'budget_reached'): void {
     // Validate the transition against the state machine. If the current status
     // already equals the target, this is a no-op. Invalid transitions are
     // skipped (defense — should not happen given callers guard with isTerminal).
@@ -1624,7 +1671,7 @@ export class SessionManager {
       }
       const statusEvent = this.eventLogger.append(sessionId, {
         type: eventType,
-        metadata: lifecycleMetadataFor(newStatus, events),
+        metadata: lifecycleMetadataFor(newStatus, events, idleStopReason),
       });
       this.broadcast(sessionId, statusEvent);
     }
@@ -1799,6 +1846,7 @@ export class SessionManager {
     for await (const evt of this.executor.execute(running, revisionEvent, {
       abortSignal: abortController.signal,
       broadcast: (e) => this.broadcast(sessionId, e),
+      budgetExhausted: () => this.isBudgetExhausted(sessionId),
       onRequiresAction: () => {
         turnState.requiresAction = true;
       },
@@ -1812,12 +1860,21 @@ export class SessionManager {
    * never overlap. Transitions running on start, then paused (idle, awaiting
    * next input) on normal completion — NOT terminal, so multi-turn works.
    */
-  private async runTurn(sessionId: string, event: UserEvent): Promise<void> {
+  private async runTurn(sessionId: string, event: TurnTrigger): Promise<void> {
     if (!this.executor) return;
 
     const session = this.get(sessionId);
     // Session may have been stopped/deleted between enqueue and execution.
     if (!session || isTerminal(session.status)) return;
+
+    // Two resume requests can legitimately queue behind one idle — the check at
+    // enqueue is a fast path only, so the trigger re-reads the log when its turn
+    // comes. A first resume that already ran ends the session on `end_turn`,
+    // and anything else that idled it since is a reason a duplicate must not
+    // re-enter over.
+    if (event.type === 'internal.resume_after_budget' && !this.lastIdleStopReasonIs(sessionId, 'budget_reached')) {
+      return;
+    }
 
     // Transition to running for this turn
     if (session.status !== 'running') {
@@ -1836,6 +1893,7 @@ export class SessionManager {
       for await (const evt of this.executor.execute(running, event, {
         abortSignal: abortController.signal,
         broadcast: (e) => this.broadcast(sessionId, e),
+        budgetExhausted: () => this.isBudgetExhausted(sessionId),
         onRequiresAction: () => {
           turnState.requiresAction = true;
         },
@@ -1862,10 +1920,26 @@ export class SessionManager {
       }
 
       // Turn finished. If a tool needs confirmation → requires_action;
-      // otherwise go idle (paused), awaiting next input.
+      // a turn that stopped at the spending ceiling idles on `budget_reached`
+      // — the ceiling outranks only `end_turn`, never a parked call waiting on
+      // its answer. Anything else goes idle (paused), awaiting next input.
       const current = this.get(sessionId);
       if (current && current.status === 'running') {
-        this.updateStatus(sessionId, turnState.requiresAction ? 'requires_action' : 'paused');
+        if (turnState.requiresAction) {
+          this.updateStatus(sessionId, 'requires_action');
+        } else {
+          // A ceiling stop can strand a call the loop dispatched but never
+          // executed — its `agent.tool_use` has no paired result, and the resume
+          // a budget update queues next projects messages straight from this
+          // log. Settle it the way crash recovery and a fresh user.message do,
+          // before `session.usage` and the idle close the turn.
+          if (this.isBudgetExhausted(sessionId)) {
+            this.resolveOrphanedToolUses(sessionId);
+            this.updateStatus(sessionId, 'paused', 'budget_reached');
+          } else {
+            this.updateStatus(sessionId, 'paused');
+          }
+        }
       }
     } catch (err) {
       const errorCode = errorCodeOf(err);
@@ -2038,8 +2112,8 @@ function getConfirmationMetadata(
   };
 }
 
-function lifecycleMetadataFor(status: SessionStatus, events: SessionEvent[]): Record<string, unknown> | undefined {
-  if (status === 'paused') return { stop_reason: { type: 'end_turn' } };
+function lifecycleMetadataFor(status: SessionStatus, events: SessionEvent[], idleStopReason?: 'budget_reached'): Record<string, unknown> | undefined {
+  if (status === 'paused') return { stop_reason: { type: idleStopReason ?? 'end_turn' } };
   if (status !== 'requires_action') return undefined;
 
   // The parked set comes from `parkedCalls`, which the resume gate in the

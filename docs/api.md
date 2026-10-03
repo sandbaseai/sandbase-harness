@@ -940,6 +940,7 @@ jq -r 'select(.type == "session.status_idle") | .stop_reason.type // empty'
 | `stop_reason.type` | Meaning |
 | --- | --- |
 | `requires_action` | The session is waiting for an answer to a blocking tool call. `event_ids` lists the parked calls, by their own event id. |
+| `budget_reached` | The turn stopped after the step that crossed the session's spending ceiling. An accepted budget update or removal resumes the session on its own; a work-starting event before that is refused with `budget_reached`. A parked call still wins over this reason — see `requires_action`. |
 | `end_turn` | The turn ended with nothing outstanding. An interrupt reports `end_turn` as well; there is no separate interrupt reason. |
 
 The object is also kept under `metadata.stop_reason`, and is exactly the
@@ -1445,6 +1446,16 @@ and no session can be budgeted.
 | `currency` is not `USD` | `budget_invalid_currency` |
 | `type` is not `limit`, the shape is wrong, or `budget` is `null` | `budget_invalid_shape` |
 | The session's model has no list price in the configured profile | `model_not_budgetable` |
+
+A turn also stops *inside* the ceiling: the builtin loop checks the spend after
+each model step, so the step that crossed the cap is the last one. The session
+then idles with `stop_reason: {type: 'budget_reached'}` — `session.usage`
+immediately before it — and a tool call the loop dispatched but never executed
+is settled with an interrupted-outcome result so the transcript stays paired.
+An accepted budget update through `POST /v1/sessions/{id}` (a raise or `null`)
+resumes the session on its own: the turn loop re-enters without a `user.message`
+and continues from the event log. A `requires_action` reason outranks the
+ceiling — a parked call waiting on its answer is reported first.
 
 Once a session has reached its ceiling, an event that would start new model work
 is refused with `budget_reached`, and only events that settle work already in

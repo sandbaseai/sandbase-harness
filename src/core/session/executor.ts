@@ -15,6 +15,7 @@ import { dirname, resolve, sep } from 'node:path';
 import type { SessionExecutor, ExecuteOptions } from './session-manager.js';
 import type { Session, SessionEvent, SessionLoopEngine } from '@/types/session.js';
 import type { UserEvent } from '@/types/cma-protocol.js';
+import type { TurnTrigger } from '@/types/session.js';
 import type { AgentDefinition } from '@/types/agent.js';
 import type { SandboxInstance, SandboxProvider, EnvironmentConfig } from '@/types/sandbox.js';
 import type { SandboxProviderRegistry } from '@/sandbox/registry.js';
@@ -209,7 +210,7 @@ export class DefaultSessionExecutor implements SessionExecutor {
 
   async *execute(
     session: Session,
-    event: UserEvent,
+    event: TurnTrigger,
     options?: ExecuteOptions,
   ): AsyncIterable<SessionEvent> {
     const { agents, modelRegistry, eventLogger } = this.deps;
@@ -239,7 +240,11 @@ export class DefaultSessionExecutor implements SessionExecutor {
       assertPiAgentCanExecute(agent);
       const environment = this.deps.resolveEnvironmentConfig?.(session.environmentId);
       assertPiEnvironmentCanExecute(environment?.sandbox_provider ?? this.deps.sandboxProvider.type);
-      assertPiUserEventCanExecute(event);
+      // An internal resume carries no user payload to validate — it re-enters
+      // the loop on the transcript the log already holds.
+      if (event.type !== 'internal.resume_after_budget') {
+        assertPiUserEventCanExecute(event);
+      }
     }
 
     // Pi owns model transport, but it still receives the selected concrete
@@ -361,6 +366,7 @@ export class DefaultSessionExecutor implements SessionExecutor {
         temperature: agent.temperature ?? 0.7,
         confirmTools,
         onRequiresAction: options?.onRequiresAction,
+        budgetExhausted: options?.budgetExhausted,
       },
       abortSignal: options?.abortSignal,
     };

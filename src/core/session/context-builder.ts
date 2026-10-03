@@ -3,7 +3,7 @@ import type { EventLogger } from './event-logger.js';
 import type { ContextCompactor } from './context-compactor.js';
 import type { AgentDefinition } from '@/types/agent.js';
 import type { UserEvent } from '@/types/cma-protocol.js';
-import type { Session, SessionEvent } from '@/types/session.js';
+import type { Session, SessionEvent, TurnTrigger } from '@/types/session.js';
 import { composeSystemPrompt, type Skill } from '@/core/skills/loader.js';
 import type { MemoryProvider } from '@/core/memory/memory-provider.js';
 import { memoryBindingIsWritable, resolveMemoryBindings } from '@/core/memory/bindings.js';
@@ -61,7 +61,7 @@ export class ContextBuilder {
   async build(
     session: Session,
     agent: AgentDefinition,
-    event: UserEvent,
+    event: TurnTrigger,
     model: unknown | undefined,
     broadcast: (event: SessionEvent) => void,
     options?: ContextBuildOptions,
@@ -88,7 +88,7 @@ export class ContextBuilder {
     return { systemPrompt, messages };
   }
 
-  async extractMemory(session: Session, event: UserEvent): Promise<void> {
+  async extractMemory(session: Session, event: TurnTrigger): Promise<void> {
     if (event.type !== 'user.message') return;
     const text = (event.content ?? [])
       .filter((block) => block.type === 'text')
@@ -166,7 +166,7 @@ export class ContextBuilder {
   private async injectMemory(
     systemPrompt: string,
     contextId: string,
-    event: UserEvent,
+    event: TurnTrigger,
   ): Promise<string> {
     if (!this.deps.memory) return systemPrompt;
     const query = event.type === 'user.message'
@@ -185,7 +185,7 @@ export class ContextBuilder {
   private async injectMountedMemory(
     systemPrompt: string,
     bindings: ReturnType<typeof resolveMemoryBindings>,
-    event: UserEvent,
+    event: TurnTrigger,
   ): Promise<string> {
     if (!this.deps.memoryRecords) return systemPrompt;
     const query = event.type === 'user.message'

@@ -741,7 +741,9 @@ function eventFacts(event: SessionEvent): Array<[string, string]> {
   if (event.tokens_in !== undefined || event.tokens_out !== undefined) {
     facts.push(['Tokens', `${event.tokens_in ?? 0} in · ${event.tokens_out ?? 0} out`]);
   }
-  if (event.stop_reason) facts.push(['Stop reason', event.stop_reason]);
+  // A model-derived stop reason is a string; a session.status_idle one is the
+  // object the session contract publishes — only its `type` reads sensibly.
+  if (event.stop_reason) facts.push(['Stop reason', typeof event.stop_reason === 'string' ? event.stop_reason : event.stop_reason.type]);
   if (event.parent_event_id) facts.push(['Parent event', shortId(event.parent_event_id)]);
   return facts;
 }

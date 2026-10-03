@@ -8,7 +8,7 @@
 import type { LanguageModel } from 'ai';
 import type { ModelConfig } from './model.js';
 import type { SandboxInstance } from './sandbox.js';
-import type { Session, SessionEvent } from './session.js';
+import type { Session, SessionEvent, TurnTrigger } from './session.js';
 
 // ============================================================
 // Agent Strategy Interface
@@ -43,8 +43,10 @@ export interface AgentStrategy {
 
 export interface StrategyContext {
   session: Session;
-  /** The incoming user event for strategies that use the raw turn prompt. */
-  userEvent: import('./cma-protocol.js').UserEvent;
+  /** The incoming trigger — a wire user event, or an internal resume that
+   *  carries no prompt: a strategy reading `userEvent` must tolerate the
+   *  `internal.*` types, which name re-entry on the transcript the log holds. */
+  userEvent: TurnTrigger;
   /** Agent system prompt (with any injected skills). Sent to the model. */
   systemPrompt: string;
   messages: CoreMessage[];
@@ -81,6 +83,13 @@ export interface AgentStrategyConfig {
   /** Called by the strategy when a tool call needs user confirmation — the
    *  session should transition to requires_action and await user.tool_confirmation. */
   onRequiresAction?: () => void;
+  /**
+   * Checked once per step, after that step's spend has been committed — a true
+   * answer stops the turn at the session's budget ceiling instead of starting
+   * another model request. Absent means "no ceiling", which is exactly what a
+   * session without a budget is.
+   */
+  budgetExhausted?: () => boolean;
   /** Called once before the maxSteps loop starts */
   beforeTurn?: (ctx: StrategyContext) => Promise<void>;
   /** Called after each tool-loop step completes */

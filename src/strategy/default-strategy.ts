@@ -254,6 +254,12 @@ export class DefaultStrategy implements AgentStrategy {
         tools: Object.keys(aiTools).length > 0 ? aiTools : undefined,
         stopWhen: [
           stepCountIs(maxSteps),
+          // Spend is committed per step in onStepFinish below, so by the time
+          // the SDK asks stopWhen the ceiling check reads that step's cost.
+          // Stopping here is what makes "the request that crossed the budget
+          // is the last one" true; without it a turn only discovers the cap
+          // when the next event is refused.
+          () => config.budgetExhausted?.() ?? false,
           // A custom tool call has no local executor, so the turn stops rather
           // than asking the SDK to run a tool that cannot produce a result.
           ...(customTools.size > 0
