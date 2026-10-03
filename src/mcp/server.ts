@@ -21,7 +21,7 @@ export interface ManagedAgentsMcpClient {
     get(id: string): Promise<SessionSummary>;
     chat(id: string, text: string): AsyncIterable<StreamedEvent>;
     artifacts(id: string): Promise<{ data: SessionArtifactSummary[] }>;
-    stop(id: string): Promise<{ id: string; status: 'terminated' }>;
+    stop(id: string): Promise<SessionSummary>;
   };
 }
 
@@ -114,7 +114,7 @@ export function createManagedAgentsMcpServer(options: {
   }, async ({ session_id }) => result(await handlers.listArtifacts(session_id)));
 
   server.registerTool('stop_session', {
-    description: 'Stop a running managed-agents session.',
+    description: 'Interrupt the current turn, retain the sandbox for another message, and return the session. An idle session is unchanged; an already terminal session is refused.',
     inputSchema: { session_id: z.string().describe('Session id') },
   }, async ({ session_id }) => result(await handlers.stopSession(session_id)));
 

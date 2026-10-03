@@ -29,7 +29,7 @@ export type ApiSessionStatus = 'idle' | 'running' | 'rescheduling' | 'terminated
  * Key: current state, Value: set of valid next states.
  *
  * Every non-terminal state can transition to completed/failed, because a
- * session can be stopped (completed) or hit an unrecoverable error (failed)
+ * session can be logically deleted (completed) or hit an unrecoverable error (failed)
  * at any point in its life — including while queued or idle (paused).
  */
 export const SESSION_TRANSITIONS: Record<SessionStatus, SessionStatus[]> = {

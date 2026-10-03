@@ -103,6 +103,7 @@ export interface StubModelServerOptions {
    * from, which is the pair a client's two failure paths need.
    */
   failStatus?: number;
+  holdRequests?: number[];
 }
 
 export async function startStubModelServer(options: StubModelServerOptions = {}): Promise<StubModelServer> {
@@ -118,6 +119,11 @@ export async function startStubModelServer(options: StubModelServerOptions = {})
     void readJson(req).then((body) => {
       const request = body as StubModelRequest;
       requests.push(request);
+      if (options.holdRequests?.includes(requests.length)) {
+        res.writeHead(200, { 'content-type': 'text/event-stream' });
+        res.flushHeaders();
+        return;
+      }
       if (options.failRequests?.includes(requests.length)) {
         const status = options.failStatus ?? 500;
         res.writeHead(status, { 'content-type': 'application/json' });

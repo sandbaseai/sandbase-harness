@@ -38,6 +38,19 @@ outcome-grading: supported
 
 ## 2. Current SandBase shape
 
+The published `user.interrupt` event interrupts active processing and leaves the
+session resumable at `idle`; the session operations guide requires that state
+before changing, archiving, or deleting a running session. The local
+`POST /v1/sessions/{id}/stop` alias has the same interruption semantics and waits
+for the execution chain to drain before returning the full session envelope.
+Successful interruption reports `end_turn` and retains the sandbox. An idle
+session is unchanged, even while awaiting approval; already terminal sessions
+return `409` without mutation or cleanup. This local alias is deprecated,
+retained for one version, and removed in the next version. It is not a published
+SDK operation. Pi closes the interrupted child and starts another on the next
+turn in the same sandbox. Unconfirmed child-tree cleanup retains the existing
+fail-closed `cleanup_pending` state instead of claiming the workspace is safe.
+
 The routes are `src/api/routes/sessions.ts` with
 `src/api/routes/initial-events.ts` and `src/api/routes/session-normalizers.ts`;
 the lifecycle and the outcome loop live in `src/core/session/session-manager.ts`;

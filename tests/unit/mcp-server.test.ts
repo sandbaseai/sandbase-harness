@@ -13,7 +13,7 @@ function fakeClient(): ManagedAgentsMcpClient {
         return { id: 'session_one', agent: input.agent, title: input.title } as any;
       },
       async get(id) {
-        return { id, status: 'idle' } as any;
+        return { id, type: 'session', status: 'idle' } as any;
       },
       async *chat() {
         yield { type: 'agent.message_chunk', delta: 'Hello' };
@@ -24,13 +24,20 @@ function fakeClient(): ManagedAgentsMcpClient {
         return { data: [{ id: 'artifact_one', filename: 'report.md' }] as any };
       },
       async stop(id) {
-        return { id, status: 'terminated' };
+        return this.get(id);
       },
     },
   };
 }
 
 describe('managed-agents MCP handlers', () => {
+  it('returns a resumable session envelope from stop', async () => {
+    const handlers = createManagedAgentsMcpHandlers(fakeClient());
+    await expect(handlers.stopSession('session_one')).resolves.toEqual({
+      id: 'session_one', type: 'session', status: 'idle',
+    });
+  });
+
   it('lists agents without exposing transport details', async () => {
     const handlers = createManagedAgentsMcpHandlers(fakeClient());
     expect(await handlers.listAgents()).toEqual([{ id: 'agent_one', name: 'One' }]);

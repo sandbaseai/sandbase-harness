@@ -136,7 +136,7 @@ describe('Multi-turn + sandbox lifecycle', () => {
     expect(executor.turnCount).toBe(3);
   });
 
-  it('releases the sandbox on stop (terminal)', async () => {
+  it('retains the sandbox on stop and accepts a continuation', async () => {
     const session = manager.create({ agent: 'agent_echo' });
     await manager.sendEvent(session.id, userMsg('hi'));
     await waitFor(
@@ -145,11 +145,17 @@ describe('Multi-turn + sandbox lifecycle', () => {
     );
 
     await manager.stop(session.id);
-    expect(executor.cleanups.get(session.id)).toBe(1);
-    expect(manager.get(session.id)!.status).toBe('completed');
+    expect(executor.cleanups.has(session.id)).toBe(false);
+    expect(manager.get(session.id)!.status).toBe('paused');
+    await manager.sendEvent(session.id, userMsg('continue'));
+    await waitFor(
+      () => executor.turnCount === 2 && manager.get(session.id)?.status === 'paused' ? true : undefined,
+      'continued turn completion',
+    );
+    expect(executor.cleanups.has(session.id)).toBe(false);
   });
 
-  it('stop() aborts and drains an in-flight turn before cleanup (H1)', async () => {
+  it('stop() aborts and drains an in-flight turn without cleanup', async () => {
     let turnFinished = false;
     let cleanedUp = false;
     let cleanupBeforeTurnEnd = false;
@@ -175,10 +181,10 @@ describe('Multi-turn + sandbox lifecycle', () => {
     await manager.sendEvent(session.id, userMsg('go'));
     await new Promise((r) => setTimeout(r, 30)); // let the turn start
 
-    await manager.stop(session.id); // must abort + drain BEFORE cleanup
+    await manager.stop(session.id);
 
     expect(turnFinished).toBe(true);
-    expect(cleanedUp).toBe(true);
+    expect(cleanedUp).toBe(false);
     expect(cleanupBeforeTurnEnd).toBe(false);
   });
 

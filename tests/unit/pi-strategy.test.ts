@@ -355,11 +355,13 @@ describe('PiStrategy turn loop over a session-owned child', () => {
     expect(strategy.liveSessionIds()).toEqual(['sess_pi_turn']);
   });
 
-  it('stops the child and rethrows an abort when the turn is interrupted', async () => {
+  it('stops the interrupted child and launches another for a continuation', async () => {
     const session = new ScriptedSession('sess_pi_turn');
     // A turn that never settles: only the abort can end it.
     session.defaultOutcome = new Promise<LoopEngineTurnOutcome>(() => {});
-    const strategy = strategyFor([session], []);
+    const continued = new ScriptedSession('sess_pi_turn');
+    const starts: LoopEngineStartRequest[] = [];
+    const strategy = strategyFor([session, continued], starts);
     const controller = new AbortController();
 
     const turn = run(strategy, contextFor([], { abortSignal: controller.signal }));
@@ -367,6 +369,12 @@ describe('PiStrategy turn loop over a session-owned child', () => {
 
     await expect(turn).rejects.toMatchObject({ name: 'AbortError' });
     expect(session.calls).toContain('interrupt');
+    expect(strategy.liveSessionIds()).toEqual([]);
+    await run(strategy, contextFor([]));
+    expect(starts).toHaveLength(2);
+    expect(starts[1]?.sessionId).toBe('sess_pi_turn');
+    expect(continued.calls).toContain('prompt');
+    expect(strategy.liveSessionIds()).toEqual(['sess_pi_turn']);
   });
 
   it('releases the child when the session reaches a terminal state', async () => {

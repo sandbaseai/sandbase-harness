@@ -283,20 +283,20 @@
   {
     "id": "sessions-stop",
     "group": "Sessions",
-    "title": "Stop session",
+    "title": "Interrupt session (deprecated alias)",
     "method": "POST",
     "path": "/v1/sessions/{session_id}/stop",
-    "summary": "Request cancellation for the active run in a session.",
+    "summary": "Deprecated local user.interrupt alias, removed next version. Interrupt the active turn, retain its sandbox, and return the full session envelope. Idle is a no-op; an already terminal session returns 409. Unconfirmed Pi cleanup remains terminated.",
     "response": [
       {
         "name": "id",
         "type": "string",
-        "description": "Stopped session identifier."
+        "description": "Session identifier retained for another message."
       },
       {
         "name": "status",
-        "type": "terminated",
-        "description": "Terminal session status after cancellation."
+        "type": "idle | running | rescheduling | terminated",
+        "description": "Full session envelope; successful interruption leaves idle with end_turn, not terminated."
       }
     ]
   },

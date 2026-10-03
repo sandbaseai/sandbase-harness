@@ -730,7 +730,8 @@ class SessionsResource {
     return this.client.requestText('GET', `/v1/sessions/${encodeURIComponent(id)}/artifacts/${encodeURIComponent(artifactId)}/content`);
   }
 
-  stop(id: string): Promise<{ id: string; status: 'terminated' }> {
+  /** @deprecated Interrupt the active turn, retaining the sandbox for another message. Prefer interrupt(). */
+  stop(id: string): Promise<SessionSummary> {
     return this.client.request('POST', `/v1/sessions/${encodeURIComponent(id)}/stop`);
   }
 

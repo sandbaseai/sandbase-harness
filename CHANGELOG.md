@@ -4,6 +4,8 @@
 
 ### Breaking
 
+- The deprecated local `POST /v1/sessions/{id}/stop` alias now interrupts the current turn and returns a full session envelope instead of `{id, status: "terminated"}`. Successful interruption returns the session to `idle` with `stop_reason.type: "end_turn"`, retains its sandbox, and permits another message. Stopping an idle session is a no-op; already terminal sessions return `409`. Pi interruptions likewise remain resumable, while an unconfirmed child-tree cleanup still fails closed as `cleanup_pending` (`terminated`). Prefer the published `user.interrupt` event; the local stop alias is retained for one version and will be removed in the next version. Logical deletion is unchanged.
+
 - Session responses now use only `idle`, `running`, `rescheduling`, and `terminated`. Waiting for approval or a custom tool result is `idle`, with `stop_reason.type: "requires_action"` and pending event ids on the matching `session.status_idle` event. Internal `failed`, `cancelled`, `timed_out`, and `cleanup_pending` all project to `terminated`; their details remain in the event log. A failed session is terminal: new messages and events return `409` without persisting input or starting another turn. The existing single-value session `status` list filter selects every internal state in the requested public group; `rescheduling` currently selects none because automatic rescheduling is not implemented.
 
 ### Added

@@ -712,13 +712,17 @@ export function sessionsRoutes(deps: ServerDeps) {
     const sessionId = c.req.param('id');
     try {
       await sessionManager.stop(sessionId);
-      return c.json({ id: sessionId, status: 'terminated' });
+      const session = sessionManager.get(sessionId)!;
+      return c.json(toApiSession(session, session.agentDefinition ?? findAgentById(deps, session.agentId)));
     } catch (err: any) {
       if (err instanceof UnsupportedCapabilityError) {
         return unsupportedCapability(c, err);
       }
       if (err.message?.includes('not found')) {
         return c.json({ error: { type: 'not_found', message: err.message } }, 404);
+      }
+      if (err.message?.includes('terminal state')) {
+        return c.json({ error: { type: 'conflict', message: err.message } }, 409);
       }
       return c.json({ error: { type: 'internal_error', message: err.message } }, 500);
     }

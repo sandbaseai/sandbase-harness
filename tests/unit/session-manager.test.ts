@@ -88,7 +88,7 @@ describe('Session Manager', () => {
       const second = manager.sendEvent(session.id, { type: 'user.message', content: [{ type: 'text', text: 'second' }] });
       await Promise.all([first, second]);
       await vi.waitFor(() => expect(manager.get(session.id)!.status).toBe('failed'));
-      await manager.stop(session.id);
+      await expect(manager.stop(session.id)).rejects.toThrow('terminal state: failed');
 
       expect(manager.get(session.id)!.status).toBe('failed');
       expect(execute).toHaveBeenCalledTimes(1);
@@ -166,11 +166,11 @@ describe('Session Manager', () => {
   });
 
   describe('stop', () => {
-    it('stops a session (transitions to completed)', async () => {
+    it('leaves an idle session unchanged', async () => {
       const session = manager.create({ agent: 'agent_test' });
       await manager.stop(session.id);
       const stopped = manager.get(session.id);
-      expect(stopped!.status).toBe('completed');
+      expect(stopped!.status).toBe('queued');
     });
 
     it('throws for non-existent session', async () => {
@@ -184,8 +184,7 @@ describe('Session Manager', () => {
       const received: any[] = [];
       manager.subscribe(session.id, (evt) => received.push(evt));
 
-      // Trigger by stopping (which internally broadcasts status events)
-      await manager.stop(session.id);
+      await manager.sendEvent(session.id, { type: 'user.message', content: [{ type: 'text', text: 'hello' }] });
       expect(received.length).toBeGreaterThan(0);
     });
 
@@ -195,7 +194,7 @@ describe('Session Manager', () => {
       const unsub = manager.subscribe(session.id, (evt) => received.push(evt));
       unsub();
 
-      await manager.stop(session.id);
+      await manager.sendEvent(session.id, { type: 'user.message', content: [{ type: 'text', text: 'hello' }] });
       expect(received).toHaveLength(0);
     });
   });

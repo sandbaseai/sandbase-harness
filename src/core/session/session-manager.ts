@@ -1079,23 +1079,18 @@ export class SessionManager {
   }
 
   /**
-   * Stop a session and release its sandbox (terminal → completed).
+   * Interrupt the current turn and retain the session and its sandbox.
    */
   async stop(sessionId: string): Promise<void> {
     const session = this.get(sessionId);
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`);
     }
-    // Abort any in-flight turn and wait for it to unwind before tearing down
-    // the sandbox, so the strategy never calls into a destroyed sandbox (H1).
+    if (isTerminal(session.status)) {
+      throw new Error(`Session ${sessionId} is in terminal state: ${session.status}`);
+    }
     this.abortControllers.get(sessionId)?.abort();
     await this.drainChain(sessionId);
-    if (!isTerminal(this.get(sessionId)?.status ?? session.status)) {
-      this.updateStatus(sessionId, 'completed');
-    }
-    if (this.get(sessionId)?.status !== 'cleanup_pending') {
-      await this.releaseSandbox(sessionId);
-    }
   }
 
   /**
@@ -1550,7 +1545,7 @@ export class SessionManager {
       } else if (abortController.signal.aborted || isAbortError(err)) {
         const current = this.get(sessionId);
         if (current && current.status === 'running') {
-          this.updateStatus(sessionId, current.loopEngine === 'pi' ? 'cancelled' : 'paused');
+          this.updateStatus(sessionId, 'paused');
         }
       } else {
         const errorEvent = this.eventLogger.append(sessionId, {

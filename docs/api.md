@@ -565,8 +565,21 @@ internally failed sessions; those responses still report `terminated`.
 | `POST` | `/v1/sessions/{session_id}/events` | Append user events. |
 | `GET` | `/v1/sessions/{session_id}/events` | List persisted events. |
 | `GET` | `/v1/sessions/{session_id}/events/stream` | Stream live events with SSE. |
-| `POST` | `/v1/sessions/{session_id}/stop` | Stop a session. |
+| `POST` | `/v1/sessions/{session_id}/stop` | Deprecated local alias: interrupt the active turn and return the session. |
 | `DELETE` | `/v1/sessions/{session_id}` | Delete a session from active listings. |
+
+The published way to interrupt a turn is to send `user.interrupt` through
+the events endpoint and wait for `idle`. The local `/stop` alias aborts the
+active turn, waits for the execution chain to drain, and returns the same
+session envelope as retrieve. Successful interruption leaves `idle` with
+`session.status_idle.stop_reason.type: "end_turn"`, retains the sandbox, and
+allows another message. An idle session is unchanged, including pending tool
+approvals. A missing session returns `404`; an already terminal session returns
+`409` without mutation or cleanup. Pi may close its interrupted child, but the
+next turn launches another child in the retained sandbox; unconfirmed child-tree
+cleanup still leaves `cleanup_pending` (public `terminated`) and never claims a
+resumable workspace. The alias is deprecated, retained for one version, and will
+be removed in the next version. It is not archive or delete.
 
 Listing persisted events returns the canonical envelope `{data, prev_page, next_page}` with a
 followable `next_page` cursor to pass back as `page`; the local `after_id` names the same

@@ -937,7 +937,20 @@ describe('Managed Agents API', () => {
   });
 
   describe('POST /v1/sessions/:id/stop', () => {
-    it('stops a session', async () => {
+    it.each(['completed', 'failed', 'cancelled', 'timed_out', 'cleanup_pending'])('returns 409 for an already terminal %s session', async (status) => {
+      const createRes = await app.request('/v1/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agent: 'agent_echo-agent' }),
+      });
+      const { id } = await createRes.json();
+      db.prepare('UPDATE sessions SET status = ? WHERE id = ?').run(status, id);
+      const response = await app.request(`/v1/sessions/${id}/stop`, { method: 'POST' });
+      expect(response.status).toBe(409);
+      expect(await response.json()).toMatchObject({ error: { type: 'conflict' } });
+    });
+
+    it('returns an unchanged idle session envelope', async () => {
       const createRes = await app.request('/v1/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -947,10 +960,11 @@ describe('Managed Agents API', () => {
 
       const res = await app.request(`/v1/sessions/${id}/stop`, { method: 'POST' });
       expect(res.status).toBe(200);
+      expect(await res.json()).toMatchObject({ id, type: 'session', status: 'idle', agent: { id: 'agent_echo-agent' } });
 
       const getRes = await app.request(`/v1/sessions/${id}`);
       const session = await getRes.json();
-      expect(session.status).toBe('terminated');
+      expect(session.status).toBe('idle');
     });
   });
 
@@ -1213,7 +1227,7 @@ describe('Managed Agents API', () => {
 
     it('returns 409 for messages on terminal (completed) sessions', async () => {
       const id = await createSession();
-      await app.request(`/v1/sessions/${id}/stop`, { method: 'POST' });
+      db.prepare("UPDATE sessions SET status = 'completed' WHERE id = ?").run(id);
 
       const res = await app.request(`/v1/sessions/${id}/messages`, {
         method: 'POST',

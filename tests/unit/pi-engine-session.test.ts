@@ -137,7 +137,8 @@ describe('Pi Windows termination cleanup', () => {
 
     completeTreeTermination?.();
     await stop;
-    expect(cleanupCalls).toEqual([sessionId]);
+    expect(manager.get(sessionId)?.status).toBe('paused');
+    expect(cleanupCalls).toEqual([]);
     db.close();
   });
 
@@ -252,8 +253,8 @@ describe('session loop engine persistence', () => {
 
     const stopped = await startTurn();
     await piManager.stop(stopped.id);
-    expect(piManager.get(stopped.id)?.status).toBe('completed');
-    expect(cleanupCalls).toContain(stopped.id);
+    expect(piManager.get(stopped.id)?.status).toBe('paused');
+    expect(cleanupCalls).not.toContain(stopped.id);
 
     const deleted = await startTurn();
     await piManager.delete(deleted.id);

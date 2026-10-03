@@ -94,6 +94,9 @@ describe('official SDK session status projection over HTTP', () => {
       expect(before.data.filter((event) => event.type === 'session.error')).toHaveLength(1);
       expect(before.data.filter((event) => event.type === 'session.status_running')).toHaveLength(1);
       await expect(client.beta.sessions.events.send(session.id, message)).rejects.toBeInstanceOf(Anthropic.ConflictError);
+      await expect(client.post(`/v1/sessions/${session.id}/stop`, {
+        headers: { 'anthropic-beta': 'managed-agents-2026-04-01' },
+      })).rejects.toBeInstanceOf(Anthropic.ConflictError);
       expect((await client.beta.sessions.events.list(session.id)).data).toEqual(before.data);
       expect((await client.beta.sessions.retrieve(session.id)).status).toBe('terminated');
       expect(stub.requests).toHaveLength(requestsBefore);

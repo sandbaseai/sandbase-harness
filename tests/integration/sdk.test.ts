@@ -206,10 +206,10 @@ describe('Client SDK', () => {
     }
   });
 
-  it('stops a session', async () => {
+  it('returns the idle session envelope from the deprecated stop alias', async () => {
     const s = await client.sessions.create({ agent: 'agent_echo' });
     const res = await client.sessions.stop(s.id);
-    expect(res.status).toBe('terminated');
+    expect(res).toMatchObject({ id: s.id, type: 'session', status: 'idle' });
   });
 
   it('manages files and session artifacts', async () => {
