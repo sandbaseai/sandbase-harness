@@ -69,7 +69,7 @@ export type Session = {
   title: string | null;
   agent: Agent | { id: string; type: 'agent'; name: string };
   environment_id: string;
-  status: 'idle' | 'running' | 'requires_action' | 'terminated' | 'failed';
+  status: 'idle' | 'running' | 'rescheduling' | 'terminated';
   resources: Array<Record<string, unknown>>;
   vault_ids: string[];
   usage: { input_tokens: number; output_tokens: number };

@@ -312,7 +312,7 @@ describe('chat with a turn that waits for approval', () => {
       expect(run.stderr, context).not.toContain('ERR_USE_AFTER_CLOSE');
 
       const state = await sessionState(runtime, run.sessionId);
-      expect(state.status).toBe('requires_action');
+      expect(state.status).toBe('idle');
       expect(state.events.filter((event) => event.type === 'agent.tool_result')).toHaveLength(0);
       expect(stub.requests).toHaveLength(1);
     } finally {
@@ -343,7 +343,7 @@ describe('chat with a turn that waits for approval', () => {
       expect(run.stdout.split('needs a result only your own client can produce'), context).toHaveLength(2);
 
       const state = await sessionState(runtime, run.sessionId);
-      expect(state.status).toBe('requires_action');
+      expect(state.status).toBe('idle');
       const toolResults = state.events.filter((event) => event.type === 'agent.tool_result');
       expect(toolResults, JSON.stringify(state.events)).toHaveLength(1);
       expect(toolResults[0].content?.[0]?.is_error ?? false).toBe(false);
@@ -373,7 +373,7 @@ describe('chat with a turn that waits for approval', () => {
       expect(run.stdout).toContain('user.custom_tool_result');
 
       const state = await sessionState(runtime, run.sessionId);
-      expect(state.status).toBe('requires_action');
+      expect(state.status).toBe('idle');
       expect(state.events.filter((event) => event.type === 'agent.tool_result')).toHaveLength(0);
       expect(state.events.filter((event) => event.type === 'agent.custom_tool_use')).toHaveLength(1);
       // Nothing was answered, so the runtime never asked the model again.
@@ -401,7 +401,7 @@ describe('chat with a turn that waits for approval', () => {
       expect(run.stdout).toContain('--tool-approval allow|deny');
 
       const state = await sessionState(runtime, run.sessionId);
-      expect(state.status).toBe('requires_action');
+      expect(state.status).toBe('idle');
       expect(state.events.filter((event) => event.type === 'agent.tool_result')).toHaveLength(0);
       expect(stub.requests).toHaveLength(1);
     } finally {
@@ -436,8 +436,6 @@ describe('chat with a turn that fails', () => {
       expect(run.sessionId, context).toMatch(/^sess_/);
       expect(run.code, context).toBe(1);
       expect(run.stdout).toContain('the turn failed');
-      // The session is not gone: the usual cause is a credential the operator
-      // can fix and then use again, so the command names it.
       expect(run.stdout).toContain(run.sessionId);
 
       // What the CLI printed has to be what the runtime recorded, not a second
@@ -448,7 +446,7 @@ describe('chat with a turn that fails', () => {
       const message = failure?.error?.message ?? '';
       expect(message, context).not.toBe('');
       expect(run.stdout).toContain(message);
-      expect(state.status).toBe('failed');
+      expect(state.status).toBe('terminated');
       // The failure is not an approval, so nothing is parked and nothing runs.
       expect(run.stdout).not.toContain('waiting for approval');
     } finally {
@@ -487,7 +485,7 @@ describe('chat with a turn that fails', () => {
       expect(run.stdout).toContain(failure?.error?.message ?? 'no message');
       // The tool the operator allowed really ran, and the failure came after it.
       expect(state.events.filter((event) => event.type === 'agent.tool_result')).toHaveLength(1);
-      expect(state.status).toBe('failed');
+      expect(state.status).toBe('terminated');
     } finally {
       await runtime.stop();
       await stub.close();

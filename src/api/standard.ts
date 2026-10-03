@@ -1,7 +1,8 @@
 import type { AgentDefinition, AgentToolset, McpServerConfig } from '@/types/agent.js';
 import type { OutcomeRubric } from '@/types/cma-protocol.js';
-import type { Session, SessionEvent, SessionLoopEngine } from '@/types/session.js';
+import type { ApiSessionStatus, Session, SessionEvent, SessionLoopEngine, SessionStatus } from '@/types/session.js';
 import type { SessionBudget, SessionStatusIdleEvent } from '@/types/cma-protocol.js';
+import { STATUS_PROJECTION } from '@/core/session/session-lifecycle.js';
 
 export interface ApiPage<T extends { id: string }> {
   data: T[];
@@ -225,7 +226,7 @@ export interface ApiSession {
   environment_id: string;
   /** Engine frozen when the session was created, not the current Settings default. */
   loop_engine: SessionLoopEngine;
-  status: 'idle' | 'running' | 'requires_action' | 'terminated' | 'failed' | 'cancelled' | 'timed_out' | 'cleanup_pending';
+  status: ApiSessionStatus;
   resources: ApiSessionResource[];
   vault_ids: string[];
   /**
@@ -574,25 +575,8 @@ export function toApiEvent(event: SessionEvent): ApiEvent {
   };
 }
 
-export function toApiSessionStatus(status: string): ApiSession['status'] {
-  switch (status) {
-    case 'running':
-      return 'running';
-    case 'requires_action':
-      return 'requires_action';
-    case 'completed':
-      return 'terminated';
-    case 'failed':
-      return 'failed';
-    case 'cancelled':
-      return 'cancelled';
-    case 'timed_out':
-      return 'timed_out';
-    case 'cleanup_pending':
-      return 'cleanup_pending';
-    default:
-      return 'idle';
-  }
+export function toApiSessionStatus(status: SessionStatus): ApiSession['status'] {
+  return STATUS_PROJECTION[status].wire;
 }
 
 function toApiSessionResource(resource: Record<string, unknown>): ApiSessionResource {

@@ -803,13 +803,13 @@ export class SessionManager {
       ? defineOutcomeMetadataFor(event)
       : undefined;
 
-    // Resuming after failure, or sending a fresh message while a tool call is
+    // Sending a fresh message while a tool call is
     // still awaiting approval: the log may hold an agent.tool_use with no
     // paired result. Inject placeholder results before the new user event so
     // the next eventsToMessages projection has a valid, paired sequence
     // (mirrors reconcileOrphans). Legit user.tool_confirmation events are
     // exempt — the executor pairs their referenced call itself.
-    if (session.status === 'failed' || event.type === 'user.message') {
+    if (event.type === 'user.message') {
       this.resolveOrphanedToolUses(sessionId);
     }
 
@@ -1046,9 +1046,10 @@ export class SessionManager {
     const conditions: string[] = [];
     const queryParams: unknown[] = [];
 
-    if (params.status) {
-      conditions.push('status = ?');
-      queryParams.push(params.status);
+    if (params.status !== undefined) {
+      const statuses = Array.isArray(params.status) ? params.status : [params.status];
+      conditions.push(statuses.length > 0 ? `status IN (${statuses.map(() => '?').join(', ')})` : '0');
+      queryParams.push(...statuses);
     }
     if (params.agentId) {
       conditions.push('agent_id = ?');
@@ -1592,8 +1593,8 @@ export class SessionManager {
 
   /**
    * Append a placeholder tool_result for every tool_use in the session log
-   * that has no paired result. Called on crash recovery and on failed-session
-   * resume so the next eventsToMessages projection yields a valid, paired
+   * that has no paired result. Called on crash recovery and on a fresh user
+   * message so the next eventsToMessages projection yields a valid, paired
    * message sequence instead of an unpaired tool-call the model rejects.
    *
    * The message is fixed rather than a parameter: both callers describe the same

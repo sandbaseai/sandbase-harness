@@ -7,6 +7,7 @@
  */
 
 import type { ContentBlock } from '@/types/cma-protocol.js';
+import type { ApiSessionStatus } from '@/types/session.js';
 import { withCompatibilityHeaders } from './headers.js';
 
 export interface ClientOptions {
@@ -23,7 +24,7 @@ export interface SessionSummary {
   type: 'session';
   agent: AgentSummary;
   environment_id: string;
-  status: 'idle' | 'running' | 'terminated' | 'failed';
+  status: ApiSessionStatus;
   title?: string | null;
   resources: Array<Record<string, unknown>>;
   vault_ids: string[];

@@ -14,13 +14,14 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { existsSync, readFileSync } from 'node:fs';
 import type { ServerDeps } from '../server.js';
-import type { SessionEvent, SessionLoopEngine } from '@/types/session.js';
+import type { SessionEvent, SessionLoopEngine, SessionStatus } from '@/types/session.js';
 import type { UserEvent } from '@/types/cma-protocol.js';
 import type { AgentDefinition } from '@/types/agent.js';
 import { UnsupportedCapabilityError } from '@/core/capabilities/registry.js';
 import { cursorPageOf, cursorQueryMismatch, decodeCursor, encodeCursor, normalizeCollectionFilter, toApiEvent, toApiSession } from '../standard.js';
 import { unsupportedCapability } from '../capability-errors.js';
 import { isTerminal } from '@/core/session/state-machine.js';
+import { STATUS_PROJECTION } from '@/core/session/session-lifecycle.js';
 import { loadAgentDefinitionById } from '@/core/agent/store.js';
 import { isAgentOverrideError } from '@/core/agent/overrides.js';
 import { encryptSecret } from '@/core/security/secrets.js';
@@ -411,7 +412,6 @@ export function sessionsRoutes(deps: ServerDeps) {
 
     // Pre-flight: reject the whole batch up-front if the session is missing or
     // terminal, so we don't partially apply (L4). sendEvent still re-checks.
-    // A failed session is not terminal — a new event resumes it.
     const session = sessionManager.get(sessionId);
     if (!session) {
       return c.json({ error: { type: 'not_found', message: 'Session not found' } }, 404);
@@ -511,8 +511,6 @@ export function sessionsRoutes(deps: ServerDeps) {
     if (!session) {
       return c.json({ error: { type: 'not_found', message: 'Session not found' } }, 404);
     }
-    // A failed session is not terminal — a new message resumes it. Only
-    // completed sessions reject new messages.
     if (isTerminal(session.status)) {
       return c.json({ error: { type: 'conflict', message: `Session ${sessionId} is in terminal state: ${session.status}` } }, 409);
     }
@@ -776,22 +774,12 @@ function steerPayloadProblem(event: Record<string, unknown>): string | undefined
 }
 
 function internalStatusFilter(status: string | undefined) {
-  switch (status) {
-    case undefined:
-    case '':
-    case 'all':
-      return {};
-    case 'running':
-      return { status: 'running' as const };
-    case 'failed':
-      return { status: 'failed' as const };
-    case 'terminated':
-      return { status: 'completed' as const };
-    case 'idle':
-      return { status: 'queued' as const };
-    default:
-      return {};
-  }
+  if (status === 'failed') return { status: 'failed' as const };
+  if (!status || !['idle', 'running', 'rescheduling', 'terminated'].includes(status)) return {};
+  return {
+    status: (Object.keys(STATUS_PROJECTION) as SessionStatus[])
+      .filter((internal) => STATUS_PROJECTION[internal].wire === status),
+  };
 }
 
 /** The ordering the session listing is issued under, recorded in every cursor it hands out. */

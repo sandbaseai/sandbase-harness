@@ -491,7 +491,7 @@ describe('WorkQueue', () => {
 
     // Every terminal status behaves the same way, and they are read from the state machine
     // rather than listed here, so `timed_out` and `cleanup_pending` count too.
-    for (const status of ['cancelled', 'timed_out', 'cleanup_pending']) {
+    for (const status of ['failed', 'cancelled', 'timed_out', 'cleanup_pending']) {
       mkSession(`sess_${status}`, status);
       const id = queue.enqueue(`sess_${status}`, 'read', { path: status });
       expect(queue.get(id)!.stoppedAt).toBeTruthy();
@@ -499,9 +499,7 @@ describe('WorkQueue', () => {
     }
 
     // A status with an outbound transition is resumable, so its work is still wanted.
-    // `failed` is the one that matters: it has a transition back to `running`, and a
-    // session that is being retried must not lose the work it queued.
-    for (const status of ['queued', 'running', 'paused', 'requires_action', 'failed']) {
+    for (const status of ['queued', 'running', 'paused', 'requires_action']) {
       mkSession(`sess_${status}`, status);
       const id = queue.enqueue(`sess_${status}`, 'read', { path: status });
       expect(queue.get(id)!.stoppedAt).toBeNull();
@@ -590,13 +588,12 @@ describe('WorkQueue', () => {
     const live = queue.enqueue('sess_alive', 'read', { path: 'still wanted' });
     expect(queue.claim('w3')!.id).toBe(live);
 
-    // A status with an outbound transition is not an ended session, even when no release
-    // ever ran for it: `failed` is retried, and a retry has to be able to run the tools it
-    // calls.
-    mkSession('sess_retry', 'failed');
-    const retried = queue.enqueue('sess_retry', 'exec', { command: 'retry me' });
-    expect(queue.claim('w4', 'sess_retry')!.id).toBe(retried);
-    queue.complete(retried, 'w4', { exitCode: 0 });
+    mkSession('sess_failed', 'running');
+    const failed = queue.enqueue('sess_failed', 'exec', { command: 'never after failure' });
+    db.prepare("UPDATE sessions SET status = 'failed' WHERE id = 'sess_failed'").run();
+    expect(queue.get(failed)!.stoppedAt).toBeNull();
+    expect(queue.claim('w4', 'sess_failed')).toBeNull();
+    expect(queue.get(failed)!.status).toBe('queued');
 
     // And a session that ends by finishing its turn - the path that releases no sandbox at
     // all - is refused the same way, with no marker of its own.

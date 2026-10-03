@@ -31,7 +31,7 @@ describe('standard API event serialization', () => {
     });
   });
 
-  it('projects a durable confirmation target and requires_action status', () => {
+  it('projects a durable confirmation target and idle status while awaiting approval', () => {
     const event: SessionEvent = {
       id: 'sevt_2',
       sessionId: 'sess_1',
@@ -46,6 +46,6 @@ describe('standard API event serialization', () => {
       tool_use_id: 'tool_1',
       metadata: { result: 'allow', confirmation_group_id: 'confirm_1' },
     });
-    expect(toApiSessionStatus('requires_action')).toBe('requires_action');
+    expect(toApiSessionStatus('requires_action')).toBe('idle');
   });
 });

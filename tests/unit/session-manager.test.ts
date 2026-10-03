@@ -3,7 +3,7 @@
  * Validates: session create/get/list/stop lifecycle.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { join } from 'node:path';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -78,6 +78,43 @@ describe('Session Manager', () => {
   });
 
   describe('event admission', () => {
+    it('does not execute already queued turns after the first turn fails', async () => {
+      const execute = vi.fn(async function* () {
+        throw new Error('unrecoverable model failure');
+      });
+      manager.setExecutor({ execute });
+      const session = manager.create({ agent: 'agent_test' });
+      const first = manager.sendEvent(session.id, { type: 'user.message', content: [{ type: 'text', text: 'first' }] });
+      const second = manager.sendEvent(session.id, { type: 'user.message', content: [{ type: 'text', text: 'second' }] });
+      await Promise.all([first, second]);
+      await vi.waitFor(() => expect(manager.get(session.id)!.status).toBe('failed'));
+      await manager.stop(session.id);
+
+      expect(manager.get(session.id)!.status).toBe('failed');
+      expect(execute).toHaveBeenCalledTimes(1);
+      expect(manager.getEventLogger().getEvents(session.id).filter((event) => event.type === 'session.status_running')).toHaveLength(1);
+    });
+
+    it('refuses failed-session input before recording events or invoking the executor', async () => {
+      const execute = vi.fn(async function* () {});
+      manager.setExecutor({ execute });
+      const session = manager.create({ agent: 'agent_test' });
+      manager.getEventLogger().append(session.id, {
+        type: 'agent.tool_use',
+        content: [{ type: 'tool_use', id: 'call_unresolved', name: 'glob', input: { pattern: '*' } }],
+      });
+      db.prepare(`UPDATE sessions SET status = 'failed' WHERE id = ?`).run(session.id);
+      const before = manager.getEventLogger().getEvents(session.id);
+
+      await expect(manager.sendEvent(session.id, {
+        type: 'user.message',
+        content: [{ type: 'text', text: 'continue' }],
+      })).rejects.toThrow(/terminal state: failed/);
+      expect(manager.getEventLogger().getEvents(session.id)).toEqual(before);
+      expect(manager.get(session.id)!.status).toBe('failed');
+      expect(execute).not.toHaveBeenCalled();
+    });
+
     it('refuses to accept an event for a session whose Environment stopped resolving', () => {
       db.prepare(`INSERT INTO environments (id, name, config) VALUES ('env_docker_hosting', 'docker', '{"hosting_type":"docker"}')`).run();
       const session = manager.create({ agent: 'agent_test', environmentId: 'env_docker_hosting' });

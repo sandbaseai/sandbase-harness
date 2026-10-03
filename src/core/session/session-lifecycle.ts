@@ -1,20 +1,23 @@
-import type { SessionEvent, SessionStatus } from '@/types/session.js';
+import type { ApiSessionStatus, SessionEvent, SessionStatus } from '@/types/session.js';
 
-const STATUS_TO_EVENT: Partial<Record<SessionStatus, SessionEvent['type']>> = {
-  running: 'session.status_running',
-  paused: 'session.status_idle',
-  requires_action: 'session.status_idle',
-  completed: 'session.status_terminated',
-  cancelled: 'session.status_terminated',
-  timed_out: 'session.status_terminated',
-  cleanup_pending: 'session.status_terminated',
-  // 'failed' is terminal → status_terminated. The detailed session.error event
-  // is appended separately by SessionManager.runTurn's catch block.
-  failed: 'session.status_terminated',
+export const STATUS_PROJECTION: Record<SessionStatus, {
+  wire: ApiSessionStatus;
+  event: SessionEvent['type'] | undefined;
+  terminal: boolean;
+}> = {
+  queued: { wire: 'idle', event: undefined, terminal: false },
+  running: { wire: 'running', event: 'session.status_running', terminal: false },
+  paused: { wire: 'idle', event: 'session.status_idle', terminal: false },
+  requires_action: { wire: 'idle', event: 'session.status_idle', terminal: false },
+  completed: { wire: 'terminated', event: 'session.status_terminated', terminal: true },
+  failed: { wire: 'terminated', event: 'session.status_terminated', terminal: true },
+  cancelled: { wire: 'terminated', event: 'session.status_terminated', terminal: true },
+  timed_out: { wire: 'terminated', event: 'session.status_terminated', terminal: true },
+  cleanup_pending: { wire: 'terminated', event: 'session.status_terminated', terminal: true },
 };
 
 export function eventTypeForStatus(status: SessionStatus): SessionEvent['type'] | undefined {
-  return STATUS_TO_EVENT[status];
+  return STATUS_PROJECTION[status].event;
 }
 
 export function isAbortError(err: unknown): boolean {

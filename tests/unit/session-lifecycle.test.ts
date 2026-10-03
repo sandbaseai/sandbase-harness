@@ -1,14 +1,32 @@
 import { describe, expect, it } from 'vitest';
-import { eventTypeForStatus, isAbortError } from '@/core/session/session-lifecycle.js';
+import { eventTypeForStatus, isAbortError, STATUS_PROJECTION } from '@/core/session/session-lifecycle.js';
+import { isTerminal } from '@/core/session/state-machine.js';
+import { toApiSessionStatus } from '@/api/standard.js';
+import type { SessionStatus, SessionEvent } from '@/types/session.js';
 
 describe('session lifecycle helpers', () => {
-  it('maps internal statuses to CMA lifecycle events', () => {
-    expect(eventTypeForStatus('running')).toBe('session.status_running');
-    expect(eventTypeForStatus('paused')).toBe('session.status_idle');
-    expect(eventTypeForStatus('requires_action')).toBe('session.status_idle');
-    expect(eventTypeForStatus('completed')).toBe('session.status_terminated');
-    expect(eventTypeForStatus('failed')).toBe('session.status_terminated');
-    expect(eventTypeForStatus('queued')).toBeUndefined();
+  const projections: [SessionStatus, string, SessionEvent['type'] | undefined, boolean][] = [
+    ['queued', 'idle', undefined, false],
+    ['running', 'running', 'session.status_running', false],
+    ['paused', 'idle', 'session.status_idle', false],
+    ['requires_action', 'idle', 'session.status_idle', false],
+    ['completed', 'terminated', 'session.status_terminated', true],
+    ['failed', 'terminated', 'session.status_terminated', true],
+    ['cancelled', 'terminated', 'session.status_terminated', true],
+    ['timed_out', 'terminated', 'session.status_terminated', true],
+    ['cleanup_pending', 'terminated', 'session.status_terminated', true],
+  ];
+
+  it('covers every internal status in the projection regressions', () => {
+    expect(projections.map(([status]) => status).sort()).toEqual(Object.keys(STATUS_PROJECTION).sort());
+  });
+
+  it.each(projections)('projects %s consistently to the wire, lifecycle event, and terminal guard', (status, wire, event, terminal) => {
+    expect(toApiSessionStatus(status)).toBe(wire);
+    expect(['idle', 'running', 'rescheduling', 'terminated']).toContain(toApiSessionStatus(status));
+    expect(eventTypeForStatus(status)).toBe(event);
+    expect(isTerminal(status)).toBe(terminal);
+    expect(STATUS_PROJECTION[status]).toEqual({ wire, event, terminal });
   });
 
   it('recognizes abort errors without treating arbitrary errors as aborts', () => {

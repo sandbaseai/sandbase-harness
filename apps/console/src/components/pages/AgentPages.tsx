@@ -388,7 +388,7 @@ function AgentSessionsTab({ sessions, onOpenSession }: { sessions: Session[]; on
 }
 
 function AgentObservability({ sessions, tokenIn, tokenOut }: { sessions: Session[]; tokenIn: number; tokenOut: number }) {
-  const failed = sessions.filter((session) => session.status === 'failed').length;
+  const failed = sessions.filter((session) => String(session.status) === 'failed').length;
   const errorRate = sessions.length ? Math.round((failed / sessions.length) * 100) : 0;
   return (
     <div className="detailStack">

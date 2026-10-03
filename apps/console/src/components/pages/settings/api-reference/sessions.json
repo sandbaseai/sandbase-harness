@@ -63,7 +63,7 @@
       },
       {
         "name": "status",
-        "type": "idle | running | terminated | failed",
+        "type": "idle | running | rescheduling | terminated",
         "description": "Current session lifecycle state."
       },
       {

@@ -539,6 +539,23 @@ object, and a `model_config` sent beside it is ignored rather than merged.
 
 Sessions run an agent in an environment and persist a resumable event log.
 
+The public session `status` is one of `idle`, `running`, `rescheduling`, or
+`terminated`. Internal `queued`, `paused`, and `requires_action` project to
+`idle`; `completed`, `failed`, `cancelled`, `timed_out`, and `cleanup_pending`
+project to `terminated`. Error and cleanup details remain in the event log.
+`rescheduling` is in the public type but is not emitted yet: automatic
+rescheduling is not implemented.
+
+The existing single-value `status` list filter selects every internal state in
+the requested public group, including paused and approval-waiting sessions for
+`idle` and all terminal states for `terminated`. `rescheduling` returns an empty
+list. Terminal sessions, including `failed`, reject new messages and events with
+`409` before input is persisted or another model/tool turn starts. Create a new
+session after a terminal failure; fixable configuration errors that already
+leave the internal state `paused` still allow another turn.
+The legacy local `status=failed` filter remains available and selects only
+internally failed sessions; those responses still report `terminated`.
+
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/v1/sessions` | List sessions. |
@@ -822,8 +839,9 @@ is the source for aggregate token totals.
 Approval-gated `tool_use` blocks include `requires_confirmation: true` and a
 `confirmation_group_id`. The corresponding `user.tool_confirmation` event
 stores its target and decision in event metadata. The session stays in
-`requires_action` until every tool use in that group has a paired result. The
-session response exposes that state as `status: "requires_action"`.
+internal `requires_action` until every tool use in that group has a paired result.
+The session response exposes that state as `status: "idle"`; the event's
+`stop_reason.type: "requires_action"` identifies the outstanding action.
 
 The matching `session.status_idle` event carries a session-level `stop_reason`
 **object at the top level**, which is where the published client reads it:
@@ -894,7 +912,8 @@ deployment where nobody is coming back to answer:
 
 With a bound set, a session parked longer than that is ended: a `session.error`
 carrying `requires_action_timeout` (`retry_status: "not_retryable"`) is appended
-and the session reaches `timed_out`, published as `session.status_terminated`.
+and the session reaches internal `timed_out`, published as `status: "terminated"`
+and `session.status_terminated`.
 
 - The bound is measured from the event that parked the session, so a session that
   had already been parked longer than the bound when the runtime started ends on
@@ -1207,7 +1226,7 @@ turn reads its instruction from it. The loop ends at the first `satisfied` or
   and records no `session.error`;
 - a revision turn that stops for a tool confirmation ends the outcome as
   `interrupted` too: the loop cannot drive another turn while the session waits
-  for a human, and the session's own status reports `requires_action`;
+  for a human, and the session reports `idle` with a `requires_action` stop reason;
 - a session that reaches its spending ceiling stops iterating: the loop spends
   nothing more — not the grader pass that would measure the turn that just ran, not
   the revision turn, and not the settling turn — and the outcome closes with one
@@ -2917,9 +2936,9 @@ line arguments.
 
 ## Pi lifecycle status boundary
 
-When `loop_engine.provider` is `pi`, the API may expose `cancelled`,
-`timed_out`, or `cleanup_pending` rather than collapsing every child-process
-outcome into `failed` or `terminated`. `cleanup_pending` is fail-closed: the
+When `loop_engine.provider` is `pi`, internal `cancelled`, `timed_out`,
+`cleanup_pending`, and `failed` all project to public `terminated`; the event
+log retains the distinct child-process outcomes. `cleanup_pending` is fail-closed: the
 runtime has not proved that the process tree released the workspace, so it does
 not clean up or accept a new turn. A live cross-runtime Pi session-file owner
 returns a retryable `pi_session_busy` error. Resume refusal, corrupt headers,
@@ -2941,7 +2960,7 @@ for that tool, so the call is intercepted before it executes and the tool_use th
 session publishes carries `requires_confirmation: true`,
 `confirmation_group_id`, and the input a decision is being made against. The
 request is recorded durably in `pi_tool_interactions`, the session reports
-`requires_action`, and the matching `user.tool_confirmation` resolves that one
+`idle` with a `requires_action` stop reason, and the matching `user.tool_confirmation` resolves that one
 pending call: it is consumed by a conditional update, so a duplicate, mismatched,
 or late decision is refused instead of executing anything. A decision that cannot
 be recorded, a gate extension that did not load, a decision whose replacement

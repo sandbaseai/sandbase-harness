@@ -31,8 +31,9 @@ outcome-grading: supported
   the referenced agent version, `null` (or `[]` for a list) clears it for this
   session, and any other value replaces it wholesale. Overriding a field does
   not modify the agent and does not create a version.
-- Session status reflects what a caller must do next: idle, running, waiting for
-  action, terminated, or failed.
+- Session status is one of `idle`, `running`, `rescheduling`, or `terminated`.
+  Waiting for approval or a custom tool result is `idle`; the matching
+  `session.status_idle` event identifies the pending action in `stop_reason`.
 - The session-scoped event stream is the canonical way to observe progress.
 
 ## 2. Current SandBase shape
@@ -43,18 +44,31 @@ the lifecycle and the outcome loop live in `src/core/session/session-manager.ts`
 override resolution is `src/core/agent/overrides.ts`; the wire projection is
 `src/api/standard.ts`.
 
-Status projection (`toApiSessionStatus`):
+Status projection (`STATUS_PROJECTION` in
+`src/core/session/session-lifecycle.ts`, shared by `toApiSessionStatus` and
+`eventTypeForStatus`):
 
-| Internal | API status |
-| --- | --- |
-| `running` | `running` |
-| `requires_action` | `requires_action` |
-| `completed` | `terminated` |
-| `failed` | `failed` |
-| `cancelled` | `cancelled` |
-| `timed_out` | `timed_out` |
-| `cleanup_pending` | `cleanup_pending` |
-| anything else | `idle` |
+| Internal | API status | Lifecycle event | Terminal |
+| --- | --- | --- | --- |
+| `queued` | `idle` | None | No |
+| `running` | `running` | `session.status_running` | No |
+| `paused` | `idle` | `session.status_idle` | No |
+| `requires_action` | `idle` | `session.status_idle` | No |
+| `completed` | `terminated` | `session.status_terminated` | Yes |
+| `failed` | `terminated` | `session.status_terminated` | Yes |
+| `cancelled` | `terminated` | `session.status_terminated` | Yes |
+| `timed_out` | `terminated` | `session.status_terminated` | Yes |
+| `cleanup_pending` | `terminated` | `session.status_terminated` | Yes |
+
+`rescheduling` is part of the public type, but the runtime does not yet
+implement automatic rescheduling or emit that status. The existing single-value
+`status` list filter selects all internal states in the requested public group;
+`rescheduling` selects none. Terminal sessions, including `failed`, reject new
+messages and events with `409` before input persistence or execution. Fixable
+model-configuration errors that already leave a session `paused` remain
+resumable; this does not revive a `failed` session.
+The legacy local `status=failed` filter remains available, selecting only
+internally failed sessions whose public status is `terminated`.
 
 The session-level `stop_reason` (`toApiEvent`):
 
@@ -241,7 +255,8 @@ reference forms, and the tri-state override rule.
 | --- | --- |
 | Session budget | Owned by [`budget.md`](./budget.md), which is `partial`. `/v1/sessions` accepts a `budget` at creation and echoes it back, and rejects a malformed one before the session is persisted; pricing and the ceiling rules are that contract's subject, not this one's. |
 | Creation response | `initial_events` is not echoed back. The published contract does not state whether the creation response echoes it. |
-| `cleanup_pending` | SandBase exposes this as a distinct status for local sandbox teardown. |
+| Automatic rescheduling | `rescheduling` is accepted by the public type and list filter, but no internal retry state or automatic rescheduling is implemented yet. |
+| `cleanup_pending` | Internal fail-closed state for local sandbox teardown, projected to public `terminated`; the event log retains the cleanup error. |
 | Session delete is logical | The published delete permanently removes the session's record, events and sandbox, and refuses a `running` session until it has been interrupted to `idle`. `DELETE /v1/sessions/{id}` here stops a running turn itself, releases the sandbox, appends `session.deleted`, and **keeps** the session row and its event log; the response is `{id, deleted: true}`, which reports the delete and does not claim the record was physically removed. |
 | Extension endpoints | Session inspection and control endpoints under `/v1/x` are local additions and are excluded from CMA admission. |
 | Override refusal codes | `agent_model_required` is the published code for a cleared `model`. `agent_tools_cleared_with_skills`, `agent_mcp_server_not_found`, `invalid_agent_override_field`, `invalid_agent_overrides`, `invalid_agent_ref` and `agent_required` are SandBase spellings for the same conditions, published so a client can distinguish them without parsing prose. |
@@ -261,8 +276,9 @@ reference forms, and the tri-state override rule.
   whose evidence is a refusal code, not a lifecycle transition.
 - Not echoing `initial_events` avoids presenting accepted input as restatable
   session state; the event stream is the authoritative record.
-- `cleanup_pending` exists because local sandbox teardown is asynchronous and a
-  caller needs to know teardown is still in progress.
+- Internal `cleanup_pending` exists because local sandbox teardown is asynchronous
+  and must not release a workspace until child-tree cleanup is proved. Its public
+  status stays `terminated`, and its error details remain in the event log.
 - Delete is logical because the event log is append-only by project rule: a
   physical delete would remove events a resumable stream or an audit may still
   read. Stopping a running session instead of refusing it keeps delete usable

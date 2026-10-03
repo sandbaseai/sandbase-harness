@@ -3,7 +3,7 @@
  * silent idle). Covers the fullStream 'error' part handling in DefaultStrategy.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { join } from 'node:path';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -79,31 +79,23 @@ describe('Model error → failed turn', () => {
     expect(errEvent).toBeDefined();
   });
 
-  it('accepts a new message on a failed session and resumes the turn', async () => {
+  it('rejects a new message on a failed session without resuming the turn', async () => {
     const session = manager.create({ agent: 'agent_b' });
     await manager.sendEvent(session.id, {
       type: 'user.message',
       content: [{ type: 'text', text: 'hi' }],
     } as any);
-    await new Promise((r) => setTimeout(r, 200));
-    expect(manager.get(session.id)!.status).toBe('failed');
-
-    // A failed session is recoverable: sending another message must be
-    // accepted (not rejected as terminal) and must re-run the turn.
-    const result = await manager.sendEvent(session.id, {
+    await vi.waitFor(() => expect(manager.get(session.id)!.status).toBe('failed'));
+    const before = manager.getEventLogger().getEvents(session.id);
+    await expect(manager.sendEvent(session.id, {
       type: 'user.message',
       content: [{ type: 'text', text: 'retry please' }],
-    } as any);
-    expect(result.accepted).toBe(true);
-
-    // The resume runs a fresh turn. Its status_running event proves the
-    // failed → running transition was allowed. (This model always throws, so
-    // it lands back in failed — the point is the turn was re-entered.)
-    await new Promise((r) => setTimeout(r, 200));
+    } as any)).rejects.toThrow(/terminal state: failed/);
     const events = manager.getEventLogger().getEvents(session.id);
     const runningEvents = events.filter((e) => e.type === 'session.status_running');
-    expect(runningEvents.length).toBe(2);
+    expect(runningEvents.length).toBe(1);
     const userMessages = events.filter((e) => e.type === 'user.message');
-    expect(userMessages.length).toBe(2);
+    expect(userMessages.length).toBe(1);
+    expect(events).toEqual(before);
   });
 });

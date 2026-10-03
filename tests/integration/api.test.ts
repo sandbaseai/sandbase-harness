@@ -21,7 +21,7 @@ import {
   CMA_CAPABILITY_MATRIX,
   capabilityMatrixJson,
 } from '@/core/capabilities/matrix.js';
-import type { Session, SessionEvent } from '@/types/session.js';
+import type { Session, SessionEvent, SessionStatus } from '@/types/session.js';
 import type { UserEvent } from '@/types/cma-protocol.js';
 import type { RuntimeModelInfo } from '@/types/model.js';
 
@@ -853,6 +853,50 @@ describe('Managed Agents API', () => {
   });
 
   describe('GET /v1/sessions', () => {
+    it('retrieves and filters every internal status by its public projection, including pagination', async () => {
+      db.prepare('INSERT INTO agents (id, name, definition) VALUES (?, ?, ?)')
+        .run('agent_status-projection', 'status-projection', '{}');
+      const manager = new SessionManager(db);
+      const groups: Record<string, SessionStatus[]> = {
+        idle: ['queued', 'paused', 'requires_action'],
+        running: ['running'],
+        terminated: ['completed', 'failed', 'cancelled', 'timed_out', 'cleanup_pending'],
+        rescheduling: [],
+      };
+
+      for (const [wire, statuses] of Object.entries(groups)) {
+        const expectedIds: string[] = [];
+        for (const status of statuses) {
+          const session = manager.create({ agent: 'agent_status-projection' });
+          db.prepare('UPDATE sessions SET status = ?, created_at = ? WHERE id = ?')
+            .run(status, new Date(Date.UTC(2026, 0, 1, 0, 0, expectedIds.length)).toISOString(), session.id);
+          expectedIds.push(session.id);
+          const response = await app.request(`/v1/sessions/${session.id}`);
+          expect(response.status).toBe(200);
+          expect((await response.json()).status).toBe(wire);
+        }
+
+        const receivedIds: string[] = [];
+        let cursor: string | null = null;
+        do {
+          const response = await app.request(`/v1/sessions?status=${wire}&agent_id=agent_status-projection&limit=2${cursor ? `&page=${encodeURIComponent(cursor)}` : ''}`);
+          expect(response.status).toBe(200);
+          const page = await response.json();
+          expectCursorPage(page);
+          expect(page.data.every((session: { status: string }) => session.status === wire)).toBe(true);
+          receivedIds.push(...page.data.map((session: { id: string }) => session.id));
+          cursor = page.next_page;
+        } while (cursor);
+        expect(receivedIds.sort()).toEqual(expectedIds.sort());
+      }
+      const failedResponse = await app.request('/v1/sessions?status=failed&agent_id=agent_status-projection');
+      const failedPage = await failedResponse.json();
+      expect(failedResponse.status).toBe(200);
+      expect(failedPage.data).toHaveLength(1);
+      expect(failedPage.data[0].status).toBe('terminated');
+      expect(db.prepare('SELECT status FROM sessions WHERE id = ?').get(failedPage.data[0].id)).toEqual({ status: 'failed' });
+    });
+
     it('lists sessions with pagination', async () => {
       // Create a few sessions
       for (let i = 0; i < 3; i++) {
@@ -1179,21 +1223,28 @@ describe('Managed Agents API', () => {
       expect(res.status).toBe(409);
     });
 
-    it('accepts messages on a failed session (failed is recoverable, not terminal)', async () => {
+    it('rejects all failed-session ingress without changing the event log', async () => {
       const id = await createSession();
-      // Drive the session into failed directly; the failure path itself is
-      // covered by strategy-error.test.ts. Here we only assert the API no
-      // longer rejects a failed session as terminal.
       db.prepare(`UPDATE sessions SET status = 'failed' WHERE id = ?`).run(id);
 
-      const res = await app.request(`/v1/sessions/${id}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: [{ type: 'text', text: 'retry' }], stream: false }),
-      });
-      expect(res.status).toBe(200);
-      const body = await res.json();
-      expect(body.accepted).toBe(true);
+      const before = db.prepare('SELECT * FROM events WHERE session_id = ? ORDER BY seq').all(id);
+      const requests = [
+        { path: 'messages', body: { content: 'retry', stream: false } },
+        { path: 'messages', body: { content: 'retry', stream: true } },
+        { path: 'events', body: { events: [{ type: 'user.message', content: [{ type: 'text', text: 'retry' }] }, { type: 'user.interrupt' }] } },
+        { path: 'events', body: { events: [{ type: 'user.tool_confirmation', tool_use_id: 'call_pending', result: 'allow' }] } },
+      ];
+      for (const request of requests) {
+        const res = await app.request(`/v1/sessions/${id}/${request.path}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(request.body),
+        });
+        expect(res.status).toBe(409);
+        expect((await res.json()).error.type).toBe('conflict');
+        expect(db.prepare('SELECT * FROM events WHERE session_id = ? ORDER BY seq').all(id)).toEqual(before);
+        expect(db.prepare('SELECT status FROM sessions WHERE id = ?').get(id)).toEqual({ status: 'failed' });
+      }
     });
   });
 

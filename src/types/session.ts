@@ -22,6 +22,8 @@ export type SessionStatus =
   | 'timed_out'
   | 'cleanup_pending';
 
+export type ApiSessionStatus = 'idle' | 'running' | 'rescheduling' | 'terminated';
+
 /**
  * Valid state transitions for the Session state machine.
  * Key: current state, Value: set of valid next states.
@@ -36,7 +38,7 @@ export const SESSION_TRANSITIONS: Record<SessionStatus, SessionStatus[]> = {
   paused: ['running', 'completed', 'failed', 'cancelled'],
   requires_action: ['running', 'completed', 'failed', 'cancelled', 'timed_out'],
   completed: [],
-  failed: ['running', 'completed', 'cancelled'],
+  failed: [],
   cancelled: [],
   timed_out: [],
   cleanup_pending: [],
@@ -145,7 +147,7 @@ export interface CreateSessionParams {
 export interface ListSessionsParams {
   page?: number;
   pageSize?: number;
-  status?: SessionStatus;
+  status?: SessionStatus | SessionStatus[];
   agentId?: string;
 }
 

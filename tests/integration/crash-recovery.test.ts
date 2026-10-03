@@ -124,20 +124,17 @@ describe('Crash recovery', () => {
     expect(placeholderContent(sessionId, 'call_123')).not.toMatch(/retry/i);
   });
 
-  it('records the same, non-retrying message when resuming a failed session', () => {
-    // The second call site, which used to carry a *different* sentence for the same
-    // epistemic situation.
+  it('records the same, non-retrying message when a new message replaces an unresolved idle call', () => {
     const session = manager.create({ agent: 'agent_echo' });
     logger.append(session.id, {
       type: 'agent.tool_use',
-      content: [{ type: 'tool_use', id: 'call_failed', name: 'bash', input: { command: 'rm -rf /tmp/x' } }],
+      content: [{ type: 'tool_use', id: 'call_parked', name: 'glob', input: { pattern: '*' } }],
     });
-    db.prepare(`UPDATE sessions SET status = 'failed' WHERE id = ?`).run(session.id);
+    db.prepare(`UPDATE sessions SET status = 'paused' WHERE id = ?`).run(session.id);
 
-    // Any user event on a failed session triggers the resume path.
     return manager.sendEvent(session.id, { type: 'user.message', content: [{ type: 'text', text: 'continue' }] })
       .then(() => {
-        const content = placeholderContent(session.id, 'call_failed');
+        const content = placeholderContent(session.id, 'call_parked');
         expect(content).toBe(INTERRUPTED_TOOL_OUTCOME_MESSAGE);
         expectStatesOutcomeIsUnknown(content);
       });

@@ -12,7 +12,7 @@ import type { Agent, ConsoleData, Session, SessionEvent, ToolPermission } from '
 
 const SESSION_EVENT_KINDS = ['user', 'agent', 'tool', 'error', 'system'] as const;
 type SessionEventKind = (typeof SESSION_EVENT_KINDS)[number];
-type SessionDisplayStatus = Session['status'] | 'queued' | 'completed' | 'requires_action';
+type SessionDisplayStatus = Session['status'] | 'queued' | 'completed' | 'requires_action' | 'failed';
 
 /**
  * Markdown renderer used for assistant messages.  Keep code blocks as a
@@ -1197,10 +1197,11 @@ function sessionDisplayStatus(session: Session, events: SessionEvent[]): Session
   // Session status is an authoritative server-side state-machine field. The
   // event log is used only to refine fresh lifecycle progress while a snapshot
   // is pending; tool cards never decide whether a session requires action.
-  if (session.status === 'requires_action') return 'requires_action';
-  if (session.status === 'terminated') return 'terminated';
-  if (session.status === 'failed') return 'failed';
-  if (session.status === 'running') return 'running';
+  const status = session.status as SessionDisplayStatus;
+  if (status === 'requires_action') return 'requires_action';
+  if (status === 'terminated') return 'terminated';
+  if (status === 'failed') return 'failed';
+  if (status === 'running') return 'running';
 
   const lastStatus = [...events].reverse().find((event) => event.type.startsWith('session.status_'));
   if (!lastStatus) return session.status;
