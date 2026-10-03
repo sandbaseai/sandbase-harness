@@ -92,6 +92,8 @@ export interface OutcomeLoopInput {
   request: OutcomeRequest;
   /** Rubric text, already resolved from inline content or an uploaded file. */
   rubric: string;
+  /** The model reference the session's agent runs on, for the grader's scoring calls. */
+  model?: string;
   grader: OutcomeGrader;
   logger: OutcomeSpanLogger;
   /** Append a revision message so the next turn sees the grader's explanation. */
@@ -172,6 +174,7 @@ export async function runOutcomeLoop(input: OutcomeLoopInput): Promise<OutcomeLo
       iteration,
       description: input.request.description,
       rubric: input.rubric,
+      model: input.model,
       grader: input.grader,
       logger: input.logger,
       readTranscript: input.readTranscript,

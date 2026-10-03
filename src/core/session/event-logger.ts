@@ -120,6 +120,39 @@ export class EventLogger {
   }
 
   /**
+   * The rows `outcomeEvaluationsFromEvents` reads, for a set of sessions in one
+   * query: the outcome declaration and evaluation spans — plus
+   * `session.status_running`, the only signal that separates `pending` from
+   * `running` before a span exists — with their metadata carriers parsed.
+   */
+  getOutcomeEventRows(sessionIds: readonly string[]): OutcomeEventRow[] {
+    if (sessionIds.length === 0) return [];
+    const placeholders = sessionIds.map(() => '?').join(', ');
+    const stmt = this.db.prepare(
+      `SELECT session_id, type, metadata, processed_at, created_at FROM events
+       WHERE session_id IN (${placeholders})
+         AND type IN ('user.define_outcome', 'span.outcome_evaluation_start',
+                      'span.outcome_evaluation_ongoing', 'span.outcome_evaluation_end',
+                      'session.status_running')
+       ORDER BY session_id, seq ASC`,
+    );
+    const rows = stmt.all(...sessionIds) as Array<{
+      session_id: string;
+      type: string;
+      metadata: string | null;
+      processed_at: string | null;
+      created_at: string | null;
+    }>;
+    return rows.map((row) => ({
+      sessionId: row.session_id,
+      type: row.type,
+      metadata: row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : null,
+      processedAt: row.processed_at ? new Date(row.processed_at) : null,
+      createdAt: row.created_at ? new Date(row.created_at) : null,
+    }));
+  }
+
+  /**
    * Get the latest seq number for a session. Returns 0 if no events exist.
    */
   getLatestSeq(sessionId: string): number {
@@ -152,6 +185,15 @@ export class EventLogger {
 export interface StatusEventTick {
   sessionId: string;
   type: string;
+  processedAt: Date | null;
+  createdAt: Date | null;
+}
+
+/** One outcome-relevant row, as {@link EventLogger.getOutcomeEventRows} returns it. */
+export interface OutcomeEventRow {
+  sessionId: string;
+  type: string;
+  metadata: Record<string, unknown> | null;
   processedAt: Date | null;
   createdAt: Date | null;
 }

@@ -37,8 +37,9 @@ import {
   normalizeVaultIds,
 } from './session-normalizers.js';
 import { createSessionEventQueue, isMessageStreamTerminalEvent } from './session-stream.js';
-import type { StatusEventTick } from '@/core/session/event-logger.js';
+import type { OutcomeEventRow, StatusEventTick } from '@/core/session/event-logger.js';
 import { activeSecondsFromEvents, activeSecondsFromTicks } from '@/core/session/session-usage.js';
+import { outcomeEvaluationsFromEvents } from '@/core/outcomes/session-outcomes.js';
 import { rejectUnexpectedQueryParams } from './query-params.js';
 import { normalizeDefineOutcome, normalizeInitialEvents } from './initial-events.js';
 import { isBudgetError, parseSessionBudget, BUDGET_ERROR_CODES } from '@/core/session/session-budget.js';
@@ -60,24 +61,39 @@ export function sessionsRoutes(deps: ServerDeps) {
   const app = new Hono();
   const { sessionManager } = deps;
 
-  /** The `stats` fields of one projected session, read from its event log. */
-  const statsFor = (sessionId: string) => ({
-    activeSeconds: activeSecondsFromEvents(sessionManager.getEventLogger().getEvents(sessionId)),
-  });
+  /**
+   * The event-derived fields of one projected session — `stats.active_seconds`
+   * and `outcome_evaluations` — from a single log read.
+   */
+  const sessionDerived = (sessionId: string) => {
+    const events = sessionManager.getEventLogger().getEvents(sessionId);
+    return {
+      activeSeconds: activeSecondsFromEvents(events),
+      outcomeEvaluations: outcomeEvaluationsFromEvents(events),
+    };
+  };
 
   /**
-   * `stats` for a whole list page in one query: the status-transition ticks
-   * grouped per session instead of a full event read per row.
+   * The same fields for a whole list page: two bulk queries (status ticks for
+   * active time, outcome rows for the evaluations) grouped per session instead
+   * of a full event read per row.
    */
-  const statsForAll = (sessionIds: readonly string[]) => {
+  const derivedForAll = (sessionIds: readonly string[]) => {
     const ticks = new Map<string, StatusEventTick[]>();
     for (const tick of sessionManager.getEventLogger().getStatusEventTicks(sessionIds)) {
       const list = ticks.get(tick.sessionId) ?? [];
       list.push(tick);
       ticks.set(tick.sessionId, list);
     }
+    const outcomeRows = new Map<string, OutcomeEventRow[]>();
+    for (const row of sessionManager.getEventLogger().getOutcomeEventRows(sessionIds)) {
+      const list = outcomeRows.get(row.sessionId) ?? [];
+      list.push(row);
+      outcomeRows.set(row.sessionId, list);
+    }
     return (sessionId: string) => ({
       activeSeconds: activeSecondsFromTicks(ticks.get(sessionId) ?? []),
+      outcomeEvaluations: outcomeEvaluationsFromEvents(outcomeRows.get(sessionId) ?? []),
     });
   };
 
@@ -157,7 +173,7 @@ export function sessionsRoutes(deps: ServerDeps) {
         metadata,
         ...(budget.budget ? { budget: budget.budget } : {}),
       }, initialEvents.events ?? []);
-      return c.json(toApiSession(session, session.agentDefinition ?? findAgentById(deps, session.agentId), statsFor(session.id)), 201);
+      return c.json(toApiSession(session, session.agentDefinition ?? findAgentById(deps, session.agentId), sessionDerived(session.id)), 201);
     } catch (err) {
       if (err instanceof UnsupportedCapabilityError) {
         return unsupportedCapability(c, err);
@@ -243,8 +259,8 @@ export function sessionsRoutes(deps: ServerDeps) {
       ...(agentIdFilter ? { agentId: agentIdFilter } : {}),
       ...internalStatusFilter(status),
     });
-    const statsOf = statsForAll(result.data.map((session) => session.id));
-    const sessions = result.data.map((session) => toApiSession(session, session.agentDefinition ?? findAgentById(deps, session.agentId), statsOf(session.id)));
+    const derivedOf = derivedForAll(result.data.map((session) => session.id));
+    const sessions = result.data.map((session) => toApiSession(session, session.agentDefinition ?? findAgentById(deps, session.agentId), derivedOf(session.id)));
     const cursorState = { order: SESSION_LIST_ORDER, filter };
     return c.json(cursorPageOf(sessions, {
       prev: page > 1 ? encodeCursor({ ...cursorState, page: page - 1 }) : null,
@@ -258,7 +274,7 @@ export function sessionsRoutes(deps: ServerDeps) {
     if (!session) {
       return c.json({ error: { type: 'not_found', message: 'Session not found' } }, 404);
     }
-    return c.json(toApiSession(session, session.agentDefinition ?? findAgentById(deps, session.agentId), statsFor(session.id)));
+    return c.json(toApiSession(session, session.agentDefinition ?? findAgentById(deps, session.agentId), sessionDerived(session.id)));
   });
 
   // The published envelope, like the rest of the canonical `/v1` surface. This listing
@@ -751,7 +767,7 @@ export function sessionsRoutes(deps: ServerDeps) {
     try {
       await sessionManager.stop(sessionId);
       const session = sessionManager.get(sessionId)!;
-      return c.json(toApiSession(session, session.agentDefinition ?? findAgentById(deps, session.agentId), statsFor(session.id)));
+      return c.json(toApiSession(session, session.agentDefinition ?? findAgentById(deps, session.agentId), sessionDerived(session.id)));
     } catch (err: any) {
       if (err instanceof UnsupportedCapabilityError) {
         return unsupportedCapability(c, err);
@@ -771,7 +787,7 @@ export function sessionsRoutes(deps: ServerDeps) {
     const sessionId = c.req.param('id');
     try {
       const session = await sessionManager.archive(sessionId);
-      return c.json(toApiSession(session, session.agentDefinition ?? findAgentById(deps, session.agentId), statsFor(session.id)));
+      return c.json(toApiSession(session, session.agentDefinition ?? findAgentById(deps, session.agentId), sessionDerived(session.id)));
     } catch (err: any) {
       if (err.message?.includes('not found')) {
         return c.json({ error: { type: 'not_found', message: err.message } }, 404);
@@ -833,7 +849,7 @@ export function sessionsRoutes(deps: ServerDeps) {
         ...(body.title !== undefined ? { title: body.title } : {}),
         ...(body.vault_ids !== undefined ? { vault_ids: body.vault_ids } : {}),
       });
-      return c.json(toApiSession(session, session.agentDefinition ?? findAgentById(deps, session.agentId), statsFor(session.id)));
+      return c.json(toApiSession(session, session.agentDefinition ?? findAgentById(deps, session.agentId), sessionDerived(session.id)));
     } catch (err: any) {
       if (err instanceof UnsupportedCapabilityError) {
         return unsupportedCapability(c, err);

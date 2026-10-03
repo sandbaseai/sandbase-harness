@@ -42,6 +42,8 @@ export interface OutcomeEvaluationInput {
   rubric: string;
   /** What the agent produced, as a grader-facing transcript. */
   readTranscript: () => string;
+  /** The model reference the agent produced with, for the grader's scoring call. */
+  model?: string;
   grader: OutcomeGrader;
   logger: OutcomeSpanLogger;
   /**
@@ -78,6 +80,7 @@ export async function runOutcomeEvaluation(input: OutcomeEvaluationInput): Promi
       description: input.description,
       rubric: input.rubric,
       transcript: input.readTranscript(),
+      ...(input.model ? { model: input.model } : {}),
     });
     const result: OutcomeEvaluationResult =
       input.budgetSpent === true && grade.result === 'needs_revision' ? 'max_iterations_reached' : grade.result;

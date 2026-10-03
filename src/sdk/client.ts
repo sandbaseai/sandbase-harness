@@ -42,6 +42,16 @@ export interface SessionSummary {
     /** Seconds since creation; frozen at the last update once terminal or archived. */
     duration_seconds: number;
   };
+  /** Declared outcomes and their evaluation state, in declaration order. */
+  outcome_evaluations: Array<{
+    type: 'outcome_evaluation';
+    outcome_id: string;
+    description: string;
+    result: string;
+    iteration: number;
+    explanation: string | null;
+    completed_at: string | null;
+  }>;
   metadata: Record<string, string>;
   created_at: string;
   updated_at: string;

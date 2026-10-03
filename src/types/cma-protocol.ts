@@ -195,6 +195,13 @@ export interface UserDefineOutcomeEvent extends EventBase {
   description: string;
   rubric: OutcomeRubric;
   max_iterations: number;
+  /**
+   * Server-generated `outc_` id. The published input shape does not accept one,
+   * so admission assigns it, persists it through the metadata carrier, and the
+   * `span.outcome_evaluation_*` events reference the same value. Optional on
+   * the way in; always present once the event is durable.
+   */
+  outcome_id?: string;
 }
 
 /**

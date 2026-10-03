@@ -102,7 +102,12 @@ The append path and the row shape are `src/core/session/session-manager.ts` and
   memory, and a replayed session reconstructs the same sequence.
 - A `user.define_outcome` payload rides in `metadata` and is projected back into
   the agent's context as the turn's instruction; the event has no content blocks
-  of its own.
+  of its own. Admission assigns the outcome its `outc_` id and persists it on the
+  same carrier, so the published event carries top-level `outcome_id`,
+  `description`, `rubric`, and `max_iterations` (`null` when the declaration left
+  the default unset), and every `span.outcome_evaluation_*` the loop appends
+  references the same id — declarations written before the id existed are the
+  only events without it.
 
 ## 3. Alignment
 

@@ -29,6 +29,7 @@ function persistedEvent(overrides: Partial<SessionEvent> = {}): SessionEvent {
     seq: 1,
     type: 'user.define_outcome',
     metadata: {
+      outcome_id: 'outc_test',
       description: 'Ship a working endpoint',
       rubric: { type: 'text', content: 'The endpoint returns 200' },
       max_iterations: 5,
@@ -141,9 +142,22 @@ describe('user.define_outcome projection', () => {
 
     expect(projected.type).toBe('user.define_outcome');
     expect(projected.content).toBeNull();
+    expect(projected.outcome_id).toBe('outc_test');
     expect(projected.description).toBe('Ship a working endpoint');
     expect(projected.rubric).toEqual({ type: 'text', content: 'The endpoint returns 200' });
     expect(projected.max_iterations).toBe(5);
+  });
+
+  it('reports max_iterations as null on a declaration that predates the carrier', () => {
+    const projected = toApiEvent(persistedEvent({
+      metadata: { description: 'Ship it', rubric: { type: 'text', content: 'x' } },
+    }));
+
+    // `max_iterations` is `number | null` on the published event: present even
+    // when the stored declaration has no budget to project, and `outcome_id` is
+    // absent only on events persisted before admission assigned it.
+    expect(projected.max_iterations).toBeNull();
+    expect(projected).not.toHaveProperty('outcome_id');
   });
 
   it('does not project those fields onto another event type', () => {
@@ -152,5 +166,6 @@ describe('user.define_outcome projection', () => {
     expect(projected).not.toHaveProperty('description');
     expect(projected).not.toHaveProperty('rubric');
     expect(projected).not.toHaveProperty('max_iterations');
+    expect(projected).not.toHaveProperty('outcome_id');
   });
 });

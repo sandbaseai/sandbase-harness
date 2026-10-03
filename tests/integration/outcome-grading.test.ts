@@ -18,6 +18,7 @@ import { Database } from '@/core/db/database.js';
 import { SessionManager, type SessionExecutor } from '@/core/session/session-manager.js';
 import type { EventLogger } from '@/core/session/event-logger.js';
 import { toApiEvent } from '@/api/standard.js';
+import { outcomeEvaluationsFromEvents } from '@/core/outcomes/session-outcomes.js';
 import { createModelOutcomeGrader } from '@/core/outcomes/grader.js';
 import type { OutcomeGrade, OutcomeGradeInput } from '@/core/outcomes/grader.js';
 import { isOutcomeGraderUnavailableError } from '@/core/outcomes/loop.js';
@@ -110,6 +111,43 @@ describe('declared outcome grading', () => {
     // no second evaluation runs. The revision path is pinned in outcome-loop.test.ts.
     expect(spans.filter((event) => event.type === 'span.outcome_evaluation_end')).toHaveLength(1);
     expect(events.some((event) => event.type === 'user.message')).toBe(false);
+  });
+
+  it('assigns the outcome_id at admission and joins declaration, spans, and projection on it', async () => {
+    manager.setOutcomeGrader({
+      grade: async () => ({ result: 'satisfied', explanation: 'Met.' }),
+    });
+
+    const session = await runDeclaredOutcome();
+    const events = manager.getEventLogger().getEvents(session.id);
+    const declared = events.find((event) => event.type === 'user.define_outcome')!;
+    const outcomeId = declared.metadata?.outcome_id;
+
+    // The id is generated when the event is admitted — an `outc_` string the
+    // caller never sent — and persisted on the declaration itself.
+    expect(outcomeId).toMatch(/^outc_/);
+
+    // Every span the loop appended references that same id.
+    for (const span of events.filter((event) => event.type.startsWith('span.outcome_evaluation'))) {
+      expect(span.metadata?.outcome_id).toBe(outcomeId);
+    }
+
+    // The published event carries it at the top level, as the official shape requires.
+    const projected = toApiEvent(declared);
+    expect(projected.outcome_id).toBe(outcomeId);
+
+    // And the session object's outcome_evaluations entry is derivable from the log.
+    expect(outcomeEvaluationsFromEvents(events)).toEqual([
+      expect.objectContaining({
+        type: 'outcome_evaluation',
+        outcome_id: outcomeId,
+        description: 'Ship a working endpoint',
+        result: 'satisfied',
+        iteration: 0,
+        explanation: 'Met.',
+        completed_at: expect.any(String),
+      }),
+    ]);
   });
 
   it('reports a grader with no provider as the session error instead of a verdict', async () => {

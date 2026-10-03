@@ -104,6 +104,17 @@ export interface StubModelServerOptions {
    */
   failStatus?: number;
   holdRequests?: number[];
+  /**
+   * Reply text for specific requests, by 1-based ordinal — the same numbering
+   * `failRequests` uses.
+   *
+   * The outcome grader is a second model caller behind the same provider, and a
+   * test that needs a particular verdict has to make the grader's request answer
+   * with it: the stub's default text parses as `needs_revision`, so an outcome
+   * that should close `satisfied` scripts its grading call here. Requests not
+   * named keep the default behavior — tool call first, `STUB_REPLY_TEXT` after.
+   */
+  replyTexts?: Record<number, string>;
 }
 
 export async function startStubModelServer(options: StubModelServerOptions = {}): Promise<StubModelServer> {
@@ -128,6 +139,11 @@ export async function startStubModelServer(options: StubModelServerOptions = {})
         const status = options.failStatus ?? 500;
         res.writeHead(status, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ error: { message: `scripted ${status}`, type: 'invalid_request_error' } }));
+        return;
+      }
+      const scripted = options.replyTexts?.[requests.length];
+      if (scripted !== undefined) {
+        respond(req, res, request, { text: scripted });
         return;
       }
       if (wantToolCall(request)) {

@@ -82,6 +82,11 @@
         "description": "active_seconds (cumulative running time from the event log) and duration_seconds (since creation, frozen at the last update once terminal or archived)."
       },
       {
+        "name": "outcome_evaluations",
+        "type": "array",
+        "description": "One entry per user.define_outcome, in declaration order: outcome_id, description, result (pending | running | evaluating while in progress, then the terminal end-span verdict), iteration, explanation, completed_at."
+      },
+      {
         "name": "usage",
         "type": "object",
         "description": "Input and output token counters recorded by the runtime."

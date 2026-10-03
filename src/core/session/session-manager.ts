@@ -1029,6 +1029,13 @@ export class SessionManager {
     const customToolResultMetadata = event.type === 'user.custom_tool_result'
       ? getCustomToolResultMetadata(event, this.eventLogger.getEvents(sessionId))
       : undefined;
+    // A declared outcome's `outc_` id is assigned at admission so the
+    // declaration itself carries it: the metadata carrier persists it for the
+    // event projection and `outcome_evaluations`, and the loop's spans
+    // reference the same value rather than minting their own.
+    if (event.type === 'user.define_outcome') {
+      event = withOutcomeId(event);
+    }
     const defineOutcomeMetadata = event.type === 'user.define_outcome'
       ? defineOutcomeMetadataFor(event)
       : undefined;
@@ -1191,6 +1198,12 @@ export class SessionManager {
    * refused batch does not leave a session holding resources either.
    */
   createWithInitialEvents(params: CreateSessionParams, events: UserEvent[]): Session {
+    // Admission assigns each declared outcome its `outc_` id once, so the
+    // persisted event and the queued turn share it — `sendEvent` does the same
+    // for live declarations.
+    const admitted = events.map((event) =>
+      event.type === 'user.define_outcome' ? withOutcomeId(event) : event,
+    );
     const session = this.db.transaction(() => {
       const created = this.create(params);
 
@@ -1198,20 +1211,20 @@ export class SessionManager {
       // read the durable session and its log, so they only mean anything once
       // the row exists. Inside the transaction a throw discards the row and
       // every event appended before it, which is the property that matters.
-      for (const event of events) {
+      for (const event of admitted) {
         this.assertSessionCanAcceptEvent(created.id, event);
       }
-      for (const event of events) {
+      for (const event of admitted) {
         this.appendUserEventInTransaction(created.id, event);
       }
       return created;
     });
 
     // Post-commit: the log is durable, so the turn can now be queued.
-    if (events.length > 0 && this.executor) {
+    if (admitted.length > 0 && this.executor) {
       this.updateStatus(session.id, 'running');
     }
-    for (const event of events) {
+    for (const event of admitted) {
       this.enqueueTurnForEvent(session.id, event);
     }
     return this.get(session.id) ?? session;
@@ -1663,12 +1676,24 @@ export class SessionManager {
 
     let revision: string | undefined;
     await runOutcomeLoop({
-      outcomeId: `outc_${nanoid(16)}`,
+      // The id assigned at admission — spans and the session object's
+      // `outcome_evaluations` entry join on it. The fallback only covers a
+      // caller that bypassed admission entirely.
+      outcomeId: event.outcome_id ?? `outc_${nanoid(16)}`,
       request: {
         description: event.description,
         maxIterations: event.max_iterations ?? DEFAULT_OUTCOME_MAX_ITERATIONS,
       },
       rubric,
+      // The grader scores with the same model reference the deliverable was
+      // produced with: provider configurations carry no model id, so the
+      // session's effective agent definition is the only concrete reference
+      // that resolves. A non-frozen session resolves its agent live, the same
+      // lookup the turn itself makes.
+      model: (() => {
+        const session = this.get(sessionId);
+        return (session?.agentDefinition ?? (session ? this.resolveAgentSnapshot(session.agentId)?.definition : undefined))?.model;
+      })(),
       grader,
       logger: {
         append: (span) => {
@@ -2209,10 +2234,23 @@ function defineOutcomeMetadataFor(
   event: Extract<UserEvent, { type: 'user.define_outcome' }>,
 ): Record<string, unknown> {
   return {
+    outcome_id: event.outcome_id,
     description: event.description,
     rubric: event.rubric,
     max_iterations: event.max_iterations,
   };
+}
+
+/**
+ * Admission-time `outc_` assignment. The published input shape does not accept
+ * an id — the server generates it — so a caller's field is replaced rather
+ * than honoured: a supplied id would let a client point spans at an outcome
+ * the runtime never declared.
+ */
+function withOutcomeId(
+  event: Extract<UserEvent, { type: 'user.define_outcome' }>,
+): Extract<UserEvent, { type: 'user.define_outcome' }> {
+  return { ...event, outcome_id: `outc_${nanoid(16)}` };
 }
 
 /**

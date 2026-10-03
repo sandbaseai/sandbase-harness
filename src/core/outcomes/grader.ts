@@ -34,6 +34,13 @@ export interface OutcomeGradeInput {
   rubric: string;
   /** What the agent produced: its messages, tool calls and their results. */
   transcript: string;
+  /**
+   * The model reference the deliverable was produced with, for the grader's own
+   * scoring call. Provider configurations carry no pinned model id — the Agent
+   * names the model — so the default provider alone cannot answer `createModel`;
+   * the session's agent reference is what resolves.
+   */
+  model?: string;
 }
 
 export interface OutcomeGrade {
@@ -70,14 +77,24 @@ export class OutcomeEvaluatorUnavailableError extends Error {
 export function createModelOutcomeGrader(modelRegistry: ModelRegistry): OutcomeGrader {
   return {
     async grade(input) {
-      const modelName = modelRegistry.getDefaultName();
+      const modelName = input.model ?? modelRegistry.getDefaultName();
       if (!modelName) {
         throw new OutcomeEvaluatorUnavailableError(
           'No default model provider is configured; the outcome grader cannot evaluate the deliverable.',
         );
       }
-      const model = modelRegistry.createModel(modelName);
+      let model: ReturnType<ModelRegistry['createModel']>;
       let response: Awaited<ReturnType<typeof generateText>>;
+      try {
+        model = modelRegistry.createModel(modelName);
+      } catch (err) {
+        // An unresolvable reference — including the bare provider name, which
+        // carries no model id — is the same fact as no provider at all: the
+        // grader cannot run, and that is configuration, not a verdict.
+        throw new OutcomeEvaluatorUnavailableError(
+          `Outcome grader model "${modelName}" could not be resolved: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
       try {
         response = await generateText({
           model,

@@ -115,10 +115,12 @@ bulk status-transition query rather than a full event read per row), and
 or archived session and to the read for a live one. The materialized `agent`
 pins `version` to the session snapshot and reports `multiagent: null` — a
 declared roster is refused by name, so a populated value can never appear.
-`loop_engine` remains on the object as a local extension. The published
-shape's required `outcome_evaluations` is not yet emitted; its derivation
-from `user.define_outcome` and `span.outcome_evaluation_*` events is a
-separate work item.
+`outcome_evaluations` is derived from the event log on every read path: one
+entry per `user.define_outcome`, in declaration order, reporting `pending`,
+`running`, or `evaluating` while in progress and the terminal end-span verdict
+once closed (see *Declared outcome evaluation* below). The list route derives
+it from one bulk query over the outcome and status events rather than a full
+event read per row. `loop_engine` remains on the object as a local extension.
 
 `DELETE /v1/sessions/{id}` permanently removes the session row, event history,
 session-owned resources, snapshots, and generated files. It returns
@@ -297,7 +299,17 @@ Declared outcome evaluation:
 - A `user.define_outcome` event is an instruction as well as a record: its
   `description` and rubric project into the turn's context, so the queued turn
   works against declared criteria. A `{type: "file"}` rubric names its file
-  rather than inlining it.
+  rather than inlining it. Admission assigns the outcome its `outc_` id and
+  persists it on the event itself, so the published event carries a top-level
+  `outcome_id` and every `span.outcome_evaluation_*` the loop appends
+  references the same value.
+- The session object's `outcome_evaluations` reports one entry per
+  declaration, joined on that id: `description` from the event;
+  `iteration`, `result`, `explanation`, and `completed_at` from the last
+  matching `span.outcome_evaluation_end`. Before any end the entry reports
+  `evaluating` while a start or ongoing span is open, `running` once the
+  declaration's own turn began, and `pending` otherwise — `needs_revision` is
+  a span verdict, not a resource state, so it never appears as `result`.
 - Once that turn completes, the runtime appends
   `span.outcome_evaluation_start`, `span.outcome_evaluation_ongoing` and
   `span.outcome_evaluation_end`, and the end event carries the verdict
@@ -340,9 +352,11 @@ Aligned for: lifecycle endpoints, status vocabulary, initial event processing,
 the 50-event ceiling, the initial event type whitelist, the three `agent`
 reference forms, the tri-state override rule, session update (`agent` limited
 to `tools`/`mcp_servers`, `metadata` merge patch, `title` replace), the
-`session.updated` event carrying only the changed fields, and the session
-object's published fields: `budget` always present (`null` when there is no
-ceiling), `stats.active_seconds`/`stats.duration_seconds`, and the
+`session.updated` event carrying only the changed fields, the server-assigned
+`outcome_id` on `user.define_outcome`, and the session object's published
+fields: `budget` always present (`null` when there is no ceiling),
+`stats.active_seconds`/`stats.duration_seconds`, `outcome_evaluations`
+projected from the event log on create, retrieve, and list, and the
 materialized `agent` with a pinned `version` and `multiagent: null`.
 
 ## 4. Differences
@@ -351,7 +365,6 @@ materialized `agent` with a pinned `version` and `multiagent: null`.
 | --- | --- |
 | Session budget | Owned by [`budget.md`](./budget.md), which is `partial`. `/v1/sessions` accepts a `budget` at creation and echoes it back, and rejects a malformed one before the session is persisted; pricing and the ceiling rules are that contract's subject, not this one's. `POST /v1/sessions/{id}` moves it under that contract's rules and reports the change through `session.updated`. |
 | `vault_ids` on update | Refused with `vault_ids_not_updatable` on `POST /v1/sessions/{id}`; the published parameter is reserved and the refusal keeps a caller from believing its bindings moved. |
-| `outcome_evaluations` absent | The published session object requires it, and this runtime does emit the `user.define_outcome` / `span.outcome_evaluation_*` events it derives from — but the projection into the session object is a separate work item, so the field is withheld rather than emitted as a misleading `[]` on sessions whose log does carry evaluations. |
 | `loop_engine` on the object | Local extension with no published equivalent: the engine selection frozen at creation (`builtin` for legacy rows). It is additive and collides with no published field. |
 | Creation response | `initial_events` is not echoed back. The published contract does not state whether the creation response echoes it. |
 | Automatic rescheduling | `rescheduling` is accepted by the public type and list filter, but no internal retry state or automatic rescheduling is implemented yet. |
@@ -385,10 +398,6 @@ materialized `agent` with a pinned `version` and `multiagent: null`.
   that quietly ran the base agent after a caller asked for a different one is the
   failure the override exists to prevent, and the same reasoning makes an
   unexecutable `effort` a refusal instead of a no-op field.
-- `outcome_evaluations` is withheld rather than emitted empty because an `[]`
-  reads as "evaluated nothing" on a session whose log does carry evaluations —
-  the misleading half of an easy fix. The field returns once the projection
-  exists.
 - `loop_engine` stays on the object because the engine is a real, persisted
   property a local operator must be able to read; it is additive, so a client
   written against the published shape ignores it.
@@ -508,13 +517,24 @@ materialized `agent` with a pinned `version` and `multiagent: null`.
   sent by block id, resumes the model with the paired tool result.
 - `tests/unit/api-standard.test.ts` — the session object's published key set,
   compared against the `BetaManagedAgentsSession` field list transcribed from
-  `@anthropic-ai/sdk@0.129.0` (only `loop_engine` may be extra;
-  `outcome_evaluations` stays absent until its projection lands), plus
+  `@anthropic-ai/sdk@0.129.0` (only `loop_engine` may be extra), plus
   `budget` always present, `stats` timing, and `agent.version`/`multiagent`.
 - `tests/conformance/session-object-fields.test.ts` — the same fields over the
-  wire on create, retrieve, and list, and `stats.active_seconds` derived from
+  wire on create, retrieve, and list, `stats.active_seconds` derived from
   the status-transition log on both the single-session read and the bulk list
-  path.
+  path, and `outcome_evaluations` derived from the declaration and its end
+  span on both read paths.
+- `tests/unit/session-outcomes.test.ts` — the `outcome_evaluations` derivation
+  itself: `pending`, `running`, `evaluating`, every terminal verdict,
+  declaration order, the `needs_revision`-is-not-terminal rule, and the
+  legacy-id claim for declarations persisted before `outcome_id` existed.
+- `tests/integration/outcome-grading.test.ts` — the admission-assigned
+  `outcome_id` joining the persisted declaration, its span triple, and the
+  projected `outcome_evaluations` entry on a real grading run.
+- `tests/conformance/session-outcome-evaluations.test.ts` — the official SDK
+  reading `outcome_evaluations` end to end: one real outcome against the stub
+  model, `satisfied` verdict, and the same `outc_` id on the declaration
+  event and the session entry.
 
 ## 7. Status
 
@@ -524,9 +544,9 @@ grading runs in its own context window over what the agent produced, a
 `needs_revision` verdict is appended as a real `user.message` and re-enters the
 executor, and the loop is bounded by the declared `max_iterations`. The session
 object's published fields are emitted in full — `budget` always present,
-`stats` derived from the event log, and the snapshot `agent` carrying
-`version` and `multiagent: null` — except `outcome_evaluations`, which waits
-for its own work item. Session
+`stats` derived from the event log, `outcome_evaluations` projected from the
+declaration and evaluation spans on every read path, and the snapshot `agent`
+carrying `version` and `multiagent: null`. Session
 update is `supported` for `agent.tools`/`mcp_servers`, `metadata`, `title`,
 and `budget` with `session.updated`; `vault_ids` on that route is a named
 refusal rather than an accepted field, which the matrix records under the

@@ -5,6 +5,7 @@ import type { SessionBudget, SessionStatusIdleEvent } from '@/types/cma-protocol
 import { projectSessionError, type SessionErrorPayload } from '@/core/session/session-error.js';
 import { STATUS_PROJECTION } from '@/core/session/session-lifecycle.js';
 import { isTerminal } from '@/core/session/state-machine.js';
+import type { SessionOutcomeEvaluation } from '@/core/outcomes/session-outcomes.js';
 
 export interface ApiPage<T extends { id: string }> {
   data: T[];
@@ -249,6 +250,14 @@ export interface ApiSession {
     output_tokens: number;
   };
   stats: ApiSessionStats;
+  /**
+   * The session's declared outcomes and their current evaluation state,
+   * derived from the event log: one entry per `user.define_outcome`, in
+   * declaration order. `pending`/`running`/`evaluating` while in progress and
+   * the terminal end-span verdict once closed — `needs_revision` is a span
+   * verdict, not a resource state, so it never appears here.
+   */
+  outcome_evaluations: SessionOutcomeEvaluation[];
   metadata: Record<string, string>;
   created_at: string;
   updated_at: string;
@@ -337,13 +346,16 @@ export interface ApiEvent {
   /**
    * `user.define_outcome` payload, lifted from the metadata carrier.
    *
-   * The event has no `content` blocks, so the description, the rubric and the
-   * iteration budget are the event's whole payload: persisted through metadata and
-   * projected back here rather than sent as an empty `content` array.
+   * The event has no `content` blocks, so the server-assigned outcome id, the
+   * description, the rubric and the iteration budget are the event's whole
+   * payload: persisted through metadata and projected back here rather than
+   * sent as an empty `content` array. `outcome_id` is absent only on events
+   * persisted before the id existed.
    */
+  outcome_id?: string;
   description?: string;
   rubric?: OutcomeRubric;
-  max_iterations?: number;
+  max_iterations?: number | null;
   /**
    * `session.updated` payload, lifted from the metadata carrier. Each field is
    * present only when the update changed it: `agent` is the session's full
@@ -480,7 +492,7 @@ export function toApiAgent(
 export function toApiSession(
   session: Session,
   agent?: AgentDefinition,
-  stats?: { activeSeconds?: number; now?: Date },
+  derived?: { activeSeconds?: number; outcomeEvaluations?: SessionOutcomeEvaluation[]; now?: Date },
 ): ApiSession {
   return {
     id: session.id,
@@ -501,9 +513,10 @@ export function toApiSession(
       output_tokens: session.usage?.tokensOut ?? 0,
     },
     stats: {
-      active_seconds: stats?.activeSeconds ?? 0,
-      duration_seconds: durationSeconds(session, stats?.now ?? new Date()),
+      active_seconds: derived?.activeSeconds ?? 0,
+      duration_seconds: durationSeconds(session, derived?.now ?? new Date()),
     },
+    outcome_evaluations: derived?.outcomeEvaluations ?? [],
     metadata: parseStringRecord(session.metadata),
     created_at: toIsoString(session.createdAt),
     updated_at: toIsoString(session.updatedAt),
@@ -565,9 +578,12 @@ export function toApiEvent(event: SessionEvent): ApiEvent {
   // and `session.error`.
   const defineOutcome = event.type === 'user.define_outcome'
     ? {
+        ...(typeof event.metadata?.outcome_id === 'string' ? { outcome_id: event.metadata.outcome_id } : {}),
         ...(typeof event.metadata?.description === 'string' ? { description: event.metadata.description } : {}),
         ...(event.metadata?.rubric ? { rubric: event.metadata.rubric as OutcomeRubric } : {}),
-        ...(typeof event.metadata?.max_iterations === 'number' ? { max_iterations: event.metadata.max_iterations } : {}),
+        // `max_iterations` is `number | null` on the official event: present
+        // even when the declaration left the default unset.
+        max_iterations: typeof event.metadata?.max_iterations === 'number' ? event.metadata.max_iterations : null,
       }
     : undefined;
   // `session.status_idle` persists the session-level reason as an object in the

@@ -55,16 +55,70 @@ describe('session object fields over HTTP', () => {
       duration_seconds: expect.any(Number),
     });
     expect(created.agent).toMatchObject({ version: 1, multiagent: null });
+    expect(created.outcome_evaluations).toEqual([]);
 
     const retrieved = await (await ctx.app.request(`/v1/sessions/${created.id}`)).json() as Record<string, any>;
     expect(retrieved.budget).toBeNull();
     expect(retrieved.agent).toMatchObject({ version: 1, multiagent: null });
+    expect(retrieved.outcome_evaluations).toEqual([]);
 
     const listed = await (await ctx.app.request('/v1/sessions')).json() as { data: Array<Record<string, any>> };
     const row = listed.data.find((s) => s.id === created.id);
     expect(row).toBeDefined();
     expect(row!.budget).toBeNull();
     expect(row!.stats).toMatchObject({ active_seconds: expect.any(Number), duration_seconds: expect.any(Number) });
+    expect(row!.outcome_evaluations).toEqual([]);
+  });
+
+  it('derives outcome_evaluations from the declaration and its end span', async () => {
+    const ctx = context();
+    ctx.db
+      .prepare(`INSERT INTO agents (id, name, definition) VALUES ('agent_fields', 'fields-agent', ?)`)
+      .run(AGENT_DEFINITION);
+    const session = await createSession(ctx);
+
+    // The same rows the grading loop appends: a declaration carrying its
+    // admission-assigned outcome_id, and the closing end span that joins it.
+    const logger = new EventLogger(ctx.db);
+    logger.append(session.id as string, {
+      type: 'user.define_outcome',
+      metadata: {
+        outcome_id: 'outc_route',
+        description: 'Ship a working endpoint',
+        rubric: { type: 'text', content: 'The endpoint returns 200' },
+        max_iterations: 3,
+      },
+    });
+    logger.append(session.id as string, { type: 'session.status_running' });
+    logger.append(session.id as string, {
+      type: 'span.outcome_evaluation_end',
+      metadata: {
+        outcome_id: 'outc_route',
+        iteration: 0,
+        result: 'satisfied',
+        explanation: 'The endpoint returns 200.',
+      },
+    });
+
+    const expected = {
+      type: 'outcome_evaluation',
+      outcome_id: 'outc_route',
+      description: 'Ship a working endpoint',
+      result: 'satisfied',
+      iteration: 0,
+      explanation: 'The endpoint returns 200.',
+      completed_at: expect.any(String),
+    };
+    const retrieved = await (await ctx.app.request(`/v1/sessions/${session.id}`)).json() as {
+      outcome_evaluations: unknown[];
+    };
+    expect(retrieved.outcome_evaluations).toEqual([expected]);
+
+    // The list route derives the same entry from its bulk event query.
+    const listed = await (await ctx.app.request('/v1/sessions')).json() as {
+      data: Array<{ id: string; outcome_evaluations: unknown[] }>;
+    };
+    expect(listed.data.find((s) => s.id === session.id)!.outcome_evaluations).toEqual([expected]);
   });
 
   it('derives stats.active_seconds from the status-transition event log', async () => {

@@ -565,7 +565,13 @@ session is terminal or archived). The embedded `agent` is the session's frozen
 snapshot: `version` pins the definition the session runs, and `multiagent` is
 always `null` because a declared roster is refused rather than silently
 dropped. `loop_engine` is a local extension on top of the published shape.
-The published `outcome_evaluations` field is not emitted yet.
+`outcome_evaluations` is derived from the session's event log on create,
+retrieve, and list: one entry per `user.define_outcome`, in declaration order —
+`pending` before its turn begins, `running` while the agent works or revises,
+`evaluating` while the grader scores, and the terminal end-span verdict
+(`satisfied`, `failed`, `max_iterations_reached`, `interrupted`, or the local
+`budget_reached`) once closed. `needs_revision` is a span verdict, not a
+resource state, so it never appears there.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -1255,8 +1261,11 @@ criteria instead of a message.
 `{ "type": "file", "file_id": "file_..." }`, and `max_iterations` defaults to 3 and is
 capped at 20 — a value outside that range is rejected rather than lowered, because
 quietly shrinking the budget would change how much work the outcome may do. The
-admitted event is normalized before it is written, and its payload is projected back
-onto the event listing as top-level `description`, `rubric` and `max_iterations` fields.
+admitted event is normalized before it is written, and admission assigns the
+outcome its server-generated `outc_` id, which the event listing projects back as
+top-level `outcome_id`, `description`, `rubric` and `max_iterations` fields. Every
+`span.outcome_evaluation_*` the loop appends references the same `outcome_id`, and
+so does the session's `outcome_evaluations` entry.
 
 A non-empty list produces a session whose status is `running` and whose event
 log already contains every supplied event, in order. An absent field and an

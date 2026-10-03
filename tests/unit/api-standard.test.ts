@@ -21,6 +21,7 @@ const OFFICIAL_SESSION_KEYS = [
   'created_at',
   'environment_id',
   'metadata',
+  'outcome_evaluations',
   'resources',
   'stats',
   'status',

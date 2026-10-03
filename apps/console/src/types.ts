@@ -78,6 +78,16 @@ export type Session = {
   budget: { type: 'limit'; max_list_cost: { amount: string; currency: 'USD' } } | null;
   usage: { input_tokens: number; output_tokens: number };
   stats: { active_seconds: number; duration_seconds: number };
+  /** Declared outcomes and their evaluation state, in declaration order. */
+  outcome_evaluations: Array<{
+    type: 'outcome_evaluation';
+    outcome_id: string;
+    description: string;
+    result: string;
+    iteration: number;
+    explanation: string | null;
+    completed_at: string | null;
+  }>;
   metadata: Record<string, string>;
   created_at: string;
   updated_at: string;
