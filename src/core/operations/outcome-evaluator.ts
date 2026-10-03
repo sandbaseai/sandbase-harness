@@ -57,6 +57,8 @@ export function createModelAssistedOutcomeEvaluator(modelRegistry: ModelRegistry
       const model = modelRegistry.createModel(modelName);
       const response = await generateText({
         model,
+        // Retries belong to the registry's middleware, not a second layer here.
+        maxRetries: 0,
         temperature: 0,
         prompt: [
           'Evaluate whether an agent session satisfied an outcome.',

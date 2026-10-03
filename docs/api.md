@@ -541,16 +541,21 @@ Sessions run an agent in an environment and persist a resumable event log.
 
 The public session `status` is one of `idle`, `running`, `rescheduling`, or
 `terminated`. Internal `queued`, `paused`, and `requires_action` project to
-`idle`; `completed`, `failed`, `cancelled`, `timed_out`, `cleanup_pending`, and
-`archived` project to `terminated`. Error and cleanup details remain in the event
-log.
-`rescheduling` is in the public type but is not emitted yet: automatic
-rescheduling is not implemented.
+`idle`; internal `retrying` projects to `rescheduling`; `completed`, `failed`,
+`cancelled`, `timed_out`, `cleanup_pending`, and `archived` project to
+`terminated`. Error and cleanup details remain in the event log.
+`rescheduling` is emitted while a transient model failure is being retried:
+the first scheduled retry in a turn writes `session.error` with
+`retry_status: {"type": "retrying"}` and `session.status_rescheduled`, a
+request that succeeds after a retry writes `session.status_running`, and a
+retry policy that gives up writes `session.error` with `"type": "exhausted"`
+and idles with `stop_reason: {"type": "retries_exhausted"}` — the session
+stays usable. A `user.interrupt` during the wait ends it with `end_turn`.
 
 The repeatable `statuses` (or `statuses[]`) list filter selects every internal
 state in each requested public group, including paused and approval-waiting
 sessions for `idle` and all terminal states for `terminated`. `rescheduling`
-returns an empty list. Terminal sessions, including `failed`, reject new
+selects sessions retrying a failed model request. Terminal sessions, including `failed`, reject new
 messages and events with `409` before input is persisted or another model/tool
 turn starts. Create a new session after a terminal failure; fixable
 configuration errors that already leave the internal state `paused` still allow
@@ -941,6 +946,7 @@ jq -r 'select(.type == "session.status_idle") | .stop_reason.type // empty'
 | --- | --- |
 | `requires_action` | The session is waiting for an answer to a blocking tool call. `event_ids` lists the parked calls, by their own event id. |
 | `budget_reached` | The turn stopped after the step that crossed the session's spending ceiling. An accepted budget update or removal resumes the session on its own; a work-starting event before that is refused with `budget_reached`. A parked call still wins over this reason — see `requires_action`. |
+| `retries_exhausted` | The retry policy gave up on a transient model failure after `session.status_rescheduled`. The session stays usable — a later `user.message` starts a new turn. |
 | `end_turn` | The turn ended with nothing outstanding. An interrupt reports `end_turn` as well; there is no separate interrupt reason. |
 
 The object is also kept under `metadata.stop_reason`, and is exactly the
@@ -1180,7 +1186,8 @@ empty credential the provider would answer with an unattributed `401`.
 
 | `retry_status.type` | Meaning | Codes |
 | --- | --- | --- |
-| `retrying` | Transient; the same request may succeed. | `pi_session_busy`, `work_queue_timeout` |
+| `retrying` | Transient; the same request may succeed. | `pi_session_busy`, `work_queue_timeout`, and each scheduled model retry during `rescheduling` |
+| `exhausted` | The retry policy gave up; the turn ended, the session did not. | the final model error of an exhausted retry wait — the session idles with `stop_reason: retries_exhausted` and still accepts a new message |
 | `terminal` | The runtime will refuse this request again, or the failure is not classified. | `pi_cleanup_pending`, `pi_timed_out`, `pi_rpc_gate_unavailable`, `pi_rpc_gate_lost`, `pi_rpc_approval_not_pending`, `pi_rpc_protocol_error`, `pi_rpc_timeout`, `pi_rpc_outcome_unknown`, `pi_always_ask_not_supported`, `pi_tool_policy_not_supported`, `pi_sandbox_provider_not_supported`, `pi_user_event_not_supported`, `pi_message_content_not_supported`, `loop_engine_not_supported`, `loop_engine_invalid`, `unsupported_capability`, `requires_action_timeout`, `work_outcome_unknown`, `work_lease_lost`, `outcome_evaluator_unavailable`, `outcome_rubric_file_not_found`, `model_not_found`, `model_provider_not_configured`, `model_config_invalid`, `model_auth_failed`, any other code, and a failure with no code |
 
 `pi_always_ask_not_supported` is retained in that table but is no longer produced:
@@ -1191,8 +1198,9 @@ distinction. The three gate codes are the new permanent failures — the gate
 extension did not load, a gated call executed with no decision attached, or a
 `user.tool_confirmation` named a gate this runtime was not waiting on.
 
-The runtime produces only `retrying` and `terminal`: `exhausted` belongs to
-automatic rescheduling, which is not implemented. Events persisted before this
+The runtime produces all three values: `retrying` while a transient model
+retry is scheduled, `exhausted` when that policy gives up, and `terminal` for
+everything the runtime will not retry. Events persisted before this
 shape existed stored the local code in `type` and a string disposition —
 `retryable`, `not_retryable`, or `unknown` — in `retry_status`; the projection
 normalizes them on the way out, so a client reading an old log sees the same

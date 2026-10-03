@@ -98,6 +98,8 @@ export function createModelOutcomeGrader(modelRegistry: ModelRegistry): OutcomeG
       try {
         response = await generateText({
           model,
+          // Retries belong to the registry's middleware, not a second layer here.
+          maxRetries: 0,
           temperature: 0,
           prompt: [
             'You are grading whether an agent session met an outcome.',

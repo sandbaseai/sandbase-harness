@@ -402,7 +402,7 @@ export interface StreamedEvent {
    * as the provider's own string, so both shapes are possible here — the object is
    * what the documented client loop reads (`docs/api.md`).
    */
-  stop_reason?: string | { type: 'end_turn' | 'requires_action'; event_ids?: string[] };
+  stop_reason?: string | { type: 'end_turn' | 'requires_action' | 'budget_reached' | 'retries_exhausted'; event_ids?: string[] };
   /**
    * Structured failure of a `session.error`, projected from the event's metadata
    * carrier. `type` is one of the official error types and `retry_status` is

@@ -8,6 +8,7 @@ describe('session lifecycle helpers', () => {
   const projections: [SessionStatus, string, SessionEvent['type'] | undefined, boolean][] = [
     ['queued', 'idle', undefined, false],
     ['running', 'running', 'session.status_running', false],
+    ['retrying', 'rescheduling', 'session.status_rescheduled', false],
     ['paused', 'idle', 'session.status_idle', false],
     ['requires_action', 'idle', 'session.status_idle', false],
     ['completed', 'terminated', 'session.status_terminated', true],

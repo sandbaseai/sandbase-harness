@@ -249,6 +249,10 @@ export class DefaultStrategy implements AgentStrategy {
 
       const result = streamText({
         model: model as LanguageModel,
+        // The registry's middleware owns every retry: the SDK's own step-level
+        // retry would re-enter it silently, multiplying requests and hiding
+        // the rescheduling the session is supposed to publish.
+        maxRetries: 0,
         system: systemPrompt || undefined,
         messages: aiMessages,
         tools: Object.keys(aiTools).length > 0 ? aiTools : undefined,

@@ -21,6 +21,7 @@ import {
   DEFAULT_RETRY_POLICY,
   type ModelConfig,
   type ModelProviderType,
+  type RetryObserver,
   type RetryPolicy,
   type RuntimeConfigState,
   type RuntimeModelInfo,
@@ -138,8 +139,16 @@ export class ModelRegistry {
    * Create a Vercel AI SDK LanguageModel instance, wrapped with the retry
    * middleware (Property 14). Resolves ${ENV_VAR} in api_key and base_url.
    */
-  createModel(name: string): LanguageModel {
-    return this.createModelFromConfig(this.resolveModelConfig(name));
+  /**
+   * The registry's retry middleware on its own, for callers that wrap a model
+   * built elsewhere — one observer reports on that wrapper's retries only.
+   */
+  retryMiddleware(observer?: RetryObserver): LanguageModelMiddleware {
+    return createRetryMiddleware(this.retryPolicy, observer);
+  }
+
+  createModel(name: string, options?: { retryObserver?: RetryObserver }): LanguageModel {
+    return this.createModelFromConfig(this.resolveModelConfig(name), options);
   }
 
   /**
@@ -155,7 +164,7 @@ export class ModelRegistry {
    * names neither the variable nor the field. Failing before the request instead
    * is what makes the first turn say which variable is missing.
    */
-  createModelFromConfig(config: ModelConfig): LanguageModel {
+  createModelFromConfig(config: ModelConfig, options?: { retryObserver?: RetryObserver }): LanguageModel {
     if (!config.model) {
       throw new ModelConfigInvalidError(
         config.name,
@@ -173,7 +182,7 @@ export class ModelRegistry {
       resolvedApiKey,
       resolvedBaseUrl,
     );
-    const middleware: LanguageModelMiddleware[] = [createRetryMiddleware(this.retryPolicy)];
+    const middleware: LanguageModelMiddleware[] = [createRetryMiddleware(this.retryPolicy, options?.retryObserver)];
     // Only the OpenAI-compatible branches ever took a reasoning effort.
     if (config.reasoning_effort && config.provider !== 'anthropic' && config.provider !== MINIMAX_PROVIDER) {
       middleware.push(createReasoningEffortMiddleware(config.reasoning_effort));
@@ -409,35 +418,83 @@ function publicBaseUrl(value?: string): string | undefined {
 // ============================================================
 
 /**
+ * Marks an error that surfaced only because the retry policy was exhausted —
+ * `runTurn` reads it to publish `retries_exhausted` rather than guessing from
+ * the error's own text whether the model was asked more than once.
+ */
+const RETRIES_EXHAUSTED = Symbol('retriesExhausted');
+
+export function isRetriesExhausted(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && (err as Record<symbol, unknown>)[RETRIES_EXHAUSTED] === true;
+}
+
+function markRetriesExhausted(err: unknown): void {
+  if (typeof err === 'object' && err !== null) {
+    Object.defineProperty(err, RETRIES_EXHAUSTED, { value: true, configurable: true });
+  }
+}
+
+/**
  * Wrap model generate/stream calls with the retry policy:
  * - network timeout: retry up to 3x, no backoff
  * - rate limit (429): honor Retry-After, up to 3x
+ * - server error (5xx) / overloaded (529): exponential backoff, up to 3x
  * - auth (401/403): never retry
+ *
+ * The optional observer is per model instance — `createModel` is called once
+ * per turn, so one observer reports on exactly one turn's retries. The wait
+ * itself is abort-aware: a `user.interrupt` during the backoff ends the wait
+ * instead of letting a retry land after the turn was asked to stop.
  */
-function createRetryMiddleware(policy: RetryPolicy): LanguageModelMiddleware {
-  const runWithRetry = async <T>(fn: () => PromiseLike<T>): Promise<T> => {
+function createRetryMiddleware(policy: RetryPolicy, observer?: RetryObserver): LanguageModelMiddleware {
+  // One middleware instance wraps one model for one turn, so calls within that
+  // turn share this flag: a success after any scheduled retry is a recovery
+  // even when it landed on a different call's first attempt.
+  let everRetried = false;
+  const runWithRetry = async <T>(fn: () => PromiseLike<T>, signal?: AbortSignal): Promise<T> => {
     let attempt = 0;
     for (;;) {
+      if (signal?.aborted) throw signal.reason ?? abortError();
       try {
-        return await fn();
+        const result = await fn();
+        if (everRetried) {
+          everRetried = false;
+          observer?.onRetryRecovered();
+        }
+        return result;
       } catch (err) {
+        if (signal?.aborted) throw err;
         const type = policy.classify(err);
         const max = policy.maxRetries(type);
-        if (attempt >= max) throw err;
+        if (attempt >= max) {
+          if (max > 0) {
+            markRetriesExhausted(err);
+            observer?.onRetryExhausted?.({ attempt, type, error: err });
+          }
+          throw err;
+        }
         const headers = extractHeaders(err);
         const delay = policy.getDelay(type, attempt, headers);
-        if (delay > 0) await sleep(delay);
         attempt++;
+        everRetried = true;
+        observer?.onRetryScheduled({ attempt, delayMs: delay, type, error: err });
+        if (delay > 0) await sleep(delay, signal);
       }
     }
   };
 
   return {
-    wrapGenerate: async ({ doGenerate }) => runWithRetry(doGenerate),
+    wrapGenerate: async ({ doGenerate, params }) => runWithRetry(doGenerate, params.abortSignal),
     // Streaming: retry only applies to establishing the stream (the initial
     // call). Once bytes flow, mid-stream failures are surfaced to the caller.
-    wrapStream: async ({ doStream }) => runWithRetry(doStream),
+    wrapStream: async ({ doStream, params }) => runWithRetry(doStream, params.abortSignal),
   };
+}
+
+function abortError(): Error {
+  const err = new Error('The operation was aborted');
+  err.name = 'AbortError';
+  return err;
 }
 
 /**
@@ -467,8 +524,22 @@ function extractHeaders(err: unknown): Headers | undefined {
   return undefined;
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(signal?.reason ?? abortError());
+    };
+    if (signal?.aborted) {
+      onAbort();
+      return;
+    }
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
 }
 
 // ============================================================

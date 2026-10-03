@@ -144,6 +144,7 @@ Status projection (`STATUS_PROJECTION` in
 | --- | --- | --- | --- |
 | `queued` | `idle` | None | No |
 | `running` | `running` | `session.status_running` | No |
+| `retrying` | `rescheduling` | `session.status_rescheduled` | No |
 | `paused` | `idle` | `session.status_idle` | No |
 | `requires_action` | `idle` | `session.status_idle` | No |
 | `completed` | `terminated` | `session.status_terminated` | Yes |
@@ -153,8 +154,16 @@ Status projection (`STATUS_PROJECTION` in
 | `cleanup_pending` | `terminated` | `session.status_terminated` | Yes |
 | `archived` | `terminated` | `session.status_terminated` | Yes |
 
-`rescheduling` is part of the public type, but the runtime does not yet
-implement automatic rescheduling or emit that status. `GET /v1/sessions` takes
+`rescheduling` is emitted by the internal `retrying` state: a model request
+that fails with a transient provider error (429, a 5xx server error, 529
+overloaded, or a transport timeout) is retried by the registry's middleware
+under the published backoff — the first scheduled wait in a turn writes
+`session.error{retry_status: {type: 'retrying'}}` and `session.status_rescheduled`,
+a recovered request writes `session.status_running`, and a policy that gives up
+writes `session.error{retry_status: {type: 'exhausted'}}` and idles with
+`stop_reason: {type: 'retries_exhausted'}` rather than terminating. A
+`user.interrupt` during the backoff ends the wait and idles with `end_turn`.
+`GET /v1/sessions` takes
 the published parameter set: `limit` and the `page` cursor, `order` (`asc` or
 `desc` by `created_at`, default `desc`), `agent_id` with an `agent_version`
 that applies only beside it, `include_archived` (archived rows are excluded
@@ -378,7 +387,7 @@ materialized `agent` with a pinned `version` and `multiagent: null`.
 | `vault_ids` on update | Refused with `vault_ids_not_updatable` on `POST /v1/sessions/{id}`; the published parameter is reserved and the refusal keeps a caller from believing its bindings moved. |
 | `loop_engine` on the object | Local extension with no published equivalent: the engine selection frozen at creation (`builtin` for legacy rows). It is additive and collides with no published field. |
 | Creation response | `initial_events` is not echoed back. The published contract does not state whether the creation response echoes it. |
-| Automatic rescheduling | `rescheduling` is accepted by the public type and list filter, but no internal retry state or automatic rescheduling is implemented yet. |
+| Automatic rescheduling | Implemented for transient model failures: a retryable error schedules a wait, reports `session.status_rescheduled` (internal `retrying`), and either recovers to `running` or idles as `retries_exhausted` once the policy gives up. Retry counts and delays come from the local retry policy, not a published schedule. |
 | `cleanup_pending` | Internal fail-closed state for local sandbox teardown, projected to public `terminated`; the event log retains the cleanup error. |
 | Extension endpoints | Session inspection and control endpoints under `/v1/x` are local additions and are excluded from CMA admission. |
 | Override refusal codes | `agent_model_required` is the published code for a cleared `model`. `agent_tools_cleared_with_skills`, `agent_mcp_server_not_found`, `invalid_agent_override_field`, `invalid_agent_overrides`, `invalid_agent_ref` and `agent_required` are SandBase spellings for the same conditions, published so a client can distinguish them without parsing prose. |
@@ -458,6 +467,16 @@ materialized `agent` with a pinned `version` and `multiagent: null`.
   its declared ceiling closing the outcome as `budget_reached` without another
   grading pass or turn, and `outcome_grader_unavailable` as a 400 on both ingress
   paths with nothing written.
+- `tests/unit/model-retry.test.ts` — retry classification by `statusCode` and
+  message, the 1s/2s/4s backoff and `Retry-After`, observer notification
+  order, and abort-aware waits.
+- `tests/integration/session-rescheduling.test.ts` and
+  `tests/conformance/session-rescheduling.test.ts` — the `rescheduling`
+  lifecycle: `session.error(retrying)` before `session.status_rescheduled`,
+  `session.status_running` on recovery, `exhausted` and `retries_exhausted` on
+  policy exhaustion with the session still answering a later message, and
+  `end_turn` when an interrupt aborts the wait — in-process and through the
+  official SDK on a real runtime.
 - `tests/unit/cma-event-contract.test.ts` — `initial_events` validation: the
   whitelist, the 50-event ceiling, the `user.define_outcome` defaulting and its
   rejection cases, and the projection that lifts the payload out of the metadata

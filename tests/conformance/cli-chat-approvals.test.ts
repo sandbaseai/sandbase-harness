@@ -462,10 +462,11 @@ describe('chat with a turn that fails', () => {
     // never returns and never says why.
     const stub = await startStubModelServer({
       toolCalls: [{ name: 'bash', arguments: { command: 'echo conformance' } }],
-      // The first request asks for the tool; the resumed request is refused on
-      // each of the runtime's three attempts, so the failure is the terminal kind
-      // rather than one the session continues from.
-      failRequests: [2, 3, 4],
+      // The first request asks for the tool; the resumed request is refused
+      // with a non-retryable 400 — not one of the resumable model codes — so
+      // the failure is the terminal kind rather than one the session
+      // reschedules or pauses to continue from.
+      failRequests: [2], failStatus: 400,
     });
     const runtime = await startRuntimeHarness({ modelBaseUrl: stub.baseUrl, agentTools: GATED_BASH_TOOLS });
 

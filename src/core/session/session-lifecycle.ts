@@ -7,6 +7,7 @@ export const STATUS_PROJECTION: Record<SessionStatus, {
 }> = {
   queued: { wire: 'idle', event: undefined, terminal: false },
   running: { wire: 'running', event: 'session.status_running', terminal: false },
+  retrying: { wire: 'rescheduling', event: 'session.status_rescheduled', terminal: false },
   paused: { wire: 'idle', event: 'session.status_idle', terminal: false },
   requires_action: { wire: 'idle', event: 'session.status_idle', terminal: false },
   completed: { wire: 'terminated', event: 'session.status_terminated', terminal: true },

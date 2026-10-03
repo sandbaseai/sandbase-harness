@@ -253,7 +253,9 @@ export class DefaultSessionExecutor implements SessionExecutor {
     const modelConfig = strategy.requiresModel === false
       ? modelRegistry.resolveModelConfig(agent.model)
       : undefined;
-    const model = strategy.requiresModel === false ? undefined : modelRegistry.createModel(agent.model);
+    const model = strategy.requiresModel === false
+      ? undefined
+      : modelRegistry.createModel(agent.model, { retryObserver: options?.retryObserver });
 
     // 3. Provision sandbox (or reuse the one bound to this session)
     const sandbox = await this.sandboxLifecycle.getOrProvision(session);

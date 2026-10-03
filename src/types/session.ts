@@ -14,6 +14,7 @@ import type { AgentDefinition, AgentOverrides } from './agent.js';
 export type SessionStatus =
   | 'queued'
   | 'running'
+  | 'retrying'
   | 'paused'
   | 'requires_action'
   | 'completed'
@@ -35,7 +36,10 @@ export type ApiSessionStatus = 'idle' | 'running' | 'rescheduling' | 'terminated
  */
 export const SESSION_TRANSITIONS: Record<SessionStatus, SessionStatus[]> = {
   queued: ['running', 'completed', 'failed', 'cancelled', 'timed_out', 'cleanup_pending', 'archived'],
-  running: ['paused', 'requires_action', 'completed', 'failed', 'cancelled', 'timed_out', 'cleanup_pending', 'archived'],
+  running: ['retrying', 'paused', 'requires_action', 'completed', 'failed', 'cancelled', 'timed_out', 'cleanup_pending', 'archived'],
+  // A retry wait ends back into the turn it came from (running), into the idle
+  // the exhausted retry earned (paused), or into the turn's own failure modes.
+  retrying: ['running', 'paused', 'failed', 'cancelled', 'timed_out'],
   paused: ['running', 'completed', 'failed', 'cancelled', 'archived'],
   requires_action: ['running', 'completed', 'failed', 'cancelled', 'timed_out', 'archived'],
   completed: [],

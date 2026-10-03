@@ -72,7 +72,15 @@ The append path and the row shape are `src/core/session/session-manager.ts` and
   distinguished by event type. [`sessions.md`](./sessions.md) records both.
   `stop_reason.type` is `requires_action` while a call is parked,
   `budget_reached` when the session's spending ceiling stopped the turn (a
-  `requires_action` reason outranks it), and `end_turn` otherwise.
+  `requires_action` reason outranks it), `retries_exhausted` when the retry
+  policy gave up on a transient model failure, and `end_turn` otherwise.
+- `session.status_rescheduled` is the `rescheduling` projection's lifecycle
+  event: a transient model failure (429, a 5xx server error, 529 overloaded,
+  or a transport timeout) writes a `session.error` with
+  `retry_status: {type: 'retrying'}` before the first scheduled wait, then the
+  status event. A recovered request writes `session.status_running`; a policy
+  that gives up writes `session.error` with `{type: 'exhausted'}` and the
+  `retries_exhausted` idle above.
 - The listed calls are exactly the ones still holding the turn back: while
   `event_ids` is non-empty no resume turn starts, and the turn starts when the
   last one is answered. Both the array and that gate read one definition
@@ -198,6 +206,18 @@ lifecycle, structured `session.error`, and usage-before-idle ordering.
   object: `session.usage` immediately before the idle event, `requires_action`
   outranking it, and the resumed turn after a budget raise or removal carrying
   no synthetic `user.message`.
+- `tests/integration/session-rescheduling.test.ts` — the retry lifecycle over a
+  live session: `session.error(retrying)` before `session.status_rescheduled`,
+  `session.status_running` on recovery, `exhausted` plus the
+  `retries_exhausted` idle on policy exhaustion, and `end_turn` when an
+  interrupt aborts the wait.
+- `tests/conformance/session-rescheduling.test.ts` — the same arc through the
+  official SDK on a real runtime: a stubbed 503 drives the rescheduled
+  sequence, four failures drive `exhausted` and `retries_exhausted`, and the
+  session answers the next message either way.
+- `tests/unit/model-retry.test.ts` — the policy underneath: `statusCode`-first
+  classification into `server_error`/`overloaded`, the 1s/2s/4s backoff with
+  `Retry-After`, observer notifications, and the abort-aware wait.
 - `tests/integration/approval-event-id.test.ts` — the event-id address: the
   pending call's own event id reported in `event_ids` and not the block id, a
   decision naming it executed, the block-id spelling still accepted, and every

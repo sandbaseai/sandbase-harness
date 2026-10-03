@@ -14,11 +14,27 @@
 
 - `DELETE /v1/sessions/{id}` is now permanent: running sessions return `session_running` until interrupted, while idle or terminal sessions emit `session.deleted`, release their sandbox, remove session-owned rows, snapshots, and generated files, and return `{id, type: "session_deleted"}`. The deleted session and its event history return `404`; user-uploaded files are retained without the deleted session scope.
 
-- Session responses now use only `idle`, `running`, `rescheduling`, and `terminated`. Waiting for approval or a custom tool result is `idle`, with `stop_reason.type: "requires_action"` and pending event ids on the matching `session.status_idle` event. Internal `failed`, `cancelled`, `timed_out`, and `cleanup_pending` all project to `terminated`; their details remain in the event log. A failed session is terminal: new messages and events return `409` without persisting input or starting another turn. The existing single-value session `status` list filter selects every internal state in the requested public group; `rescheduling` currently selects none because automatic rescheduling is not implemented.
+- Session responses now use only `idle`, `running`, `rescheduling`, and `terminated`. Waiting for approval or a custom tool result is `idle`, with `stop_reason.type: "requires_action"` and pending event ids on the matching `session.status_idle` event. Internal `failed`, `cancelled`, `timed_out`, and `cleanup_pending` all project to `terminated`; their details remain in the event log. A failed session is terminal: new messages and events return `409` without persisting input or starting another turn. The existing single-value session `status` list filter selects every internal state in the requested public group; `rescheduling` selects sessions retrying a transient model failure.
 
 - The local `status` query parameter on `GET /v1/sessions` is removed in favour of the published repeatable `statuses` (and the SDK's `statuses[]` spelling): every value must be one of `idle`, `running`, `rescheduling`, or `terminated` and selects all internal states in that public group — a filter on internally `failed` sessions is expressed as `statuses=terminated`, and any other value is a `400` naming it. `GET /v1/sessions` also now takes the rest of the published parameter set: `order=asc|desc` by `created_at`, `include_archived` (archived sessions are excluded by default), `agent_id` with `agent_version` applying only beside it, `memory_store_id`, `deployment_id`, and `created_at[gt|gte|lt|lte]` bounds. A `page` cursor now binds only the `order` and `created_at[*]` window it was issued under — replaying either differently is a `400` — while the remaining filters may change freely across a replay, matching the published rule.
 
 ### Added
+- A model request that fails with a transient provider error — HTTP 429, a
+  500/502/503/504 server error, a 529 or an `overloaded` message, or a
+  transport timeout — is now retried by the registry's retry middleware, and
+  the wait is visible: the first scheduled retry in a turn writes
+  `session.error` with `retry_status: {"type": "retrying"}` and
+  `session.status_rescheduled` (public status `rescheduling`), a request that
+  succeeds on retry writes `session.status_running` again, and a policy that
+  gives up writes `session.error` with `{"type": "exhausted"}` and idles the
+  session with `stop_reason: {"type": "retries_exhausted"}` — terminal state
+  is not entered, so the session still answers a later `user.message`. A
+  `user.interrupt` during the backoff ends the wait and idles with `end_turn`.
+  Retry classification now reads the error's `statusCode` first (AI SDK
+  `APICallError` included) and falls back to the message; `server_error` and
+  `overloaded` retry three times on a 1s/2s/4s backoff and honour
+  `Retry-After`. Non-retryable auth and unknown errors keep their existing
+  terminal behaviour.
 - A session that crosses its `max_list_cost` ceiling inside a turn now stops
   after the step that crossed it instead of only refusing the next event: the
   session idles with `stop_reason: {"type": "budget_reached"}` —

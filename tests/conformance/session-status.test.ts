@@ -74,7 +74,10 @@ describe('official SDK session status projection over HTTP', () => {
   }, 300_000);
 
   it('reports a model failure as terminated and refuses new events without persisting or invoking the model', async () => {
-    const stub = await startStubModelServer({ failRequests: [1, 2, 3, 4, 5] });
+    // A 400 is neither retryable nor one of the resumable model codes, so the
+    // failure is the terminal kind rather than one the session reschedules or
+    // pauses to continue from.
+    const stub = await startStubModelServer({ failRequests: [1, 2, 3, 4, 5], failStatus: 400 });
     let runtime: RunningRuntime | undefined;
     try {
       runtime = await startRuntimeHarness({ modelBaseUrl: stub.baseUrl });

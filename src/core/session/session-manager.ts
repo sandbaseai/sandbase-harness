@@ -22,6 +22,8 @@ import { expiredParkedWait, PARKED_WAIT_TIMEOUT_CODE } from './parked-wait.js';
 import { rowToSession, type SessionRow } from './session-records.js';
 import { attachSessionResources } from './session-resources.js';
 import { officialErrorType, retryStatus } from './session-error.js';
+import { isRetriesExhausted } from '@/model/registry.js';
+import type { RetryObserver } from '@/types/model.js';
 import { buildSessionUsageSnapshot } from './session-usage.js';
 import type { SnapshotManager } from './snapshot-manager.js';
 import {
@@ -141,6 +143,12 @@ export interface ExecuteOptions {
    * ceiling instead of only discovering it when the next event is refused.
    */
   budgetExhausted?: () => boolean;
+  /**
+   * Per-turn view into the model wrapper's retry decisions — the manager maps
+   * a scheduled retry onto `session.status_rescheduled` and a recovered one
+   * back onto `session.status_running`.
+   */
+  retryObserver?: RetryObserver;
 }
 
 /** The one internal trigger this runtime re-enters a turn on. See `TurnTrigger`. */
@@ -674,7 +682,7 @@ export class SessionManager {
       throw new Error(`Session not found: ${sessionId}`);
     }
     if (session.archivedAt) return session;
-    if (session.status === 'running') {
+    if (session.status === 'running' || session.status === 'retrying') {
       throw sessionOperationError(
         'session_running',
         `Session ${sessionId} is running; interrupt it and wait for idle before archiving`,
@@ -1435,7 +1443,7 @@ export class SessionManager {
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`);
     }
-    if (session.status === 'running') {
+    if (session.status === 'running' || session.status === 'retrying') {
       throw sessionOperationError(
         'session_running',
         `Session ${sessionId} is running; interrupt it and wait for idle before deleting`,
@@ -1542,7 +1550,7 @@ export class SessionManager {
    */
   reconcileOrphans(): number {
     const running = this.db
-      .prepare("SELECT id FROM sessions WHERE status = 'running'")
+      .prepare("SELECT id FROM sessions WHERE status IN ('running', 'retrying')")
       .all() as Array<{ id: string }>;
 
     for (const { id: sessionId } of running) {
@@ -1638,7 +1646,7 @@ export class SessionManager {
     }
   }
 
-  private updateStatus(sessionId: string, newStatus: SessionStatus, idleStopReason?: 'budget_reached'): void {
+  private updateStatus(sessionId: string, newStatus: SessionStatus, idleStopReason?: IdleStopReason): void {
     // Validate the transition against the state machine. If the current status
     // already equals the target, this is a no-op. Invalid transitions are
     // skipped (defense — should not happen given callers guard with isTerminal).
@@ -1742,7 +1750,7 @@ export class SessionManager {
     sessionId: string,
     event: Extract<UserEvent, { type: 'user.define_outcome' }>,
     abortController: AbortController,
-    turnState: { requiresAction: boolean },
+    turnState: { requiresAction: boolean; retriesExhausted: boolean },
   ): Promise<void> {
     const grader = this.outcomeGrader;
     // Admission refuses a declared outcome on a runtime with no grader, so this
@@ -1834,7 +1842,7 @@ export class SessionManager {
     sessionId: string,
     abortController: AbortController,
     revision: string | undefined,
-    turnState: { requiresAction: boolean },
+    turnState: { requiresAction: boolean; retriesExhausted: boolean },
   ): AsyncIterable<SessionEvent> {
     if (!this.executor) return;
     const running = this.get(sessionId);
@@ -1847,12 +1855,49 @@ export class SessionManager {
       abortSignal: abortController.signal,
       broadcast: (e) => this.broadcast(sessionId, e),
       budgetExhausted: () => this.isBudgetExhausted(sessionId),
+      retryObserver: this.retryObserverFor(sessionId, turnState),
       onRequiresAction: () => {
         turnState.requiresAction = true;
       },
     })) {
       this.broadcast(sessionId, evt);
     }
+  }
+
+  /**
+   * Turn-level view onto the model wrapper's retry decisions, so a transient
+   * provider failure shows up on the wire instead of only waiting silently.
+   *
+   * The first scheduled retry moves the session to `retrying` — projecting as
+   * `rescheduling` with a `session.status_rescheduled` — after the
+   * `session.error` that explains it; later retries in the same wait cycle
+   * only add their own error event. A request that succeeds after a retry
+   * moves the session back to `running`, and the exhausted case never reaches
+   * here: the final error surfaces through `runTurn`'s catch instead.
+   */
+  private retryObserverFor(sessionId: string, turnState: { retriesExhausted: boolean }): RetryObserver {
+    return {
+      onRetryScheduled: ({ error }) => {
+        const code = errorCodeOf(error);
+        const errorEvent = this.eventLogger.append(sessionId, {
+          type: 'session.error',
+          content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }],
+          metadata: sessionErrorMetadata(error, code, { type: 'retrying' }),
+        });
+        this.broadcast(sessionId, errorEvent);
+        if (this.get(sessionId)?.status === 'running') {
+          this.updateStatus(sessionId, 'retrying');
+        }
+      },
+      onRetryRecovered: () => {
+        if (this.get(sessionId)?.status === 'retrying') {
+          this.updateStatus(sessionId, 'running');
+        }
+      },
+      onRetryExhausted: () => {
+        turnState.retriesExhausted = true;
+      },
+    };
   }
 
   /**
@@ -1886,7 +1931,7 @@ export class SessionManager {
     // Shared with the outcome loop: a revision turn that stops for a tool
     // confirmation ends the outcome (it cannot drive another turn while the
     // session waits), and the status below still says `requires_action`.
-    const turnState = { requiresAction: false };
+    const turnState = { requiresAction: false, retriesExhausted: false };
 
     try {
       const running = this.get(sessionId)!;
@@ -1894,6 +1939,7 @@ export class SessionManager {
         abortSignal: abortController.signal,
         broadcast: (e) => this.broadcast(sessionId, e),
         budgetExhausted: () => this.isBudgetExhausted(sessionId),
+        retryObserver: this.retryObserverFor(sessionId, turnState),
         onRequiresAction: () => {
           turnState.requiresAction = true;
         },
@@ -1923,8 +1969,11 @@ export class SessionManager {
       // a turn that stopped at the spending ceiling idles on `budget_reached`
       // — the ceiling outranks only `end_turn`, never a parked call waiting on
       // its answer. Anything else goes idle (paused), awaiting next input.
+      // `retrying` is included defensively: a completed turn cannot still be
+      // waiting on a retry, but a wedged `rescheduling` is unrecoverable if
+      // some future path ever leaves it here.
       const current = this.get(sessionId);
-      if (current && current.status === 'running') {
+      if (current && (current.status === 'running' || current.status === 'retrying')) {
         if (turnState.requiresAction) {
           this.updateStatus(sessionId, 'requires_action');
         } else {
@@ -1953,8 +2002,24 @@ export class SessionManager {
         if (this.get(sessionId)?.status === 'running') this.updateStatus(sessionId, 'cleanup_pending');
       } else if (abortController.signal.aborted || isAbortError(err)) {
         const current = this.get(sessionId);
-        if (current && current.status === 'running') {
+        if (current && (current.status === 'running' || current.status === 'retrying')) {
           this.updateStatus(sessionId, 'paused');
+        }
+      } else if (turnState.retriesExhausted || isRetriesExhausted(err)) {
+        // The retry middleware already published each scheduled wait through
+        // the observer; what surfaces here is the policy giving up. The error
+        // reports `exhausted`, and the session idles on `retries_exhausted`
+        // rather than failing — a transient provider failure is not a broken
+        // session, and the client can send another message.
+        const errorEvent = this.eventLogger.append(sessionId, {
+          type: 'session.error',
+          content: [{ type: 'text', text: err instanceof Error ? err.message : String(err) }],
+          metadata: sessionErrorMetadata(err, errorCode, { type: 'exhausted' }),
+        });
+        this.broadcast(sessionId, errorEvent);
+        const current = this.get(sessionId);
+        if (current && (current.status === 'running' || current.status === 'retrying')) {
+          this.updateStatus(sessionId, 'paused', 'retries_exhausted');
         }
       } else {
         const errorEvent = this.eventLogger.append(sessionId, {
@@ -2112,7 +2177,9 @@ function getConfirmationMetadata(
   };
 }
 
-function lifecycleMetadataFor(status: SessionStatus, events: SessionEvent[], idleStopReason?: 'budget_reached'): Record<string, unknown> | undefined {
+type IdleStopReason = 'budget_reached' | 'retries_exhausted';
+
+function lifecycleMetadataFor(status: SessionStatus, events: SessionEvent[], idleStopReason?: IdleStopReason): Record<string, unknown> | undefined {
   if (status === 'paused') return { stop_reason: { type: idleStopReason ?? 'end_turn' } };
   if (status !== 'requires_action') return undefined;
 
@@ -2204,12 +2271,16 @@ const INTERNAL_ERROR_CODE = 'internal_error';
  * `model_request_failed_error` alike, while the code the failure was raised
  * with is preserved under `error.code`.
  */
-function sessionErrorMetadata(error: unknown, code: string | undefined): Record<string, unknown> {
+function sessionErrorMetadata(
+  error: unknown,
+  code: string | undefined,
+  retryStatusOverride?: SessionErrorRetryStatus,
+): Record<string, unknown> {
   return {
     error: {
       type: officialErrorType(code, error),
       message: error instanceof Error ? error.message : String(error),
-      retry_status: retryStatusFor(code),
+      retry_status: retryStatusOverride ?? retryStatusFor(code),
       // A codeless failure still records `internal_error` — the same fallback
       // it previously published as `type`, now in the extension field.
       code: code ?? INTERNAL_ERROR_CODE,

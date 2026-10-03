@@ -76,6 +76,8 @@ export class ContextCompactor {
 
     const { text } = await generateText({
       model,
+      // Retries belong to the registry's middleware, not a second layer here.
+      maxRetries: 0,
       system: SUMMARIZE_SYSTEM_PROMPT,
       prompt: `Summarize this conversation:\n\n${transcript}`,
     });

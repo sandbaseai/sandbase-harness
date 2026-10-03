@@ -109,7 +109,6 @@ session-budget: partial
 | The thread-level `budget_reached` signal has no thread surface | The session pauses exactly as published — idle with `stop_reason: budget_reached`, automatic resume when an update lifts the ceiling — but the reason is carried on the session's own `session.status_idle`. The published model also reports it per thread, and this runtime has no thread surface to report it on. A work-starting event at the cap is still refused with the `budget_reached` code rather than queued, because a resumed-at-once turn would charge spend the client did not raise the ceiling for. |
 | An outcome stops at the ceiling with its own verdict | A declared outcome whose session reaches the ceiling closes with `result: "budget_reached"` on its terminal `span.outcome_evaluation_end`. The published contract has no outcome-loop surface, so this is a local rule rather than a published one; `sessions.md` §4 records the outcome side of it. |
 | The settlement whitelist names three events, not four | The published list also names `user.tool_result`. No client can send that event here — externally executed tool results arrive as `user.custom_tool_result` — and the refusal quotes the list back to the client, so naming an event the API would reject as unknown would be worse than omitting it. |
-| No `session.status_rescheduled` | Not emitted, because no transient-error retry schedule exists. |
 | No budget alerts | `session-budget-alerts` remains a deliberate non-goal, as recorded in the capability matrix. |
 
 ## 5. Reason for the difference
@@ -130,9 +129,6 @@ session-budget: partial
   session-level imitation would put a value in the log that no client could match
   to the published rule. Shipping the half that is provable — the next request
   does not start — keeps the observable promise without inventing the rest.
-- **No rescheduling.** Emitting a retry status implies a retry loop. SandBase has
-  none, and inventing the event would tell a client to wait for something that
-  will not happen.
 
 ## 6. Corresponding tests
 
