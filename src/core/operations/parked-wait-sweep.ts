@@ -94,7 +94,7 @@ export function sweepExpiredParkedWaits(opts: ParkedWaitSweepOptions): string[] 
   // it just left. Re-reading stops when a pass ends nothing, at which point every
   // remaining parked session has been examined and none had expired.
   for (;;) {
-    const parked = opts.sessionManager.list({ status: 'requires_action', page: 1, pageSize });
+    const parked = opts.sessionManager.list({ statuses: ['requires_action'], page: 1, pageSize });
     let endedThisPass = 0;
     for (const session of parked.data) {
       if (opts.sessionManager.expireParkedWait(session.id, timeoutSeconds, now)) {

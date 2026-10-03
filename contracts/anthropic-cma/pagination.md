@@ -73,8 +73,11 @@ cursor-query-binding: supported
 
 Aligned for: canonical field names, cursor opacity at the API surface, the
 prohibition on mixing both spellings in one response, cursor rejection on
-malformed input, and rejection of a cursor replayed under a different ordering
-or filter.
+malformed input, and rejection of a cursor replayed under a different
+ordering — on `/v1/sessions`, or a different creation-time window, matching
+the published rule that only `order` and `created_at[*]` bind a session
+cursor, while the events listing and the other windowed collections still
+bind the filter they were issued under.
 
 ## 4. Differences
 
@@ -85,18 +88,20 @@ or filter.
 | Null cursors on complete result sets | Most canonical collections return `next_page: null` and `prev_page: null` because the full set is returned unwindowed. A real cursor is produced when a collection is windowed — `/v1/sessions`, `/v1/sessions/:id/events`, `/v1/skills`, the credential audit listings, the `/v1/credential-vaults` and `/v1/memory_stores` listings and `/v1/memory_stores/{id}/memory_versions`. |
 | Cursor payload visibility | SandBase cursors are readable base64url JSON, not opaque binary. They carry no secret, so the opacity is present to discourage construction rather than to conceal data. The published contract does not specify an encoding. |
 | Cursor position is a page, not a sort key | `/v1/sessions` stores a 1-based page number, so the scan is redone from that page. A concurrent insert or delete shifts what a later page contains. A keyset cursor naming the last delivered row's sort key would not. The offset cursors (`/v1/skills`, the audit listings, the memory versions) have the same property for the same reason: the backing store pages by offset. |
-| Cursor semantics are not uniform | Four shapes exist across the surface: `/v1/sessions` carries `{order, filter, page}`, `/v1/sessions/:id/events` carries `{session_id, after_id}`, `/v1/skills` and the audit listings carry `{offset, filter}`, and the remaining resource listings carry `{offset}` alone because they return everything in one page. All are canonical envelopes, but a cursor is only meaningful in the collection that issued it, which `cursorQueryMismatch` enforces where a filter is bound. |
+| Cursor semantics are not uniform | Four shapes exist across the surface: `/v1/sessions` carries `{order, filter, page}` where the filter records only the `created_at[*]` bounds, `/v1/sessions/:id/events` carries `{session_id, after_id}`, `/v1/skills` and the audit listings carry `{offset, filter}`, and the remaining resource listings carry `{offset}` alone because they return everything in one page. All are canonical envelopes, but a cursor is only meaningful in the collection that issued it, which `cursorQueryMismatch` enforces where a filter is bound. |
 
 Every canonical `/v1` collection serves the canonical envelope, with no exceptions; the
 only listing shape that is neither canonical nor a plain `/v1/x` extension is the
 work-item row
-above. `order` **is** bound, and the filter binding covers the query's own filters:
-`/v1/sessions` records `created_at DESC` and the normalized `agent_id` / `status` in
-every cursor it issues and rejects a replay that does not match
-(`cursorQueryMismatch`). The remaining gap is the position scheme, not the query
-binding. An earlier revision of this document listed `include_archived` among the
-bound filters; that parameter does not exist on this runtime's session listing, and
-the cursor records only what the query actually filters on.
+above. `order` **is** bound, and on `/v1/sessions` the only filter bound with it is
+the `created_at[*]` window: the published contract lets a session cursor be
+replayed under a different `agent_id`, `statuses`, or any other filter, because the
+position it names survives those changes, while an `order` or creation-window
+change makes that position unreachable. Every cursor the listing issues therefore
+records `order` and the normalized `created_at[*]` bounds and rejects a replay that
+differs in either (`cursorQueryMismatch`); the other windowed collections still
+bind the full filter they were issued under. The remaining gap is the position
+scheme, not the query binding.
 
 ## 5. Reason for the difference
 
@@ -134,7 +139,8 @@ the cursor records only what the query actually filters on.
   return their whole set carry exactly `{data, prev_page: null, next_page: null}`,
   including the nested agent versions and environment worker keys; the session listing
   walks forward through `next_page` and back through `prev_page`, refuses a page number
-  where a cursor belongs and a cursor issued for another filter; the audit listings
+  where a cursor belongs and a cursor replayed under another ordering or
+  creation-time window while a filter change alone replays cleanly; the audit listings
   carry a cursor once a `limit` cuts the trail; and the windowed work-item listing is
   asserted to still return the local shape so the difference row cannot drift.
 - `tests/unit/sdk-client.test.ts` — the SDK's mocked collections answer the canonical
@@ -156,9 +162,11 @@ the cursor records only what the query actually filters on.
 
 `partial` — canonical pagination is implemented and gated by tests for `/v1`,
 every canonical collection is enumerated by a contract test, and cursors are
-bound to both the ordering and the filter that produced them. The `/v1/x`
+bound to the ordering that produced them (plus the `created_at[*]` window on the
+session listing and the full filter on the other windowed collections). The `/v1/x`
 extension envelope, the null-cursor case, and the offset-based position scheme
 are documented deviations rather than upstream behaviour. The second entry this
-file carries, `cursor-query-binding`, is `supported`: a cursor that is replayed
-against a different filter is refused rather than silently answered with a page
-from another ordering, and both directions of that rule are asserted.
+file carries, `cursor-query-binding`, is `supported`: a cursor replayed against a
+different ordering is refused rather than silently answered with a page from
+another scan, a changed session `created_at[*]` window is refused the same way
+while its other filters may change, and both directions of that rule are asserted.

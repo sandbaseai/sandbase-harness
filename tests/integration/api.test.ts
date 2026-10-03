@@ -879,7 +879,7 @@ describe('Managed Agents API', () => {
         const receivedIds: string[] = [];
         let cursor: string | null = null;
         do {
-          const response = await app.request(`/v1/sessions?status=${wire}&agent_id=agent_status-projection&limit=2${cursor ? `&page=${encodeURIComponent(cursor)}` : ''}`);
+          const response = await app.request(`/v1/sessions?statuses[]=${wire}&agent_id=agent_status-projection&limit=2${cursor ? `&page=${encodeURIComponent(cursor)}` : ''}`);
           expect(response.status).toBe(200);
           const page = await response.json();
           expectCursorPage(page);
@@ -889,12 +889,15 @@ describe('Managed Agents API', () => {
         } while (cursor);
         expect(receivedIds.sort()).toEqual(expectedIds.sort());
       }
-      const failedResponse = await app.request('/v1/sessions?status=failed&agent_id=agent_status-projection');
-      const failedPage = await failedResponse.json();
-      expect(failedResponse.status).toBe(200);
-      expect(failedPage.data).toHaveLength(1);
-      expect(failedPage.data[0].status).toBe('terminated');
-      expect(db.prepare('SELECT status FROM sessions WHERE id = ?').get(failedPage.data[0].id)).toEqual({ status: 'failed' });
+      // `failed` is not one of the published four: the internally failed
+      // session already surfaced inside the terminated group above, and naming
+      // it as a filter value earns the same 400 as any other invalid value.
+      const failedResponse = await app.request('/v1/sessions?statuses=failed&agent_id=agent_status-projection');
+      expect(failedResponse.status).toBe(400);
+      const failedSession = db.prepare('SELECT id, status FROM sessions WHERE status = ?').get('failed') as { id: string; status: string };
+      expect(failedSession.status).toBe('failed');
+      const singleResponse = await app.request(`/v1/sessions/${failedSession.id}`);
+      expect((await singleResponse.json()).status).toBe('terminated');
     });
 
     it('lists sessions with pagination', async () => {

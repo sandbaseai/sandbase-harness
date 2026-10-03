@@ -16,7 +16,7 @@ import { Hono } from 'hono';
 import { streamSSE } from 'hono/streaming';
 import { existsSync, readFileSync } from 'node:fs';
 import type { ServerDeps } from '../server.js';
-import type { SessionEvent, SessionLoopEngine, SessionStatus } from '@/types/session.js';
+import type { ApiSessionStatus, SessionEvent, SessionLoopEngine, SessionStatus } from '@/types/session.js';
 import type { UserEvent } from '@/types/cma-protocol.js';
 import type { AgentDefinition } from '@/types/agent.js';
 import { UnsupportedCapabilityError } from '@/core/capabilities/registry.js';
@@ -40,7 +40,7 @@ import { createSessionEventQueue, isMessageStreamTerminalEvent } from './session
 import type { OutcomeEventRow, StatusEventTick } from '@/core/session/event-logger.js';
 import { activeSecondsFromEvents, activeSecondsFromTicks } from '@/core/session/session-usage.js';
 import { outcomeEvaluationsFromEvents } from '@/core/outcomes/session-outcomes.js';
-import { rejectUnexpectedQueryParams } from './query-params.js';
+import { parseIncludeArchived, rejectUnexpectedQueryParams } from './query-params.js';
 import { normalizeDefineOutcome, normalizeInitialEvents } from './initial-events.js';
 import { isBudgetError, parseSessionBudget, BUDGET_ERROR_CODES } from '@/core/session/session-budget.js';
 import { isOutcomeGraderUnavailableError } from '@/core/outcomes/loop.js';
@@ -228,25 +228,78 @@ export function sessionsRoutes(deps: ServerDeps) {
 
   // GET / - List sessions
   app.get('/', (c) => {
-    const rejected = rejectUnexpectedQueryParams(c, ['limit', 'status', 'agent_id', 'page']);
+    const rejected = rejectUnexpectedQueryParams(c, SESSION_LIST_QUERY_PARAMS);
     if (rejected) return rejected;
     const rawLimit = parseInt(c.req.query('limit') ?? '20', 10) || 20;
     const pageSize = Math.min(1000, Math.max(1, rawLimit)); // cap at 1000
-    const status = c.req.query('status');
-    const agentIdFilter = c.req.query('agent_id');
 
-    // The window is a 1-based page number, so the cursor carries that number together
-    // with the ordering and the normalized filter that produced it: replaying a cursor
-    // under a different `agent_id` or `status` would otherwise address a page that
-    // never existed for that query. A malformed cursor is refused rather than read as
-    // "page one", which is how a client loops over the same window.
-    const filter = normalizeCollectionFilter({ agent_id: agentIdFilter, status });
+    // `statuses[]` is the SDK's spelling and `statuses` the common one; both are
+    // repeatable and every value must be one of the published four, because a
+    // value outside that set selects an internal status the wire does not name.
+    const statusValues = [
+      ...(c.req.queries('statuses') ?? []),
+      ...(c.req.queries('statuses[]') ?? []),
+    ];
+    const badStatus = statusValues.find((value) => !SESSION_LIST_STATUSES.has(value));
+    if (badStatus !== undefined) {
+      return c.json({
+        error: {
+          type: 'invalid_request_error',
+          message: `Invalid statuses value "${badStatus}". This route accepts: idle, running, rescheduling, terminated.`,
+        },
+      }, 400);
+    }
+    const statuses = statusValues.length === 0
+      ? undefined
+      : ([...new Set(statusValues)] as ApiSessionStatus[])
+          .flatMap((wire) => SESSION_STATUS_INVERSE[wire] ?? []);
+
+    const order = c.req.query('order') ?? 'desc';
+    if (order !== 'asc' && order !== 'desc') {
+      return c.json({
+        error: { type: 'invalid_request_error', message: `Invalid order value "${order}". This route accepts order=asc or order=desc.` },
+      }, 400);
+    }
+
+    const includeArchived = parseIncludeArchived(c);
+    if (!includeArchived.ok) return includeArchived.response;
+
+    const agentIdFilter = c.req.query('agent_id');
+    // `agent_version` only constrains a session's pinned version, so without an
+    // `agent_id` there is nothing for it to pin against and it is ignored —
+    // the published contract's own rule for this pair.
+    const rawAgentVersion = c.req.query('agent_version');
+    let agentVersion: number | undefined;
+    if (rawAgentVersion !== undefined && agentIdFilter) {
+      if (!/^\d+$/.test(rawAgentVersion)) {
+        return c.json({
+          error: { type: 'invalid_request_error', message: `Invalid agent_version value "${rawAgentVersion}". This route accepts a non-negative integer.` },
+        }, 400);
+      }
+      agentVersion = parseInt(rawAgentVersion, 10);
+    }
+
+    const createdAt = readCreatedAtBounds(c);
+    if (!createdAt.ok) return createdAt.response;
+
+    // The cursor names a window position, so it records the two request parts
+    // that define what that position means: the ordering and the creation-time
+    // bounds that bound which rows exist ahead of it. The remaining filters are
+    // deliberately not bound — the published contract lets a client replay a
+    // cursor under a different `agent_id` or `statuses`, and only an `order` or
+    // `created_at[*]` change makes the position it names unreachable.
+    const createdFilter = normalizeCollectionFilter({
+      'created_at[gt]': createdAt.value.gt,
+      'created_at[gte]': createdAt.value.gte,
+      'created_at[lt]': createdAt.value.lt,
+      'created_at[lte]': createdAt.value.lte,
+    });
     const rawPage = c.req.query('page');
     const decoded = rawPage === undefined ? { ok: true as const, state: undefined } : decodeCursor(rawPage);
     if (!decoded.ok) {
       return c.json({ error: { type: 'invalid_request_error', message: 'page must be a cursor returned by this endpoint' } }, 400);
     }
-    const mismatch = cursorQueryMismatch(decoded.state, { order: SESSION_LIST_ORDER, filter });
+    const mismatch = cursorQueryMismatch(decoded.state, { order, filter: createdFilter });
     if (mismatch) return c.json({ error: { type: 'invalid_request_error', message: mismatch } }, 400);
     const page = readSessionPage(decoded.state);
     if (page === undefined) {
@@ -256,12 +309,18 @@ export function sessionsRoutes(deps: ServerDeps) {
     const result = sessionManager.list({
       page,
       pageSize,
+      order,
+      includeArchived: includeArchived.value,
       ...(agentIdFilter ? { agentId: agentIdFilter } : {}),
-      ...internalStatusFilter(status),
+      ...(agentVersion !== undefined ? { agentVersion } : {}),
+      ...(statuses ? { statuses } : {}),
+      ...(c.req.query('memory_store_id') ? { memoryStoreId: c.req.query('memory_store_id') } : {}),
+      ...(c.req.query('deployment_id') ? { deploymentId: c.req.query('deployment_id') } : {}),
+      ...(Object.keys(createdFilter).length > 0 ? { createdAt: createdAt.value } : {}),
     });
     const derivedOf = derivedForAll(result.data.map((session) => session.id));
     const sessions = result.data.map((session) => toApiSession(session, session.agentDefinition ?? findAgentById(deps, session.agentId), derivedOf(session.id)));
-    const cursorState = { order: SESSION_LIST_ORDER, filter };
+    const cursorState = { order, filter: createdFilter };
     return c.json(cursorPageOf(sessions, {
       prev: page > 1 ? encodeCursor({ ...cursorState, page: page - 1 }) : null,
       next: result.hasMore ? encodeCursor({ ...cursorState, page: page + 1 }) : null,
@@ -928,13 +987,56 @@ function steerPayloadProblem(event: Record<string, unknown>): string | undefined
   return undefined;
 }
 
-function internalStatusFilter(status: string | undefined) {
-  if (status === 'failed') return { status: 'failed' as const };
-  if (!status || !['idle', 'running', 'rescheduling', 'terminated'].includes(status)) return {};
-  return {
-    status: (Object.keys(STATUS_PROJECTION) as SessionStatus[])
-      .filter((internal) => STATUS_PROJECTION[internal].wire === status),
+/**
+ * The parameter set `GET /v1/sessions` accepts. `statuses[]` is the SDK's array
+ * spelling and `statuses` the common one; both land in the same admission list.
+ */
+const SESSION_LIST_QUERY_PARAMS = [
+  'limit', 'page', 'order', 'agent_id', 'agent_version', 'include_archived',
+  'memory_store_id', 'deployment_id', 'statuses[]', 'statuses',
+  'created_at[gt]', 'created_at[gte]', 'created_at[lt]', 'created_at[lte]',
+];
+
+/** The four published session statuses a `statuses` value may name. */
+const SESSION_LIST_STATUSES = new Set(['idle', 'running', 'rescheduling', 'terminated']);
+
+/**
+ * Published status → internal statuses, built from `STATUS_PROJECTION` so the
+ * list filter and the read projection can never disagree about the grouping.
+ */
+const SESSION_STATUS_INVERSE: Record<ApiSessionStatus, SessionStatus[]> = (() => {
+  const inverse: Record<ApiSessionStatus, SessionStatus[]> = {
+    idle: [], running: [], rescheduling: [], terminated: [],
   };
+  for (const internal of Object.keys(STATUS_PROJECTION) as SessionStatus[]) {
+    inverse[STATUS_PROJECTION[internal].wire].push(internal);
+  }
+  return inverse;
+})();
+
+/**
+ * Read the `created_at[*]` bounds. Each is a timestamp the row's `created_at`
+ * is compared against; an unparseable value is refused rather than silently
+ * matching nothing, which is the same rule `include_archived` applies.
+ */
+function readCreatedAtBounds(
+  c: { req: { query(name: string): string | undefined }; json(body: unknown, status: 400): Response },
+): { ok: true; value: { gt?: string; gte?: string; lt?: string; lte?: string } } | { ok: false; response: Response } {
+  const value: { gt?: string; gte?: string; lt?: string; lte?: string } = {};
+  for (const bound of ['gt', 'gte', 'lt', 'lte'] as const) {
+    const raw = c.req.query(`created_at[${bound}]`);
+    if (raw === undefined) continue;
+    if (Number.isNaN(Date.parse(raw))) {
+      return {
+        ok: false,
+        response: c.json({
+          error: { type: 'invalid_request_error', message: `Invalid created_at[${bound}] value "${raw}". This route accepts an ISO 8601 timestamp.` },
+        }, 400),
+      };
+    }
+    value[bound] = raw;
+  }
+  return { ok: true, value };
 }
 
 /**
@@ -943,9 +1045,6 @@ function internalStatusFilter(status: string | undefined) {
  * of the generic unknown-parameter answer.
  */
 const SESSION_UPDATE_PARAMS = new Set(['agent', 'budget', 'metadata', 'title', 'vault_ids']);
-
-/** The ordering the session listing is issued under, recorded in every cursor it hands out. */
-const SESSION_LIST_ORDER = 'created_at DESC';
 
 /**
  * The page a session cursor names, or `undefined` when the state is not one of this

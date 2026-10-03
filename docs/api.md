@@ -217,7 +217,7 @@ A query parameter a route does not implement is refused rather than ignored:
 {
   "error": {
     "type": "invalid_request_error",
-    "message": "Unknown query parameter \"include_archived\". This route accepts: limit, status, agent_id, page."
+    "message": "Unknown query parameter \"bogus\". This route accepts: limit, page, order, agent_id, agent_version, include_archived, memory_store_id, deployment_id, statuses[], statuses, created_at[gt], created_at[gte], created_at[lt], created_at[lte]."
   }
 }
 ```
@@ -547,15 +547,15 @@ log.
 `rescheduling` is in the public type but is not emitted yet: automatic
 rescheduling is not implemented.
 
-The existing single-value `status` list filter selects every internal state in
-the requested public group, including paused and approval-waiting sessions for
-`idle` and all terminal states for `terminated`. `rescheduling` returns an empty
-list. Terminal sessions, including `failed`, reject new messages and events with
-`409` before input is persisted or another model/tool turn starts. Create a new
-session after a terminal failure; fixable configuration errors that already
-leave the internal state `paused` still allow another turn.
-The legacy local `status=failed` filter remains available and selects only
-internally failed sessions; those responses still report `terminated`.
+The repeatable `statuses` (or `statuses[]`) list filter selects every internal
+state in each requested public group, including paused and approval-waiting
+sessions for `idle` and all terminal states for `terminated`. `rescheduling`
+returns an empty list. Terminal sessions, including `failed`, reject new
+messages and events with `409` before input is persisted or another model/tool
+turn starts. Create a new session after a terminal failure; fixable
+configuration errors that already leave the internal state `paused` still allow
+another turn. The former local `status` parameter is removed — a filter on
+internally failed sessions is expressed as `statuses=terminated`.
 
 Every session response carries the published object fields: `budget` is always
 present — the ceiling or `null` — and `stats` reports `active_seconds` (the
@@ -605,8 +605,25 @@ An idle session emits `session.status_terminated`, releases its sandbox, and
 returns `status: "terminated"`; a running session returns `409` with
 `session_running` until it is interrupted. Repeating the archive is idempotent.
 New events and messages on an archived session return `409` with
-`session_archived`. Filtering archived sessions from the collection is a later
-session-list behavior and is not included in this operation.
+`session_archived`. Archived sessions are excluded from the collection unless
+`include_archived=true` is sent on the list request.
+
+`GET /v1/sessions` takes the published query parameters: `limit` (default 20,
+cap 1000) and the `page` cursor it returns; `order=asc|desc` sorting by
+`created_at` (default `desc`); `agent_id`, with `agent_version` applying only
+beside it (sent alone it is ignored); `include_archived=true|false`;
+`memory_store_id`, matching sessions holding a `memory_store` resource with
+that id; `deployment_id`, matching sessions created by that scheduled
+deployment; a repeatable `statuses` (or the SDK's `statuses[]`) filter whose
+values must be `idle`, `running`, `rescheduling`, or `terminated` — each
+selects every internal state in that public group, and `rescheduling` matches
+nothing yet; and `created_at[gt]`, `created_at[gte]`, `created_at[lt]`, and
+`created_at[lte]` creation-time bounds. An invalid status value, an
+unparseable timestamp or `order`, a non-integer `agent_version`, or a
+parameter outside this set is a `400` naming it. A `page` cursor binds the
+`order` and `created_at[*]` window it was issued under and is refused when
+either changes on replay; the remaining filters may change freely across a
+replay.
 
 Updating a session patches it in place. `agent` admits only `tools` and
 `mcp_servers`, which replace wholesale and are merged onto the definition the

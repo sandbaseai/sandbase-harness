@@ -32,7 +32,7 @@ import { createServer } from '@/api/server.js';
 
 /** Every handler that reads a query parameter, with one parameter it implements. */
 const ROUTES: Array<{ name: string; method: string; path: string; accepts: string[] }> = [
-  { name: 'session list', method: 'GET', path: '/v1/sessions', accepts: ['limit', 'status', 'agent_id', 'page'] },
+  { name: 'session list', method: 'GET', path: '/v1/sessions', accepts: ['limit', 'page', 'order', 'agent_id', 'agent_version', 'include_archived', 'memory_store_id', 'deployment_id', 'statuses[]', 'statuses', 'created_at[gt]', 'created_at[gte]', 'created_at[lt]', 'created_at[lte]'] },
   { name: 'session events', method: 'GET', path: '/v1/sessions/ses_missing/events', accepts: ['limit', 'after_id', 'page'] },
   { name: 'event stream', method: 'GET', path: '/v1/sessions/ses_missing/events/stream', accepts: ['event_deltas', 'event_deltas[]', 'last_event_id'] },
   { name: 'skill list', method: 'GET', path: '/v1/skills', accepts: ['source', 'limit', 'page'] },
@@ -173,12 +173,12 @@ describe('Query-parameter admission', () => {
 
   it('still accepts every parameter the Console and the SDK send', async () => {
     // `?limit=100` is what the Console's session list sends; `page`, `limit`,
-    // `status`, and `agent_id` are what the TypeScript SDK sends. A refusal that
+    // `statuses[]`, and `agent_id` are what the TypeScript SDK sends. A refusal that
     // broke either would be a regression, so they are pinned together.
     const consoleList = await app.request('/v1/sessions?limit=100');
     expect(consoleList.status).toBe(200);
 
-    const sdkList = await app.request('/v1/sessions?limit=5&status=idle&agent_id=agent_x&page=not-a-cursor');
+    const sdkList = await app.request('/v1/sessions?limit=5&statuses[]=idle&agent_id=agent_x&page=not-a-cursor');
     // A malformed cursor is its own 400; what matters is that it is not the
     // unknown-parameter refusal.
     expect(sdkList.status).toBe(400);

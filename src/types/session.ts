@@ -179,8 +179,25 @@ export interface UpdateSessionParams {
 export interface ListSessionsParams {
   page?: number;
   pageSize?: number;
-  status?: SessionStatus | SessionStatus[];
+  /**
+   * Internal statuses to match (OR). The route projects the published
+   * `statuses[]` values back through `STATUS_PROJECTION`; internal callers may
+   * name internal statuses directly. An empty array matches nothing.
+   */
+  statuses?: SessionStatus[];
   agentId?: string;
+  /** Only meaningful alongside `agentId`: the pinned-version filter. */
+  agentVersion?: number;
+  /** `created_at` direction. Defaults to `desc` (newest first). */
+  order?: 'asc' | 'desc';
+  /** Include sessions whose `archived_at` is set. Defaults to excluding them. */
+  includeArchived?: boolean;
+  /** Sessions holding a live `memory_store` resource with this store id. */
+  memoryStoreId?: string;
+  /** Sessions created by this scheduled deployment. */
+  deploymentId?: string;
+  /** Creation-time bounds; each value is an ISO timestamp. */
+  createdAt?: { gt?: string; gte?: string; lt?: string; lte?: string };
 }
 
 export interface PaginatedResult<T> {

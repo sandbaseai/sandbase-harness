@@ -1289,14 +1289,51 @@ export class SessionManager {
     const conditions: string[] = [];
     const queryParams: unknown[] = [];
 
-    if (params.status !== undefined) {
-      const statuses = Array.isArray(params.status) ? params.status : [params.status];
-      conditions.push(statuses.length > 0 ? `status IN (${statuses.map(() => '?').join(', ')})` : '0');
-      queryParams.push(...statuses);
+    if (params.statuses !== undefined) {
+      conditions.push(params.statuses.length > 0 ? `status IN (${params.statuses.map(() => '?').join(', ')})` : '0');
+      queryParams.push(...params.statuses);
     }
     if (params.agentId) {
       conditions.push('agent_id = ?');
       queryParams.push(params.agentId);
+      if (params.agentVersion !== undefined) {
+        conditions.push('agent_version = ?');
+        queryParams.push(params.agentVersion);
+      }
+    }
+    if (params.includeArchived !== true) {
+      conditions.push('archived_at IS NULL');
+    }
+    if (params.memoryStoreId) {
+      conditions.push(`EXISTS (
+        SELECT 1 FROM session_resource_instances sri
+        WHERE sri.session_id = sessions.id
+          AND sri.resource_type = 'memory_store'
+          AND json_extract(sri.config, '$.memory_store_id') = ?
+      )`);
+      queryParams.push(params.memoryStoreId);
+    }
+    if (params.deploymentId) {
+      conditions.push(`EXISTS (
+        SELECT 1 FROM scheduled_deployment_runs sdr
+        WHERE sdr.session_id = sessions.id AND sdr.schedule_id = ?
+      )`);
+      queryParams.push(params.deploymentId);
+    }
+    // `datetime()` on both sides normalizes the two stored spellings — the
+    // column default emits `YYYY-MM-DD HH:MM:SS` while fixtures and older rows
+    // may hold RFC 3339 — and normalizes caller offsets the same way, so the
+    // comparison is chronological rather than lexical.
+    const createdBounds: Array<[string, string | undefined]> = [
+      ['>', params.createdAt?.gt],
+      ['>=', params.createdAt?.gte],
+      ['<', params.createdAt?.lt],
+      ['<=', params.createdAt?.lte],
+    ];
+    for (const [op, bound] of createdBounds) {
+      if (bound === undefined) continue;
+      conditions.push(`datetime(created_at) ${op} datetime(?)`);
+      queryParams.push(bound);
     }
 
     if (conditions.length > 0) {
@@ -1305,7 +1342,10 @@ export class SessionManager {
       querySql += where;
     }
 
-    querySql += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+    // `id` is the tiebreaker because `created_at` carries second precision: an
+    // unstable secondary order would let a row drift between adjacent pages.
+    const direction = params.order === 'asc' ? 'ASC' : 'DESC';
+    querySql += ` ORDER BY datetime(created_at) ${direction}, id ${direction} LIMIT ? OFFSET ?`;
 
     const countRow = this.db.prepare(countSql).get(...queryParams as any[]) as { total: number };
     const total = countRow.total;

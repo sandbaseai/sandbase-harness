@@ -141,7 +141,7 @@ describe('Bounded parked wait across more than one page', () => {
     // Every one of them, not just the first page's worth.
     expect(ended).toHaveLength(OVER_ONE_PAGE);
     expect(new Set(ended)).toEqual(new Set(expired));
-    const stillParked = sessionManager.list({ status: 'requires_action', page: 1, pageSize: 1000 });
+    const stillParked = sessionManager.list({ statuses: ['requires_action'], page: 1, pageSize: 1000 });
     expect(stillParked.data).toHaveLength(0);
   });
 

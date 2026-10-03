@@ -5,7 +5,59 @@
     "title": "List sessions",
     "method": "GET",
     "path": "/v1/sessions",
-    "summary": "List active and recent sessions with agent, environment, status, usage, and timestamps.",
+    "summary": "List active and recent sessions with agent, environment, status, usage, and timestamps. Archived sessions are excluded unless include_archived=true is passed.",
+    "parameters": [
+      {
+        "name": "limit",
+        "type": "integer",
+        "description": "Optional. Page size, default 20, capped at 1000."
+      },
+      {
+        "name": "page",
+        "type": "string",
+        "description": "Optional. Cursor returned as next_page or prev_page by a previous response. It binds the order and created_at window it was issued under; other filters may change across a replay."
+      },
+      {
+        "name": "order",
+        "type": "string",
+        "description": "Optional. asc or desc by created_at; default desc (newest first). Any other value is a 400."
+      },
+      {
+        "name": "agent_id",
+        "type": "string",
+        "description": "Optional. Only sessions created with this agent."
+      },
+      {
+        "name": "agent_version",
+        "type": "integer",
+        "description": "Optional. Pinned-version filter; applies only when agent_id is set and is ignored otherwise. A non-integer value is a 400."
+      },
+      {
+        "name": "include_archived",
+        "type": "boolean",
+        "description": "Optional. Pass true to include archived sessions. Omitting it, or passing false, excludes them. Any other value is a 400."
+      },
+      {
+        "name": "statuses",
+        "type": "string (repeatable)",
+        "description": "Optional. Repeatable filter on the published status values: idle, running, rescheduling, terminated. The SDK's statuses[] spelling is accepted too; each value selects every internal state in that public group. Any other value is a 400."
+      },
+      {
+        "name": "memory_store_id",
+        "type": "string",
+        "description": "Optional. Only sessions holding a memory_store resource with this id."
+      },
+      {
+        "name": "deployment_id",
+        "type": "string",
+        "description": "Optional. Only sessions created by this scheduled deployment."
+      },
+      {
+        "name": "created_at[gt] | created_at[gte] | created_at[lt] | created_at[lte]",
+        "type": "string (ISO 8601)",
+        "description": "Optional. Creation-time bounds. An unparseable timestamp is a 400."
+      }
+    ],
     "response": [
       {
         "name": "data",

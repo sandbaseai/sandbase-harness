@@ -666,14 +666,37 @@ class SessionsResource {
    *
    * `page` is the cursor a previous call returned in `next_page` / `prev_page`, not a
    * page number: the collection serves the canonical envelope, and a cursor carries
-   * the page together with the ordering and filter it was issued under.
+   * the page together with the ordering and creation-time window it was issued
+   * under — the other filters may change freely across a replay.
    */
-  list(opts?: { page?: string; limit?: number; status?: string; agentId?: string }): Promise<{ data: SessionSummary[]; prev_page: string | null; next_page: string | null }> {
+  list(opts?: {
+    page?: string;
+    limit?: number;
+    order?: 'asc' | 'desc';
+    statuses?: Array<'idle' | 'running' | 'rescheduling' | 'terminated'>;
+    includeArchived?: boolean;
+    agentId?: string;
+    agentVersion?: number;
+    memoryStoreId?: string;
+    deploymentId?: string;
+    createdAt?: { gt?: string; gte?: string; lt?: string; lte?: string };
+  }): Promise<{ data: SessionSummary[]; prev_page: string | null; next_page: string | null }> {
     const q = new URLSearchParams();
     if (opts?.page) q.set('page', opts.page);
     if (opts?.limit) q.set('limit', String(opts.limit));
-    if (opts?.status) q.set('status', opts.status);
+    if (opts?.order) q.set('order', opts.order);
+    if (opts?.includeArchived !== undefined) q.set('include_archived', String(opts.includeArchived));
     if (opts?.agentId) q.set('agent_id', opts.agentId);
+    if (opts?.agentVersion !== undefined) q.set('agent_version', String(opts.agentVersion));
+    if (opts?.memoryStoreId) q.set('memory_store_id', opts.memoryStoreId);
+    if (opts?.deploymentId) q.set('deployment_id', opts.deploymentId);
+    for (const status of opts?.statuses ?? []) q.append('statuses[]', status);
+    if (opts?.createdAt) {
+      for (const bound of ['gt', 'gte', 'lt', 'lte'] as const) {
+        const value = opts.createdAt[bound];
+        if (value) q.set(`created_at[${bound}]`, value);
+      }
+    }
     const qs = q.toString();
     return this.client.request('GET', `/v1/sessions${qs ? `?${qs}` : ''}`);
   }

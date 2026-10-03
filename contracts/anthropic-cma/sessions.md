@@ -154,14 +154,25 @@ Status projection (`STATUS_PROJECTION` in
 | `archived` | `terminated` | `session.status_terminated` | Yes |
 
 `rescheduling` is part of the public type, but the runtime does not yet
-implement automatic rescheduling or emit that status. The existing single-value
-`status` list filter selects all internal states in the requested public group;
-`rescheduling` selects none. Terminal sessions, including `failed`, reject new
+implement automatic rescheduling or emit that status. `GET /v1/sessions` takes
+the published parameter set: `limit` and the `page` cursor, `order` (`asc` or
+`desc` by `created_at`, default `desc`), `agent_id` with an `agent_version`
+that applies only beside it, `include_archived` (archived rows are excluded
+otherwise), `memory_store_id` (sessions holding a live `memory_store` resource
+with that id), `deployment_id` (sessions created by that scheduled
+deployment), a repeatable `statuses` filter — the SDK's `statuses[]` spelling
+is accepted too — whose every value must be one of the published four and
+which selects all internal states in each requested public group, and
+`created_at[gt|gte|lt|lte]` bounds. A value outside the published set, an
+unparseable timestamp, or any other parameter is a `400` by name; the former
+local `status` parameter is gone, so a filter on internally `failed` sessions
+is expressed as `statuses=terminated`. A `page` cursor binds the `order` and
+the `created_at[*]` window it was issued under — replaying either differently
+is a `400` — while every other filter may change freely across a replay.
+Terminal sessions, including `failed`, reject new
 messages and events with `409` before input persistence or execution. Fixable
 model-configuration errors that already leave a session `paused` remain
 resumable; this does not revive a `failed` session.
-The legacy local `status=failed` filter remains available, selecting only
-internally failed sessions whose public status is `terminated`.
 
 The session-level `stop_reason` (`toApiEvent`):
 
@@ -535,6 +546,13 @@ materialized `agent` with a pinned `version` and `multiagent: null`.
   reading `outcome_evaluations` end to end: one real outcome against the stub
   model, `satisfied` verdict, and the same `outc_` id on the declaration
   event and the session entry.
+- `tests/integration/session-list-filters.test.ts` — every published list
+  parameter over the real route: both `statuses` spellings and their
+  validation, `order`, `include_archived`, `agent_id`/`agent_version`,
+  `memory_store_id`, `deployment_id`, and the `created_at[*]` bounds.
+- `tests/conformance/session-list.test.ts` — the official SDK's
+  `sessions.list` driving `statuses[]`, `order`, `include_archived`, and
+  cursor auto-pagination end to end.
 
 ## 7. Status
 

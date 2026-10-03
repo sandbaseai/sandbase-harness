@@ -225,7 +225,7 @@ describe('resource collection envelope', () => {
     expect(malformed.body.error.type).toBe('invalid_request_error');
   });
 
-  it('binds a session cursor to the filter it was issued for', async () => {
+  it('binds a session cursor to its ordering and creation bounds only', async () => {
     await setupApp();
     const insert = db!.prepare(
       "INSERT INTO sessions (id, agent_id, agent_name, environment_id, status, created_at, updated_at) VALUES (?, 'agent_envelope', 'envelope-agent', 'env_default', 'paused', ?, ?)",
@@ -236,9 +236,22 @@ describe('resource collection envelope', () => {
     const filtered = await get('/v1/sessions?limit=1&agent_id=agent_envelope');
     expect(filtered.body.next_page).not.toBeNull();
 
-    const mismatch = await get(`/v1/sessions?limit=1&agent_id=agent_missing&page=${encodeURIComponent(filtered.body.next_page)}`);
-    expect(mismatch.res.status).toBe(400);
-    expect(mismatch.body.error.message).toContain('different filter');
+    // The published contract lets a cursor be replayed under a different filter
+    // — the page it names is a position, not a captured result set.
+    const refiltered = await get(`/v1/sessions?limit=1&agent_id=agent_missing&page=${encodeURIComponent(filtered.body.next_page)}`);
+    expect(refiltered.res.status).toBe(200);
+
+    // A different ordering or a different creation-time window makes that
+    // position unreachable, and is refused instead.
+    const reordered = await get(`/v1/sessions?limit=1&order=asc&agent_id=agent_envelope&page=${encodeURIComponent(filtered.body.next_page)}`);
+    expect(reordered.res.status).toBe(400);
+    expect(reordered.body.error.message).toContain('different ordering');
+
+    const windowed = await get('/v1/sessions?limit=1&created_at[gte]=2026-01-01T00:00:00Z');
+    expect(windowed.body.next_page).not.toBeNull();
+    const rewindowed = await get(`/v1/sessions?limit=1&created_at[gte]=2026-02-01T00:00:00Z&page=${encodeURIComponent(windowed.body.next_page)}`);
+    expect(rewindowed.res.status).toBe(400);
+    expect(rewindowed.body.error.message).toContain('different filter');
 
     const same = await get(`/v1/sessions?limit=1&agent_id=agent_envelope&page=${encodeURIComponent(filtered.body.next_page)}`);
     expect(same.res.status).toBe(200);
