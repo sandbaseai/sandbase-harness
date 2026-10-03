@@ -1078,6 +1078,10 @@ UPDATE work_items SET status = CASE
 END;
 `;
 
+const M049_SESSION_ARCHIVED_AT = `
+ALTER TABLE sessions ADD COLUMN archived_at TEXT;
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: '001_initial', sql: M001_INITIAL },
   { version: 2, name: '002_memory', sql: M002_MEMORY },
@@ -1127,4 +1131,5 @@ export const MIGRATIONS: Migration[] = [
   { version: 46, name: '046_work_item_accept', sql: M046_WORK_ITEM_ACCEPT },
   { version: 47, name: '047_work_item_abandon', sql: M047_WORK_ITEM_ABANDON },
   { version: 48, name: '048_work_item_status_vocabulary', sql: M048_WORK_ITEM_STATUS_VOCABULARY },
+  { version: 49, name: '049_session_archived_at', sql: M049_SESSION_ARCHIVED_AT },
 ];

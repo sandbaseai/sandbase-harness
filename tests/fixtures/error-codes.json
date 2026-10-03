@@ -55,6 +55,7 @@
     "requires_action_timeout",
     "resource_not_mountable",
     "secret_not_configured",
+    "session_archived",
     "store_full",
     "store_unavailable",
     "too_many_initial_events",

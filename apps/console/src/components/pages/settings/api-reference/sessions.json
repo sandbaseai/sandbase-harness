@@ -301,6 +301,26 @@
     ]
   },
   {
+    "id": "sessions-archive",
+    "group": "Sessions",
+    "title": "Archive session",
+    "method": "POST",
+    "path": "/v1/sessions/{session_id}/archive",
+    "summary": "Archive an idle session, release its sandbox, and return the session envelope. Running sessions return session_running until interrupted; repeating the archive is idempotent.",
+    "response": [
+      {
+        "name": "status",
+        "type": "idle | running | rescheduling | terminated",
+        "description": "Archived sessions report terminated."
+      },
+      {
+        "name": "archived_at",
+        "type": "string | null",
+        "description": "ISO 8601 archive timestamp."
+      }
+    ]
+  },
+  {
     "id": "sessions-delete",
     "group": "Sessions",
     "title": "Delete session",

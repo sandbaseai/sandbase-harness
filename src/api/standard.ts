@@ -477,7 +477,7 @@ export function toApiSession(session: Session, agent?: AgentDefinition): ApiSess
     metadata: parseStringRecord(session.metadata),
     created_at: toIsoString(session.createdAt),
     updated_at: toIsoString(session.updatedAt),
-    archived_at: null,
+    archived_at: session.archivedAt ? toIsoString(session.archivedAt) : null,
   };
 }
 

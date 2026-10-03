@@ -13,8 +13,8 @@
  * status the Pi child's own timeout already used, which was simply not
  * reachable from the one state that waits on a caller.
  *
- * Terminal states are completed, failed, cancelled, timed_out, and cleanup_pending.
- * cleanup_pending deliberately has no outbound transition: the workspace
+ * Terminal states are completed, failed, cancelled, timed_out, cleanup_pending, and archived.
+ * cleanup_pending and archived deliberately have no outbound transition: the workspace
  * remains retained until an operator can prove child-tree cleanup.
  */
 

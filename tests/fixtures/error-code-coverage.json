@@ -56,6 +56,7 @@
     "requires_action_timeout": ["tests/unit/parked-wait.test.ts"],
     "resource_not_mountable": ["tests/integration/resource-admission-refusal.test.ts", "tests/integration/session-resources-prompt.test.ts", "tests/unit/capability-matrix.test.ts", "tests/unit/resource-mountability.test.ts"],
     "secret_not_configured": ["tests/integration/api.test.ts", "tests/unit/settings.test.ts"],
+    "session_archived": ["tests/unit/session-archive.test.ts"],
     "store_full": ["tests/unit/memory-semantics.test.ts"],
     "store_unavailable": ["tests/unit/memory-mount-store-unavailable.test.ts"],
     "too_many_initial_events": ["tests/integration/api.test.ts", "tests/integration/initial-events-transaction.test.ts", "tests/unit/cma-event-contract.test.ts"],

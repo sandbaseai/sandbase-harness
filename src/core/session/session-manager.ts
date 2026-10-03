@@ -423,6 +423,31 @@ export class SessionManager {
     return this.get(sessionId) ?? session;
   }
 
+  async archive(sessionId: string): Promise<Session> {
+    const session = this.get(sessionId);
+    if (!session) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+    if (session.archivedAt) return session;
+    if (session.status === 'running') {
+      throw sessionOperationError(
+        'session_running',
+        `Session ${sessionId} is running; interrupt it and wait for idle before archiving`,
+      );
+    }
+
+    this.db.prepare(
+      `UPDATE sessions SET archived_at = datetime('now'), updated_at = datetime('now') WHERE id = ?`,
+    ).run(sessionId);
+
+    if (!isTerminal(session.status)) {
+      this.updateStatus(sessionId, 'archived');
+      await this.releaseSandbox(sessionId);
+    }
+
+    return this.get(sessionId)!;
+  }
+
   /** `null` records a removal, which is a different state from "never had one". */
   private persistBudget(sessionId: string, budget: SessionBudget | null): void {
     this.db.prepare(
@@ -736,6 +761,9 @@ export class SessionManager {
     const session = this.get(sessionId);
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`);
+    }
+    if (session.archivedAt) {
+      throw sessionOperationError('session_archived', `Session ${sessionId} is archived`);
     }
     if (isTerminal(session.status)) {
       throw new Error(`Session ${sessionId} is in terminal state: ${session.status}`);
@@ -1724,6 +1752,12 @@ function lifecycleMetadataFor(status: SessionStatus, events: SessionEvent[]): Re
       event_ids: parkedCalls(events).map((call) => call.eventId),
     },
   };
+}
+
+function sessionOperationError(code: string, message: string): Error & { code: string } {
+  const error = new Error(message) as Error & { code: string };
+  error.code = code;
+  return error;
 }
 
 /**

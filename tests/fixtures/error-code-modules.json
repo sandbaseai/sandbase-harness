@@ -55,6 +55,7 @@
     "requires_action_timeout": ["src/core/session/parked-wait.ts"],
     "resource_not_mountable": ["src/core/resources/resource-mountability.ts"],
     "secret_not_configured": ["src/core/settings/schema.ts"],
+      "session_archived": ["src/api/routes/sessions.ts"],
     "store_full": ["src/core/memory/mount-adapter.ts", "src/core/memory/semantics.ts"],
     "store_unavailable": ["src/core/memory/mount-adapter.ts"],
     "too_many_initial_events": ["src/api/routes/initial-events.ts"],

@@ -735,6 +735,10 @@ class SessionsResource {
     return this.client.request('POST', `/v1/sessions/${encodeURIComponent(id)}/stop`);
   }
 
+  archive(id: string): Promise<SessionSummary> {
+    return this.client.request('POST', `/v1/sessions/${encodeURIComponent(id)}/archive`);
+  }
+
   delete(id: string): Promise<{ deleted: boolean }> {
     return this.client.request('DELETE', `/v1/sessions/${encodeURIComponent(id)}`);
   }

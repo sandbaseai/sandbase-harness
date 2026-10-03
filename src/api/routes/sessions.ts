@@ -7,6 +7,7 @@
  * POST /v1/sessions/:id/events - send events
  * GET  /v1/sessions/:id/events - list events (paginated)
  * POST /v1/sessions/:id/stop - stop session
+ * POST /v1/sessions/:id/archive - archive session
  * DELETE /v1/sessions/:id    - delete session
  */
 
@@ -416,6 +417,9 @@ export function sessionsRoutes(deps: ServerDeps) {
     if (!session) {
       return c.json({ error: { type: 'not_found', message: 'Session not found' } }, 404);
     }
+    if (session.archivedAt) {
+      return c.json({ error: { type: 'conflict', code: 'session_archived', message: `Session ${sessionId} is archived` } }, 409);
+    }
     if (isTerminal(session.status)) {
       return c.json({ error: { type: 'conflict', message: `Session ${sessionId} is in terminal state: ${session.status}` } }, 409);
     }
@@ -473,6 +477,9 @@ export function sessionsRoutes(deps: ServerDeps) {
       if (err.message?.includes('not found')) {
         return c.json({ error: { type: 'not_found', message: err.message } }, 404);
       }
+      if (err.code === 'session_archived') {
+        return c.json({ error: { type: 'conflict', code: err.code, message: err.message } }, 409);
+      }
       if (err.message?.includes('terminal state')) {
         return c.json({ error: { type: 'conflict', message: err.message } }, 409);
       }
@@ -510,6 +517,9 @@ export function sessionsRoutes(deps: ServerDeps) {
     const session = sessionManager.get(sessionId);
     if (!session) {
       return c.json({ error: { type: 'not_found', message: 'Session not found' } }, 404);
+    }
+    if (session.archivedAt) {
+      return c.json({ error: { type: 'conflict', code: 'session_archived', message: `Session ${sessionId} is archived` } }, 409);
     }
     if (isTerminal(session.status)) {
       return c.json({ error: { type: 'conflict', message: `Session ${sessionId} is in terminal state: ${session.status}` } }, 409);
@@ -571,6 +581,9 @@ export function sessionsRoutes(deps: ServerDeps) {
         }
         if (err.message?.includes('not found')) {
           return c.json({ error: { type: 'not_found', message: err.message } }, 404);
+        }
+        if (err.code === 'session_archived') {
+          return c.json({ error: { type: 'conflict', code: err.code, message: err.message } }, 409);
         }
         if (err.message?.includes('terminal state')) {
           return c.json({ error: { type: 'conflict', message: err.message } }, 409);
@@ -723,6 +736,23 @@ export function sessionsRoutes(deps: ServerDeps) {
       }
       if (err.message?.includes('terminal state')) {
         return c.json({ error: { type: 'conflict', message: err.message } }, 409);
+      }
+      return c.json({ error: { type: 'internal_error', message: err.message } }, 500);
+    }
+  });
+
+  // POST /:id/archive - Archive session
+  app.post('/:id/archive', async (c) => {
+    const sessionId = c.req.param('id');
+    try {
+      const session = await sessionManager.archive(sessionId);
+      return c.json(toApiSession(session, session.agentDefinition ?? findAgentById(deps, session.agentId)));
+    } catch (err: any) {
+      if (err.message?.includes('not found')) {
+        return c.json({ error: { type: 'not_found', message: err.message } }, 404);
+      }
+      if (err.code === 'session_running') {
+        return c.json({ error: { type: 'conflict', code: err.code, message: err.message } }, 409);
       }
       return c.json({ error: { type: 'internal_error', message: err.message } }, 500);
     }

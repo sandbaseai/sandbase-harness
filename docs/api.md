@@ -541,8 +541,9 @@ Sessions run an agent in an environment and persist a resumable event log.
 
 The public session `status` is one of `idle`, `running`, `rescheduling`, or
 `terminated`. Internal `queued`, `paused`, and `requires_action` project to
-`idle`; `completed`, `failed`, `cancelled`, `timed_out`, and `cleanup_pending`
-project to `terminated`. Error and cleanup details remain in the event log.
+`idle`; `completed`, `failed`, `cancelled`, `timed_out`, `cleanup_pending`, and
+`archived` project to `terminated`. Error and cleanup details remain in the event
+log.
 `rescheduling` is in the public type but is not emitted yet: automatic
 rescheduling is not implemented.
 
@@ -566,6 +567,7 @@ internally failed sessions; those responses still report `terminated`.
 | `GET` | `/v1/sessions/{session_id}/events` | List persisted events. |
 | `GET` | `/v1/sessions/{session_id}/events/stream` | Stream live events with SSE. |
 | `POST` | `/v1/sessions/{session_id}/stop` | Deprecated local alias: interrupt the active turn and return the session. |
+| `POST` | `/v1/sessions/{session_id}/archive` | Archive a session and return it. |
 | `DELETE` | `/v1/sessions/{session_id}` | Delete a session from active listings. |
 
 The published way to interrupt a turn is to send `user.interrupt` through
@@ -580,6 +582,14 @@ next turn launches another child in the retained sandbox; unconfirmed child-tree
 cleanup still leaves `cleanup_pending` (public `terminated`) and never claims a
 resumable workspace. The alias is deprecated, retained for one version, and will
 be removed in the next version. It is not archive or delete.
+
+Archiving records `archived_at` and keeps the session and its history readable.
+An idle session emits `session.status_terminated`, releases its sandbox, and
+returns `status: "terminated"`; a running session returns `409` with
+`session_running` until it is interrupted. Repeating the archive is idempotent.
+New events and messages on an archived session return `409` with
+`session_archived`. Filtering archived sessions from the collection is a later
+session-list behavior and is not included in this operation.
 
 Listing persisted events returns the canonical envelope `{data, prev_page, next_page}` with a
 followable `next_page` cursor to pass back as `page`; the local `after_id` names the same

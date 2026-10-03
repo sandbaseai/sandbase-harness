@@ -16,6 +16,7 @@ export interface SessionRow {
   resources: string;
   vault_ids: string;
   metadata: string | null;
+  archived_at: string | null;
   /** `null` for a session that never had a budget; `'null'` for a removal. */
   budget: string | null;
   sandbox_type: string | null;
@@ -42,6 +43,7 @@ export function rowToSession(row: SessionRow): Session {
     resources: JSON.parse(row.resources ?? '[]'),
     vaultIds: JSON.parse(row.vault_ids ?? '[]'),
     metadata: row.metadata ? JSON.parse(row.metadata) : undefined,
+    archivedAt: row.archived_at ? new Date(row.archived_at) : undefined,
     sandboxType: row.sandbox_type ?? undefined,
     sandboxState: row.sandbox_state ? JSON.parse(row.sandbox_state) : undefined,
     usage: { tokensIn: row.usage_tokens_in, tokensOut: row.usage_tokens_out },

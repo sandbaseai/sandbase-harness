@@ -15,6 +15,7 @@ describe('session lifecycle helpers', () => {
     ['cancelled', 'terminated', 'session.status_terminated', true],
     ['timed_out', 'terminated', 'session.status_terminated', true],
     ['cleanup_pending', 'terminated', 'session.status_terminated', true],
+    ['archived', 'terminated', 'session.status_terminated', true],
   ];
 
   it('covers every internal status in the projection regressions', () => {

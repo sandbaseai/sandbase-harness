@@ -14,6 +14,7 @@ export const STATUS_PROJECTION: Record<SessionStatus, {
   cancelled: { wire: 'terminated', event: 'session.status_terminated', terminal: true },
   timed_out: { wire: 'terminated', event: 'session.status_terminated', terminal: true },
   cleanup_pending: { wire: 'terminated', event: 'session.status_terminated', terminal: true },
+  archived: { wire: 'terminated', event: 'session.status_terminated', terminal: true },
 };
 
 export function eventTypeForStatus(status: SessionStatus): SessionEvent['type'] | undefined {

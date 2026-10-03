@@ -20,7 +20,6 @@ export const PENDING_OFFICIAL_ROUTES = [
   ['POST /v1/vaults/:id/credentials/:id', 'Credential update'],
   ['POST /v1/deployments/:id', 'Official deployment update method'],
   ['POST /v1/sessions/:id', 'Session update'],
-  ['POST /v1/sessions/:id/archive', 'Session archive'],
   ['POST /v1/sessions/:id/resources/:id', 'Official session resource update method'],
   ['GET /v1/skills/:id/versions', 'Skill-version listing'],
   ['POST /v1/skills/:id/versions', 'Skill-version upload'],

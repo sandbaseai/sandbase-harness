@@ -20,7 +20,8 @@ export type SessionStatus =
   | 'failed'
   | 'cancelled'
   | 'timed_out'
-  | 'cleanup_pending';
+  | 'cleanup_pending'
+  | 'archived';
 
 export type ApiSessionStatus = 'idle' | 'running' | 'rescheduling' | 'terminated';
 
@@ -33,15 +34,16 @@ export type ApiSessionStatus = 'idle' | 'running' | 'rescheduling' | 'terminated
  * at any point in its life — including while queued or idle (paused).
  */
 export const SESSION_TRANSITIONS: Record<SessionStatus, SessionStatus[]> = {
-  queued: ['running', 'completed', 'failed', 'cancelled', 'timed_out', 'cleanup_pending'],
-  running: ['paused', 'requires_action', 'completed', 'failed', 'cancelled', 'timed_out', 'cleanup_pending'],
-  paused: ['running', 'completed', 'failed', 'cancelled'],
-  requires_action: ['running', 'completed', 'failed', 'cancelled', 'timed_out'],
+  queued: ['running', 'completed', 'failed', 'cancelled', 'timed_out', 'cleanup_pending', 'archived'],
+  running: ['paused', 'requires_action', 'completed', 'failed', 'cancelled', 'timed_out', 'cleanup_pending', 'archived'],
+  paused: ['running', 'completed', 'failed', 'cancelled', 'archived'],
+  requires_action: ['running', 'completed', 'failed', 'cancelled', 'timed_out', 'archived'],
   completed: [],
   failed: [],
   cancelled: [],
   timed_out: [],
   cleanup_pending: [],
+  archived: [],
 };
 
 // ============================================================
@@ -66,6 +68,7 @@ export interface Session {
   resources?: Array<Record<string, unknown>>;
   vaultIds?: string[];
   metadata?: Record<string, unknown>;
+  archivedAt?: Date;
   sandboxType?: string;
   sandboxState?: Record<string, unknown>;
   usage?: {

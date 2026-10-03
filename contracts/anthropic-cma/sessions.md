@@ -51,6 +51,15 @@ SDK operation. Pi closes the interrupted child and starts another on the next
 turn in the same sandbox. Unconfirmed child-tree cleanup retains the existing
 fail-closed `cleanup_pending` state instead of claiming the workspace is safe.
 
+`POST /v1/sessions/{id}/archive` records `archived_at` and returns the session
+object. An idle session is projected to `terminated`, emits
+`session.status_terminated`, and releases its sandbox; a running session returns
+`409` with `session_running` and must be interrupted first. Archiving is
+idempotent, and an already terminal session keeps its existing internal status
+and event log while receiving the archive timestamp. Reads remain available;
+new events and messages return `409` with `session_archived`. The session list's
+`include_archived` behavior belongs to the later session-list work package.
+
 The routes are `src/api/routes/sessions.ts` with
 `src/api/routes/initial-events.ts` and `src/api/routes/session-normalizers.ts`;
 the lifecycle and the outcome loop live in `src/core/session/session-manager.ts`;
@@ -72,6 +81,7 @@ Status projection (`STATUS_PROJECTION` in
 | `cancelled` | `terminated` | `session.status_terminated` | Yes |
 | `timed_out` | `terminated` | `session.status_terminated` | Yes |
 | `cleanup_pending` | `terminated` | `session.status_terminated` | Yes |
+| `archived` | `terminated` | `session.status_terminated` | Yes |
 
 `rescheduling` is part of the public type, but the runtime does not yet
 implement automatic rescheduling or emit that status. The existing single-value
@@ -314,6 +324,8 @@ reference forms, and the tri-state override rule.
 - `tests/integration/session-delete-log-position.test.ts` — the logical delete:
   the retained log is the pre-delete log, in order, followed by exactly one
   `session.deleted` marker.
+- `tests/unit/session-archive.test.ts` and `tests/conformance/session-archive.test.ts` — archive
+  state, idempotency, terminal-session handling, write refusal, and official SDK shape.
 - `tests/unit/agent-overrides.test.ts` — override parsing and resolution: the
   tri-state rule per field, the refusal codes, the cross-check on the resolved
   definition, and that the base definition is never mutated.

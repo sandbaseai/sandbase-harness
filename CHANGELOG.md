@@ -9,6 +9,11 @@
 - Session responses now use only `idle`, `running`, `rescheduling`, and `terminated`. Waiting for approval or a custom tool result is `idle`, with `stop_reason.type: "requires_action"` and pending event ids on the matching `session.status_idle` event. Internal `failed`, `cancelled`, `timed_out`, and `cleanup_pending` all project to `terminated`; their details remain in the event log. A failed session is terminal: new messages and events return `409` without persisting input or starting another turn. The existing single-value session `status` list filter selects every internal state in the requested public group; `rescheduling` currently selects none because automatic rescheduling is not implemented.
 
 ### Added
+- Sessions can now be archived with `POST /v1/sessions/{id}/archive`. Archiving
+  records `archived_at`, projects idle sessions to `terminated`, emits
+  `session.status_terminated`, releases the sandbox, and rejects later events
+  and messages with `session_archived`; running sessions return
+  `session_running` until interrupted, and repeated archive calls are idempotent.
 - **An official SDK route coverage guard** extracts managed-agent methods and
   paths from the pinned SDK, detects missing mounts and stale exceptions, and
   tracks exact deferred routes in a public follow-up. Known Dreams, tunnels,
