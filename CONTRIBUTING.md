@@ -131,11 +131,22 @@ correctness or security issue remains; prefer squash merges for focused work.
 ## Required checks
 
 Run the narrowest relevant checks while developing. Before requesting review or
-reporting completion, run the full gate:
+reporting completion, the focused tests covering the change must pass locally
+and the PR's required GitHub checks must pass. CI runs the full release
+pipeline — typecheck, the test suite, the builds, `package:check`, and
+`smoke:release` — on Ubuntu, and that is the required gate for every PR.
+
+In addition, run the full local gate:
 
 ```bash
 npm run release:check
 ```
+
+when the change can behave differently on Windows: process spawning (tar, git,
+shells, helper binaries), filesystem path handling, snapshots, sandbox
+providers, or the Pi engine; or when diagnosing a failure CI cannot reproduce.
+For other changes the local gate may be skipped; the PR must still state
+exactly which commands ran.
 
 The component commands are:
 
@@ -148,10 +159,10 @@ The component commands are:
 | `npm run smoke:release` | packaged CLI and example startup smoke checks |
 
 CI runs the test suite on Ubuntu only. Windows compatibility is not checked in
-CI; it is checked by running `npm run release:check` locally on Windows, so a
-change that can behave differently on Windows must be validated there before
-review and the PR must say so. The rules in
-[Cross-platform expectations](#cross-platform-expectations) still apply.
+CI; for changes that can behave differently on Windows it is checked by
+running `npm run release:check` locally on Windows, as described above. The
+rules in [Cross-platform expectations](#cross-platform-expectations) still
+apply.
 
 `tsconfig.tests.json` must type-check the complete test suite, including tests
 that import Console components. Do not hide errors by excluding a test group;

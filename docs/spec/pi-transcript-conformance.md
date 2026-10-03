@@ -224,9 +224,10 @@ translator and replay tests.
    criteria. Keep any runtime correction in its own independently verifiable
    behavior rather than hiding it in a documentation change.
 3. Run focused Pi unit/integration tests during development, then
-   `npm run release:check` before requesting review. Record Docker, Kubernetes,
-   Windows privilege, and live-model skips precisely rather than treating
-   skipped coverage as passed.
+   `npm run release:check` before requesting review (Pi work is
+   Windows-sensitive; see CONTRIBUTING.md#required-checks). Record Docker,
+   Kubernetes, Windows privilege, and live-model skips precisely rather than
+   treating skipped coverage as passed.
 4. Run the opt-in provider conformance test only when credentials and a
    non-production provider are supplied. Store its redacted evidence under the
    configured managed runtime/artifact directory, not the repository root.
