@@ -97,6 +97,20 @@ describe('session event stream subscription modes', () => {
     await frames.stop();
   });
 
+  it('closes after writing a live session.deleted event', async () => {
+    const { app, push } = streamApp();
+    const response = await app.request(`/v1/sessions/${SESSION_ID}/events/stream`);
+    const frames = frameReader(response);
+    const pump = frames.pump();
+    await settle();
+
+    push({ ...stored(1), type: 'session.deleted' });
+    await pump;
+
+    expect(frames.text).toContain('event: session.deleted');
+    expect(frames.text).toContain('id: 1');
+  });
+
   it('replays stored events after the cursor, in order, before live ones', async () => {
     const { app, push } = streamApp([stored(1), stored(2), stored(3)]);
     const response = await app.request(`/v1/sessions/${SESSION_ID}/events/stream`, {

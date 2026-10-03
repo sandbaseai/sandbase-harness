@@ -1,19 +1,5 @@
 /**
- * Integration test: where the delete marker sits in the retained log.
- *
- * `api.test.ts:2893` already asserts that a deleted session's log stays queryable
- * and that it *contains* a `session.deleted` event. `toContain` is the weakest
- * form of that claim: it passes if the marker were the first event, if it were
- * duplicated, or if every event that preceded the delete had been dropped, since
- * a log holding only the marker still contains it.
- *
- * `SessionManager.delete()` (`session-manager.ts:1064-1078`) appends the marker
- * after draining the run chain, so what the append-only guarantee actually
- * promises is stronger: the retained log is **the pre-delete log, in order,
- * followed by exactly one marker**. That is what a client replaying after a
- * delete reads, and it is what makes the log usable as history rather than as a
- * tombstone.
- */
+/** Integration coverage for the permanent session delete boundary. */
 
 import { describe, it, expect, afterEach } from 'vitest';
 import { join } from 'node:path';
@@ -81,62 +67,34 @@ describe('Session deletion and the retained event log', () => {
     return id;
   }
 
-  async function events(server: ReturnType<typeof createServer>, id: string, query = ''): Promise<any> {
+  async function events(server: ReturnType<typeof createServer>, id: string, query = ''): Promise<Response> {
     const res = await server.request(`/v1/sessions/${id}/events${query}`);
-    expect(res.status).toBe(200);
-    return res.json();
+    return res;
   }
 
-  it('records the termination and then the deletion, after the events that were already there', async () => {
+  it('deletes the session row and all event history', async () => {
     const server = setUp();
     const id = await sessionWithEvents(server, 2);
     const before = await events(server, id);
-    expect(before.data.map((event: { type: string }) => event.type)).toEqual(['user.interrupt', 'user.interrupt']);
+    expect(before.status).toBe(200);
+    const beforeBody = await before.json() as { data: Array<{ type: string }> };
+    expect(beforeBody.data.map((event) => event.type)).toEqual(['user.interrupt', 'user.interrupt']);
 
     const del = await server.request(`/v1/sessions/${id}`, { method: 'DELETE' });
 
     expect(del.status).toBe(200);
-    const after = await events(server, id);
-    // Position, not just presence: the pre-delete events keep their place, the
-    // delete's own lifecycle change is recorded before the deletion, and the
-    // marker is last. `toContain` alone would accept a log holding nothing but
-    // the marker.
-    //
-    // Two new events rather than one, because `delete()` is not a single writer:
-    // it moves the session to a terminal status through `updateStatus`, which
-    // logs `session.status_terminated`, and then appends `session.deleted`
-    // itself. A client replaying the log reads the lifecycle transition and then
-    // the deletion, so the ordering is asserted exactly.
-    expect(after.data.map((event: { type: string }) => event.type)).toEqual([
-      'user.interrupt',
-      'user.interrupt',
-      'session.status_terminated',
-      'session.deleted',
-    ]);
-    expect(after.data.slice(0, 2).map((event: { id: string }) => event.id)).toEqual(
-      before.data.map((event: { id: string }) => event.id),
-    );
+    expect(await del.json()).toEqual({ id, type: 'session_deleted' });
+    expect((await server.request(`/v1/sessions/${id}`)).status).toBe(404);
+    expect((await events(server, id)).status).toBe(404);
   });
 
-  it('keeps the retained log walkable by cursor after the delete', async () => {
+  it('refuses deletion while a session is running', async () => {
     const server = setUp();
-    const id = await sessionWithEvents(server, 3);
-    await server.request(`/v1/sessions/${id}`, { method: 'DELETE' });
-    const whole = await events(server, id);
+    const id = await sessionWithEvents(server, 0);
+    db!.prepare("UPDATE sessions SET status = 'running' WHERE id = ?").run(id);
 
-    const walked: string[] = [];
-    let cursor: string | null = null;
-    for (let guard = 0; guard < 10; guard++) {
-      const query = cursor === null ? '?limit=2' : `?limit=2&page=${encodeURIComponent(cursor)}`;
-      const page = await events(server, id, query);
-      walked.push(...page.data.map((event: { id: string }) => event.id));
-      cursor = page.next_page;
-      if (cursor === null) break;
-    }
-
-    // The retained log is still one ordered collection, not a tail that only the
-    // unpaginated read can see: three events, the termination, and the deletion.
-    expect(walked).toEqual(whole.data.map((event: { id: string }) => event.id));
-    expect(walked).toHaveLength(5);
+    const response = await server.request(`/v1/sessions/${id}`, { method: 'DELETE' });
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ error: { code: 'session_running' } });
   });
 });

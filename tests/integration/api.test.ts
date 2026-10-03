@@ -2969,7 +2969,7 @@ description: Uploaded from a compressed package.
   });
 
   describe('DELETE /v1/sessions/:id', () => {
-    it('deletes a session and retains the event log (R9.8)', async () => {
+    it('permanently deletes a session and returns the official deletion envelope', async () => {
       const createRes = await app.request('/v1/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -2980,14 +2980,13 @@ description: Uploaded from a compressed package.
       const delRes = await app.request(`/v1/sessions/${id}`, { method: 'DELETE' });
       expect(delRes.status).toBe(200);
       const delBody = await delRes.json();
-      expect(delBody.deleted).toBe(true);
+      expect(delBody).toEqual({ id, type: 'session_deleted' });
 
-      // Event log still queryable, and includes a session.deleted event
+      const retrieveRes = await app.request(`/v1/sessions/${id}`);
+      expect(retrieveRes.status).toBe(404);
+
       const eventsRes = await app.request(`/v1/sessions/${id}/events`);
-      expect(eventsRes.status).toBe(200);
-      const events = await eventsRes.json();
-      const types = events.data.map((e: any) => e.type);
-      expect(types).toContain('session.deleted');
+      expect(eventsRes.status).toBe(404);
     });
 
     it('returns 404 for non-existent session', async () => {

@@ -12,6 +12,7 @@
 
 import { nanoid } from 'nanoid';
 import type { Database } from '@/core/db/database.js';
+import type { ArtifactStore } from '@/core/storage/artifact-store.js';
 import { parseSessionVaultIds } from '@/core/credentials/injection.js';
 import { EventLogger } from './event-logger.js';
 import { eventTypeForStatus, isAbortError } from './session-lifecycle.js';
@@ -21,6 +22,7 @@ import { expiredParkedWait, PARKED_WAIT_TIMEOUT_CODE } from './parked-wait.js';
 import { rowToSession, type SessionRow } from './session-records.js';
 import { attachSessionResources } from './session-resources.js';
 import { buildSessionUsageSnapshot } from './session-usage.js';
+import type { SnapshotManager } from './snapshot-manager.js';
 import {
   BUDGET_ERROR_CODES,
   BUDGET_SETTLEMENT_EVENT_LIST,
@@ -156,6 +158,11 @@ export interface SessionExecutor {
 type Subscriber = (event: SessionEvent) => void;
 type EnvironmentSandboxProviderResolver = (environmentId: string) => string | undefined;
 
+export interface SessionStorage {
+  artifactStore?: ArtifactStore;
+  snapshots?: SnapshotManager;
+}
+
 // ============================================================
 // Session Manager
 // ============================================================
@@ -178,6 +185,7 @@ export class SessionManager {
   private outcomeGrader?: OutcomeGrader;
   /** Reader for a `{type: "file"}` rubric; absent means a file rubric is refused. */
   private rubricFileResolver?: (fileId: string) => string | undefined;
+  private sessionStorage: SessionStorage = {};
   /** Per-session execution chain — serializes turns so they never overlap. */
   private executionChains = new Map<string, Promise<void>>();
   /** Per-session abort controller for the currently running turn. */
@@ -493,6 +501,10 @@ export class SessionManager {
    */
   setExecutor(executor: SessionExecutor): void {
     this.executor = executor;
+  }
+
+  setSessionStorage(storage: SessionStorage): void {
+    this.sessionStorage = storage;
   }
 
   /**
@@ -1122,25 +1134,65 @@ export class SessionManager {
   }
 
   /**
-   * Delete a session. Stops it if running, releases the sandbox, then emits
-   * a session.deleted event. Per Requirement 9.8, the Event_Log and session
-   * metadata are retained (queryable) — this is a logical delete.
+   * Permanently delete a session and its session-owned state.
+   *
+   * Running sessions must be interrupted first so deletion cannot race an
+   * active turn. The deletion marker is broadcast before the rows disappear,
+   * allowing attached event streams to close with a durable final event.
    */
   async delete(sessionId: string): Promise<void> {
     const session = this.get(sessionId);
     if (!session) {
       throw new Error(`Session not found: ${sessionId}`);
     }
-    this.abortControllers.get(sessionId)?.abort();
-    await this.drainChain(sessionId);
-    if (!isTerminal(this.get(sessionId)?.status ?? session.status)) {
-      this.updateStatus(sessionId, 'completed');
+    if (session.status === 'running') {
+      throw sessionOperationError(
+        'session_running',
+        `Session ${sessionId} is running; interrupt it and wait for idle before deleting`,
+      );
     }
-    if (this.get(sessionId)?.status !== 'cleanup_pending') {
-      await this.releaseSandbox(sessionId);
-    }
+
+    await this.executor?.cleanupSession?.(sessionId);
+    const generatedFileIds = this.removeSessionFiles(sessionId);
+    this.sessionStorage.snapshots?.removeFiles(sessionId);
+
     const deletedEvent = this.eventLogger.append(sessionId, { type: 'session.deleted' });
     this.broadcast(sessionId, deletedEvent);
+
+    this.db.transaction(() => {
+      for (const table of sessionOwnedTables(this.db)) {
+        if (table === 'files') {
+          for (const fileId of generatedFileIds) {
+            this.db.prepare(`DELETE FROM "${table}" WHERE id = ? AND session_id = ?`).run(fileId, sessionId);
+          }
+          this.db.prepare(`UPDATE "${table}" SET session_id = NULL WHERE session_id = ?`).run(sessionId);
+          continue;
+        }
+        if (table === 'memory_versions' || table === 'scheduled_deployment_runs') {
+          this.db.prepare(`UPDATE "${table}" SET session_id = NULL WHERE session_id = ?`).run(sessionId);
+          continue;
+        }
+        this.db.prepare(`DELETE FROM "${table}" WHERE session_id = ?`).run(sessionId);
+      }
+      this.db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
+    });
+  }
+
+  private removeSessionFiles(sessionId: string): string[] {
+    const store = this.sessionStorage.artifactStore;
+    const rows = this.db.prepare(
+      `SELECT id, storage_path, role, metadata
+       FROM files
+       WHERE session_id = ?`,
+    ).all(sessionId) as Array<{ id: string; storage_path: string; role: string; metadata: string | null }>;
+    const generatedFileIds: string[] = [];
+    for (const row of rows) {
+      const generated = row.role === 'artifact' || hasSessionOutputMetadata(row.metadata);
+      if (!generated) continue;
+      generatedFileIds.push(row.id);
+      store?.remove(row.storage_path);
+    }
+    return generatedFileIds;
   }
 
   /**
@@ -1758,6 +1810,32 @@ function sessionOperationError(code: string, message: string): Error & { code: s
   const error = new Error(message) as Error & { code: string };
   error.code = code;
   return error;
+}
+
+function sessionOwnedTables(db: Database): string[] {
+  const tables = db.prepare(
+    `SELECT name
+     FROM sqlite_master
+     WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`,
+  ).all() as Array<{ name: string }>;
+
+  return tables
+    .filter(({ name }) => {
+      const identifier = name.replace(/"/g, '""');
+      const columns = db.prepare(`PRAGMA table_info("${identifier}")`).all() as Array<{ name: string }>;
+      return columns.some((column) => column.name === 'session_id');
+    })
+    .map(({ name }) => name);
+}
+
+function hasSessionOutputMetadata(metadata: string | null): boolean {
+  if (!metadata) return false;
+  try {
+    const parsed = JSON.parse(metadata) as Record<string, unknown>;
+    return typeof parsed === 'object' && parsed !== null && typeof parsed.session_output_path === 'string';
+  } catch {
+    return false;
+  }
 }
 
 /**

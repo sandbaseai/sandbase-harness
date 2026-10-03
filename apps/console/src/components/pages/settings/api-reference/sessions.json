@@ -326,12 +326,17 @@
     "title": "Delete session",
     "method": "DELETE",
     "path": "/v1/sessions/{session_id}",
-    "summary": "Delete a session and its runtime state from the local workspace.",
+    "summary": "Permanently delete a session and its session-owned state. Running sessions must be interrupted first.",
     "response": [
       {
-        "name": "deleted",
-        "type": "boolean",
-        "description": "True when the session was deleted."
+        "name": "id",
+        "type": "string",
+        "description": "The deleted session id."
+      },
+      {
+        "name": "type",
+        "type": "session_deleted",
+        "description": "Official deletion envelope discriminator."
       }
     ]
   },

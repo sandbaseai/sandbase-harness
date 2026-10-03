@@ -135,6 +135,10 @@ export function streamRoutes(deps: ServerDeps) {
           event: event.type,
           data: JSON.stringify(toApiEvent(event)),
         });
+
+        if (event.type === 'session.deleted') {
+          closed = true;
+        }
       };
 
       // Subscribe first — while backfilling, buffer; after, write directly.

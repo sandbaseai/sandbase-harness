@@ -758,14 +758,21 @@ export function sessionsRoutes(deps: ServerDeps) {
     }
   });
 
-  // DELETE /:id - Delete session (logical delete; Event_Log retained per R9.8)
+  // DELETE /:id - Permanently delete session
   app.delete('/:id', async (c) => {
     const sessionId = c.req.param('id');
-    if (!sessionManager.get(sessionId)) {
-      return c.json({ error: { type: 'not_found', message: 'Session not found' } }, 404);
+    try {
+      await sessionManager.delete(sessionId);
+      return c.json({ id: sessionId, type: 'session_deleted' });
+    } catch (err: any) {
+      if (err.message?.includes('not found')) {
+        return c.json({ error: { type: 'not_found', message: err.message } }, 404);
+      }
+      if (err.code === 'session_running') {
+        return c.json({ error: { type: 'conflict', code: err.code, message: err.message } }, 409);
+      }
+      return c.json({ error: { type: 'internal_error', message: err.message } }, 500);
     }
-    await sessionManager.delete(sessionId);
-    return c.json({ id: sessionId, deleted: true });
   });
 
   return app;

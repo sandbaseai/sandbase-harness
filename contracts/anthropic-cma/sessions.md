@@ -60,6 +60,14 @@ and event log while receiving the archive timestamp. Reads remain available;
 new events and messages return `409` with `session_archived`. The session list's
 `include_archived` behavior belongs to the later session-list work package.
 
+`DELETE /v1/sessions/{id}` permanently removes the session row, event history,
+session-owned resources, snapshots, and generated files. It returns
+`{id, type: "session_deleted"}`; an active `running` session returns `409` with
+`session_running` and must be interrupted to `idle` first. User-uploaded files
+are retained but are no longer scoped to the deleted session. A live event stream
+writes its final `session.deleted` event and then closes; deleted sessions are no
+longer retrievable or readable through their event endpoint.
+
 The routes are `src/api/routes/sessions.ts` with
 `src/api/routes/initial-events.ts` and `src/api/routes/session-normalizers.ts`;
 the lifecycle and the outcome loop live in `src/core/session/session-manager.ts`;
@@ -280,7 +288,6 @@ reference forms, and the tri-state override rule.
 | Creation response | `initial_events` is not echoed back. The published contract does not state whether the creation response echoes it. |
 | Automatic rescheduling | `rescheduling` is accepted by the public type and list filter, but no internal retry state or automatic rescheduling is implemented yet. |
 | `cleanup_pending` | Internal fail-closed state for local sandbox teardown, projected to public `terminated`; the event log retains the cleanup error. |
-| Session delete is logical | The published delete permanently removes the session's record, events and sandbox, and refuses a `running` session until it has been interrupted to `idle`. `DELETE /v1/sessions/{id}` here stops a running turn itself, releases the sandbox, appends `session.deleted`, and **keeps** the session row and its event log; the response is `{id, deleted: true}`, which reports the delete and does not claim the record was physically removed. |
 | Extension endpoints | Session inspection and control endpoints under `/v1/x` are local additions and are excluded from CMA admission. |
 | Override refusal codes | `agent_model_required` is the published code for a cleared `model`. `agent_tools_cleared_with_skills`, `agent_mcp_server_not_found`, `invalid_agent_override_field`, `invalid_agent_overrides`, `invalid_agent_ref` and `agent_required` are SandBase spellings for the same conditions, published so a client can distinguish them without parsing prose. |
 | `model.effort` in an override | Refused with `invalid_agent_override_field` rather than accepted and ignored. A definition retains `effort` and the read projection returns it — including a session's frozen snapshot, which reports the profile it resolved — but the provider model is resolved from the agent's model id, so a level set on a session would reach no request. Only a deployment's own `reasoning_effort` model setting reaches a provider, and that is operator-level. The refusal names the definition as where to set it. |
@@ -321,9 +328,13 @@ reference forms, and the tri-state override rule.
   admission, and rejection of an unknown loop engine.
 - `tests/unit/session-resource-instances.test.ts` — resource attach, list,
   delete, and the memory-store at-creation rule.
-- `tests/integration/session-delete-log-position.test.ts` — the logical delete:
-  the retained log is the pre-delete log, in order, followed by exactly one
-  `session.deleted` marker.
+- `tests/unit/session-delete.test.ts` — permanent deletion, running-session
+  refusal, session-owned file and snapshot cleanup, and all `session_id` child
+  tables.
+- `tests/integration/session-delete-log-position.test.ts` — the deleted session
+  and its event history are no longer readable.
+- `tests/integration/event-stream-subscription.test.ts` — a live stream closes
+  after writing `session.deleted`.
 - `tests/unit/session-archive.test.ts` and `tests/conformance/session-archive.test.ts` — archive
   state, idempotency, terminal-session handling, write refusal, and official SDK shape.
 - `tests/unit/agent-overrides.test.ts` — override parsing and resolution: the

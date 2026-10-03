@@ -11,8 +11,8 @@
  */
 
 import { spawnSync, type SpawnSyncOptionsWithStringEncoding } from 'node:child_process';
-import { mkdirSync, existsSync, statSync, openSync, closeSync } from 'node:fs';
-import { join, dirname, relative, isAbsolute } from 'node:path';
+import { mkdirSync, existsSync, statSync, openSync, closeSync, rmSync } from 'node:fs';
+import { join, dirname, relative, isAbsolute, resolve, sep } from 'node:path';
 import { nanoid } from 'nanoid';
 import type { Database } from '@/core/db/database.js';
 
@@ -143,5 +143,24 @@ export class SnapshotManager {
       sizeBytes: r.size_bytes,
       createdAt: new Date(r.created_at),
     }));
+  }
+
+  /** Remove snapshot files for a session without changing its database rows. */
+  removeFiles(sessionId: string): void {
+    const rows = this.db
+      .prepare('SELECT path FROM snapshots WHERE session_id = ?')
+      .all(sessionId) as Array<{ path: string }>;
+    const root = resolve(this.snapshotDir);
+
+    for (const row of rows) {
+      const target = resolve(row.path);
+      if (target === root || !target.startsWith(`${root}${sep}`)) continue;
+      rmSync(target, { force: true });
+    }
+
+    const sessionDir = resolve(this.snapshotDir, sessionId);
+    if (sessionDir.startsWith(`${root}${sep}`)) {
+      rmSync(sessionDir, { recursive: true, force: true });
+    }
   }
 }

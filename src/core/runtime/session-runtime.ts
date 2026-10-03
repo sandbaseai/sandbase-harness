@@ -112,6 +112,7 @@ export function createRuntimeSessionServices(options: RuntimeSessionServicesOpti
   );
   const eventLogger = sessionManager.getEventLogger();
   const snapshots = new SnapshotManager(options.db, options.artifactStore.path('snapshots'));
+  sessionManager.setSessionStorage({ artifactStore: options.artifactStore, snapshots });
   const memoryRecords = options.memoryRecords ?? new SqliteMemoryRecordsProvider(options.db);
 
   // The two dependencies `SandboxLifecycle` needs to materialize a session's

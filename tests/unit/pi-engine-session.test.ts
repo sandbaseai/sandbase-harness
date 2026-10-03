@@ -256,11 +256,10 @@ describe('session loop engine persistence', () => {
     expect(piManager.get(stopped.id)?.status).toBe('paused');
     expect(cleanupCalls).not.toContain(stopped.id);
 
-    const deleted = await startTurn();
-    await piManager.delete(deleted.id);
-    expect(piManager.get(deleted.id)?.status).toBe('completed');
-    expect(cleanupCalls).toContain(deleted.id);
-    expect(piManager.getEventLogger().getEvents(deleted.id).map((event) => event.type)).toContain('session.deleted');
+    await piManager.delete(interrupted.id);
+    expect(piManager.get(interrupted.id)).toBeNull();
+    expect(cleanupCalls).toContain(interrupted.id);
+    expect(piManager.getEventLogger().getEvents(interrupted.id)).toEqual([]);
 
     const shuttingDown = await startTurn();
     await piManager.shutdown();

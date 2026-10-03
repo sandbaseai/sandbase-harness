@@ -568,7 +568,7 @@ internally failed sessions; those responses still report `terminated`.
 | `GET` | `/v1/sessions/{session_id}/events/stream` | Stream live events with SSE. |
 | `POST` | `/v1/sessions/{session_id}/stop` | Deprecated local alias: interrupt the active turn and return the session. |
 | `POST` | `/v1/sessions/{session_id}/archive` | Archive a session and return it. |
-| `DELETE` | `/v1/sessions/{session_id}` | Delete a session from active listings. |
+| `DELETE` | `/v1/sessions/{session_id}` | Permanently delete a session and its session-owned state. |
 
 The published way to interrupt a turn is to send `user.interrupt` through
 the events endpoint and wait for `idle`. The local `/stop` alias aborts the
@@ -590,6 +590,15 @@ returns `status: "terminated"`; a running session returns `409` with
 New events and messages on an archived session return `409` with
 `session_archived`. Filtering archived sessions from the collection is a later
 session-list behavior and is not included in this operation.
+
+Deleting a session is permanent. A running session returns `409` with
+`session_running` and must be interrupted to `idle` first. Otherwise the runtime
+emits `session.deleted` to live event streams, closes those streams after the
+event is written, removes the session row and event history, releases the
+sandbox, removes snapshots and session-generated files, and returns
+`{id, type: "session_deleted"}`. User-uploaded files are retained but are
+detached from the deleted session; retrieving the deleted session or its events
+returns `404`.
 
 Listing persisted events returns the canonical envelope `{data, prev_page, next_page}` with a
 followable `next_page` cursor to pass back as `page`; the local `after_id` names the same
