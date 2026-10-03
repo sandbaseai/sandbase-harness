@@ -3,12 +3,13 @@
  * The official Anthropic TypeScript SDK against a local SandBase Harness
  * runtime — the quickstart, with nothing changed but where it points.
  *
- * Every call below is the published SDK's own API. The only lines that differ
- * from a quickstart written against the hosted service are `baseURL` and the
- * credential, plus the environment `config.type`, which this runtime reads as
- * its own `hosting_type` and supports as `local` (see `docs/api.md`,
- * "Environments"). No request is hand-rolled and no response is reshaped: if
- * this script reads a reply, an official client can talk to this runtime.
+ * Every call below is the published SDK's own API, and every request is the
+ * published shape — including the environment's `config.type: "cloud"`, which
+ * this runtime serves from the workspace's configured sandbox backend (see
+ * `docs/api.md`, "Environments"). The only lines that differ from a quickstart
+ * written against the hosted service are `baseURL` and the credential. No
+ * request is hand-rolled and no response is reshaped: if this script reads a
+ * reply, an official client can talk to this runtime.
  *
  * Usage
  *
@@ -80,12 +81,13 @@ try {
   });
   report('agent', { text: agent.id });
 
-  // 2. An environment. The hosted quickstart asks for `{type: "cloud"}`; this
-  //    runtime executes locally and rejects cloud rather than silently
-  //    downgrading, so the local value is the one to use.
+  // 2. An environment — the exact shape the published quickstart sends.
+  //    `cloud` means "the platform decides"; on this runtime the platform is
+  //    the workspace, so sessions provision the workspace's configured sandbox
+  //    backend, reported back as `effective_sandbox_provider`.
   const environment = await client.beta.environments.create({
     name: 'official-sdk-quickstart',
-    config: { type: 'local' },
+    config: { type: 'cloud', networking: { type: 'unrestricted' } },
   });
   report('environment', { text: environment.id });
 

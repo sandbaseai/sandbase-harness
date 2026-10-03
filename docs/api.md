@@ -1713,7 +1713,7 @@ only when the Environment is the stricter of the two. Binding a session to a
 sandbox and re-reading the Environment on every attachment are both deliberate;
 the alternative would be accepting a mount the named backend cannot serve. An
 Environment that cannot be resolved at all — a damaged config, or a row
-declaring `hosting_type: "cloud"` or the published `config: {"type": "cloud"}` —
+declaring a hosting type this runtime does not know —
 is answered with its own `400` and code
 (`unsupported_hosting_type`), not a `500`, on this route as on creation.
 A `memory_store` resource can only be attached when the session is created,
@@ -1790,15 +1790,15 @@ curl -X POST http://127.0.0.1:3000/v1/environments \
   -d '{
     "name": "local-dev",
     "description": "Local development environment",
-    "hosting_type": "local",
-    "sandbox_provider": "local",
-    "network": {
-      "type": "limited",
-      "allow_mcp_server_network_access": false,
-      "allow_package_manager_network_access": true,
-      "allowed_hosts": []
-    },
-    "packages": []
+    "config": {
+      "type": "cloud",
+      "networking": {
+        "type": "limited",
+        "allow_package_managers": true,
+        "allow_mcp_servers": false,
+        "allowed_hosts": []
+      }
+    }
 }'
 ```
 
@@ -1811,7 +1811,11 @@ one sessions use:
   replaced with another backend. A runtime that registers a provider this build
   does not ship can still name it.
 - Otherwise the hosting type selects the backend: `local`, `docker`,
-  `kubernetes`, and `self_hosted` map to the backend of the same name.
+  `kubernetes`, and `self_hosted` map to the backend of the same name. `cloud` —
+  the published "the platform decides" value — resolves to the workspace's
+  configured default backend: the `sandbox.provider` the active Settings V2
+  configuration carries, with its backend-specific options (image, Kubernetes
+  namespace, timeout) applied.
 - Otherwise the environment runs on `local`, the runtime default. An
   environment that declares neither is the only case that resolves to `local`;
   a declaration this runtime cannot serve is never lowered to it.
@@ -1850,22 +1854,23 @@ The published CMA `config` shape is read rather than stored and ignored:
   refused with a message naming the update that replaces it, so a damaged row is
   repaired by declaring a policy rather than being un-updatable.
 - A stored declaration the resolution refuses — two spellings that disagree, or a
-  value that is not a name — is reported as `hosting_type: "unknown"` rather than
-  as a backend, so a listing never presents as runnable an environment whose
-  sessions are refused.
+  value that is not a name — is reported with a null `effective_sandbox_provider`
+  rather than as a backend, so a listing never presents as runnable an
+  environment whose sessions are refused.
 - `config.packages` is preserved as written. No provider in this runtime
   installs packages, in either the published object shape or the local list
-  shape, so a declaration there does not reach a sandbox. The response's
-  top-level `packages` field stays the local list shape, so a published object
-  shape is visible only inside `config`.
+  shape, so a declaration there does not reach a sandbox — the response marks
+  this with `packages_enforced: false`. The response's `config.packages` field
+  reports the published per-manager object shape; the local array spelling a
+  stored config may carry is folded into it.
 
 `hosting_type: "cloud"` — and the published `config: {"type": "cloud"}` — is
-refused with `400 invalid_request_error` and code `unsupported_hosting_type`:
-cloud names hosting on machines this runtime does not own, so no setting of this
-runtime can honor it, and the message names the hosting types it can execute.
-The same refusal covers any other unrecognized hosting type, in either spelling.
-A published quickstart's cloud environment therefore needs that one line
-changed to a hosting type this runtime can run.
+accepted and means "the platform decides": sessions on that environment
+provision on the workspace's configured default sandbox backend. The record
+keeps the `cloud` declaration; the response's `effective_sandbox_provider`
+reports which backend it resolves to. An *unrecognized* hosting type is still
+refused with `400 invalid_request_error` and code `unsupported_hosting_type`,
+and the message names the hosting types this build can serve.
 
 A `config` that is not a JSON object, a stored `config` that is not valid JSON,
 a declared `hosting_type` / `type` / `sandbox_provider` that is not a string, or
@@ -1886,26 +1891,29 @@ enforced when the credential is injected.
 
 Resolution failures surface at `POST /v1/sessions`, before any session row is
 written, and at `POST /v1/sessions/{id}/events`, before any event is appended,
-so a session whose environment cannot be resolved never accepts work. Responses
-report the backend the environment declares: a Kubernetes environment is
-reported as `kubernetes`, and a declared `hosting_type` is echoed as written
-even when this runtime would refuse to execute it. An environment whose stored
-`config` cannot be read is reported as `hosting_type: "unknown"` with a null
-`sandbox_provider` rather than as `local`, so repairing it is a deliberate
-choice: an update that does not carry a replacement `config` is refused.
+so a session whose environment cannot be resolved never accepts work. The
+Environment response keeps the declaration and the execution separate:
+`config.type` reports the published hosting axis the caller declared —
+`self_hosted`, or `cloud` for every backend this runtime itself serves — while
+`effective_sandbox_provider` reports the backend sessions on it actually
+provision: `kubernetes` on a Kubernetes environment, the workspace default on a
+`cloud` one. An environment whose stored `config` cannot be read resolves to no
+backend, so `effective_sandbox_provider` is `null` rather than `local` and
+repairing it is a deliberate choice: an update that does not carry a
+replacement `config` is refused.
 
 `env_default` is the workspace fallback Environment, so its backend is the
 workspace runtime setting (`sandbox.provider`) and its stored `config` is the
 legacy seed those settings were derived from; a named Environment decides its own
-backend as described above. That seed is why a workspace whose `env_default`
-declares a hosting type this runtime cannot execute — the published
-`config: {"type": "cloud"}` spelling included, which the version before this one
-accepted and stored verbatim — refuses to derive its runtime settings at all on a
-workspace that has no settings row yet, rather than quietly seeding the local
-backend the declaration did not ask for. A workspace that already has settings
-rows boots normally: `env_default` is then resolved per session and refuses its
-own sessions with `unsupported_hosting_type`. Repair the row with an update that
-names one spelling, which replaces the other one rather than disagreeing with it:
+backend as described above. A stored `cloud` declaration on `env_default` — the
+published `config: {"type": "cloud"}` spelling included, which a version before
+this one accepted and stored verbatim — asks the workspace default to decide,
+so it seeds the same platform default a config that declares nothing does. A
+workspace whose `env_default` declares a hosting type this runtime cannot
+serve at all still refuses to derive its runtime settings on a workspace that
+has no settings row yet, rather than quietly seeding the local backend the
+declaration did not ask for. Repair the row with an update that names one
+spelling, which replaces the other one rather than disagreeing with it:
 `PUT /v1/environments/env_default {"hosting_type": "local"}`.
 
 Worker keys and work queues are advanced self-hosted controls. They are not

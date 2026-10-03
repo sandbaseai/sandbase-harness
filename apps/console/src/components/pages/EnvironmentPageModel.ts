@@ -13,28 +13,44 @@ export function hostingLabel(type: EnvironmentHostingType) {
 }
 
 export function environmentHostingType(environment: Environment): EnvironmentHostingType {
-  const hostingType = environment.hosting_type ?? environment.config.hosting_type;
-  const provider = environment.config.sandbox_provider;
-  if (hostingType === 'self_hosted' || provider === 'self_hosted') return 'self_hosted';
-  if (hostingType === 'docker' || provider === 'docker') return 'docker';
-  if (hostingType === 'local' || provider === 'local') return 'local';
+  // The effective backend is what sessions actually provision — for a `cloud`
+  // declaration it is the workspace default; fall back to the declaration.
+  const effective = environment.effective_sandbox_provider;
+  const provider = typeof effective === 'string' && effective ? effective : environment.config.sandbox_provider;
+  const hostingType = environment.config.hosting_type;
+  if (provider === 'self_hosted' || hostingType === 'self_hosted') return 'self_hosted';
+  if (provider === 'docker' || hostingType === 'docker') return 'docker';
+  if (provider === 'local' || hostingType === 'local') return 'local';
   return 'cloud';
 }
 
 export function environmentNetwork(environment: Environment) {
+  // `network` is the stored local spelling; `networking` is the published
+  // projection of the same policy with the published key names.
   const network = objectValue(environment.config.network);
-  const allowedHosts = arrayOfStrings(network.allowed_hosts);
+  const networking = objectValue(environment.config.networking);
+  const declared = Object.keys(network).length > 0 ? network : networking;
+  const allowedHosts = arrayOfStrings(declared.allowed_hosts);
   return {
-    type: (network.type === 'unrestricted' ? 'unrestricted' : 'limited') as EnvironmentNetworkType,
-    label: titleCase(String(network.type ?? 'limited').replace('_', ' ')),
-    allowMcp: Boolean(network.allow_mcp_server_network_access),
-    allowPackageManager: Boolean(network.allow_package_manager_network_access),
+    type: (declared.type === 'unrestricted' ? 'unrestricted' : 'limited') as EnvironmentNetworkType,
+    label: titleCase(String(declared.type ?? 'limited').replace('_', ' ')),
+    allowMcp: Boolean(declared.allow_mcp_server_network_access ?? declared.allow_mcp_servers),
+    allowPackageManager: Boolean(declared.allow_package_manager_network_access ?? declared.allow_package_managers),
     allowedHosts,
   };
 }
 
 export function environmentPackages(environment: Environment): EnvironmentPackageDraft[] {
-  const packages = Array.isArray(environment.config.packages) ? environment.config.packages : [];
+  const declared = environment.config.packages;
+  // Published projection: `{ type: 'packages', npm: [...], pip: [...], ... }`.
+  if (declared && typeof declared === 'object' && !Array.isArray(declared)) {
+    return Object.entries(declared as Record<string, unknown>).flatMap(([manager, list]) => {
+      if (manager === 'type' || !Array.isArray(list)) return [];
+      return list.map((pkg, index) => ({ id: `pkg_${manager}_${index}`, manager, package: String(pkg) }));
+    });
+  }
+  // Older rows stored the local array spelling; tolerate it on read.
+  const packages = Array.isArray(declared) ? declared : [];
   return packages.flatMap((item, index) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
     const record = item as Record<string, unknown>;
@@ -76,7 +92,7 @@ export function environmentDraftFromApi(environment: Environment): EnvironmentDr
   const resources = objectValue(environment.config.resources);
   return {
     name: environment.name,
-    description: environment.description,
+    description: environment.description ?? '',
     hostingType: environmentHostingType(environment),
     dockerImage: stringValue(environment.config.image) ?? 'node:22-slim',
     dockerMemory: stringValue(resources.memory) ?? '',

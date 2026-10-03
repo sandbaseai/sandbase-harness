@@ -58,11 +58,11 @@ describe('Session Manager', () => {
     it('refuses an Environment whose config cannot be resolved', () => {
       // The session row must not exist at all: a session that can only fail
       // when it provisions a sandbox would already have accepted work.
-      db.prepare(`INSERT INTO environments (id, name, config) VALUES ('env_cloud', 'cloud', '{"hosting_type":"cloud"}')`).run();
+      db.prepare(`INSERT INTO environments (id, name, config) VALUES ('env_team', 'team', '{"hosting_type":"team_server"}')`).run();
       db.prepare(`INSERT INTO environments (id, name, config) VALUES ('env_damaged', 'damaged', '{oops')`).run();
 
-      expect(() => manager.create({ agent: 'agent_test', environmentId: 'env_cloud' }))
-        .toThrow(/no cloud execution backend/);
+      expect(() => manager.create({ agent: 'agent_test', environmentId: 'env_team' }))
+        .toThrow(/not a known hosting type/);
       expect(() => manager.create({ agent: 'agent_test', environmentId: 'env_damaged' }))
         .toThrow(/not valid JSON/);
       expect(db.prepare(`SELECT COUNT(*) AS count FROM sessions`).get()).toEqual({ count: 0 });
@@ -121,9 +121,9 @@ describe('Session Manager', () => {
       // A later edit replaced the Environment with a hosting type this runtime
       // cannot run. Admission must refuse before the append-only log or any
       // execution, rather than resolving to the local backend.
-      db.prepare(`UPDATE environments SET config = '{"hosting_type":"cloud"}' WHERE id = 'env_docker_hosting'`).run();
+      db.prepare(`UPDATE environments SET config = '{"hosting_type":"team_server"}' WHERE id = 'env_docker_hosting'`).run();
       expect(() => manager.assertSessionCanAcceptEvent(session.id, { type: 'user.message', content: [{ type: 'text', text: 'hi' }] } as never))
-        .toThrow(/no cloud execution backend/);
+        .toThrow(/not a known hosting type/);
       expect(manager.getEventLogger().getEvents(session.id)).toHaveLength(0);
     });
   });

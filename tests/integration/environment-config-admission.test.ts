@@ -4,7 +4,7 @@
  * Measured against the official TypeScript SDK at `0.129.0`, the quickstart
  * shape `config: { type: "self_hosted" }` was accepted and read back as
  * `hosting_type: "local"` with `sandbox_provider: null`, `config: { type:
- * "cloud" }` was accepted outright, and `config: { networking: … }` was stored
+ * "cloud" }` was refused by name, and `config: { networking: … }` was stored
  * without ever being read. An official client could therefore declare a backend
  * and a network policy and get neither, which is the failure this file pins.
  *
@@ -74,15 +74,13 @@ describe('environment config admission', () => {
     const { status, body } = await post({ name: 'published-self-hosted', config: { type: 'self_hosted' } });
 
     expect(status).toBe(201);
-    // Reported as the hosting the caller asked for, not as the local default.
-    expect(body.hosting_type).toBe('self_hosted');
-    // Nothing named a backend, so the backend resolves from the hosting type.
-    expect(body.sandbox_provider).toBeNull();
-    // The caller's spelling is preserved in the record.
+    // Reported as the hosting the caller asked for, on the published axis.
     expect(body.config.type).toBe('self_hosted');
+    // Nothing named a backend, so the effective backend resolves from the hosting type.
+    expect(body.effective_sandbox_provider).toBe('self_hosted');
 
     const read = await app.request(`/v1/environments/${body.id}`);
-    expect((await read.json() as any).hosting_type).toBe('self_hosted');
+    expect((await read.json() as any).config.type).toBe('self_hosted');
   });
 
   it('resolves the published type the same way the local spelling resolves', async () => {
@@ -91,19 +89,24 @@ describe('environment config admission', () => {
 
     expect(published.status).toBe(201);
     expect(local.status).toBe(201);
-    expect(published.body.hosting_type).toBe(local.body.hosting_type);
-    expect(published.body.sandbox_provider).toBe(local.body.sandbox_provider);
+    // A backend this runtime serves projects to `cloud` on the published axis —
+    // "the platform decides" — and the effective backend is reported separately.
+    expect(published.body.config.type).toBe('cloud');
+    expect(published.body.config.type).toBe(local.body.config.type);
+    expect(published.body.effective_sandbox_provider).toBe('docker');
+    expect(published.body.effective_sandbox_provider).toBe(local.body.effective_sandbox_provider);
   });
 
-  it('refuses published cloud hosting with the documented code and message', async () => {
+  it('accepts published cloud hosting and resolves it to the workspace default backend', async () => {
     const { status, body } = await post({ name: 'published-cloud', config: { type: 'cloud' } });
 
-    expect(status).toBe(400);
-    expect(body.error.type).toBe('invalid_request_error');
-    expect(body.error.code).toBe('unsupported_hosting_type');
-    expect(body.error.message).toContain('no cloud execution backend');
-    expect(body.error.message).toContain('local, docker, kubernetes, self_hosted');
-    expect(environmentCount('published-cloud')).toBe(0);
+    expect(status).toBe(201);
+    // `cloud` is the official "the platform decides" value: the declaration is
+    // preserved, and the effective backend is the workspace default — `local`
+    // for an embedded runtime without Settings selecting otherwise.
+    expect(body.config.type).toBe('cloud');
+    expect(body.effective_sandbox_provider).toBe('local');
+    expect(storedConfig(body.id).type).toBe('cloud');
   });
 
   it('refuses an unknown published type by name', async () => {
@@ -137,7 +140,7 @@ describe('environment config admission', () => {
     });
 
     expect(status).toBe(201);
-    expect(body.hosting_type).toBe('self_hosted');
+    expect(body.config.type).toBe('self_hosted');
     expect(storedConfig(body.id).type).toBe('self_hosted');
   });
 
@@ -169,16 +172,24 @@ describe('environment config admission', () => {
     });
 
     expect(status).toBe(201);
-    expect(body.network).toEqual({
+    // The stored local spelling is echoed, and the published `networking`
+    // projection carries the same policy in the official key names.
+    expect(body.config.network).toEqual({
       type: 'limited',
       allowed_hosts: ['api.example.com'],
       allow_mcp_server_network_access: true,
       allow_package_manager_network_access: false,
     });
+    expect(body.config.networking).toEqual({
+      type: 'limited',
+      allowed_hosts: ['api.example.com'],
+      allow_mcp_servers: true,
+      allow_package_managers: false,
+    });
     // One stored spelling: the published key is consumed on ingress rather than
-    // echoed back as a second declaration of the same policy.
-    expect(body.config.networking).toBeUndefined();
-    expect(storedConfig(body.id).network).toEqual(body.network);
+    // stored as a second declaration of the same policy.
+    expect(storedConfig(body.id).network).toEqual(body.config.network);
+    expect(storedConfig(body.id).networking).toBeUndefined();
   });
 
   it('keeps the local network keys a policy was written with', async () => {
@@ -191,7 +202,7 @@ describe('environment config admission', () => {
     const { status, body } = await post({ name: 'local-network', config: { network: policy } });
 
     expect(status).toBe(201);
-    expect(body.network).toEqual(policy);
+    expect(body.config.network).toEqual(policy);
   });
 
   it('refuses two network spellings that disagree and accepts two that agree', async () => {
@@ -217,8 +228,8 @@ describe('environment config admission', () => {
     });
 
     expect(agreement.status).toBe(201);
-    expect(agreement.body.network.allowed_hosts).toEqual(['a.example.com']);
-    expect(agreement.body.network.allow_mcp_server_network_access).toBe(true);
+    expect(agreement.body.config.network.allowed_hosts).toEqual(['a.example.com']);
+    expect(agreement.body.config.network.allow_mcp_server_network_access).toBe(true);
   });
 
   it('refuses a network policy that is not an object', async () => {
@@ -247,8 +258,8 @@ describe('environment config admission', () => {
     const body = await res.json() as any;
 
     expect(res.status).toBe(200);
-    expect(body.network.type).toBe('limited');
-    expect(body.network.allowed_hosts).toEqual(['legacy.example.com']);
+    expect(body.config.networking.type).toBe('limited');
+    expect(body.config.networking.allowed_hosts).toEqual(['legacy.example.com']);
   });
 
   it('translates a stored published policy on update, and lets a newer one replace it', async () => {
@@ -262,7 +273,7 @@ describe('environment config admission', () => {
 
     const renamed = await put('env_stored_networking', { name: 'stored-renamed' });
     expect(renamed.status).toBe(200);
-    expect(renamed.body.network.allowed_hosts).toEqual(['old.example.com']);
+    expect(renamed.body.config.network.allowed_hosts).toEqual(['old.example.com']);
     // The local key is the record after a write; the published one is consumed.
     expect(storedConfig('env_stored_networking').networking).toBeUndefined();
 
@@ -270,8 +281,8 @@ describe('environment config admission', () => {
       config: { network: { type: 'unrestricted' } },
     });
     expect(replaced.status).toBe(200);
-    expect(replaced.body.network.type).toBe('unrestricted');
-    expect(replaced.body.network.allow_mcp_server_network_access).toBe(false);
+    expect(replaced.body.config.network.type).toBe('unrestricted');
+    expect(replaced.body.config.network.allow_mcp_server_network_access).toBe(false);
   });
 
   it('clears a policy a client removes with null, in either spelling', async () => {
@@ -280,12 +291,15 @@ describe('environment config admission', () => {
       config: { network: { type: 'limited', allowed_hosts: ['a.example.com'] } },
     });
     expect(created.status).toBe(201);
-    expect(created.body.network.allowed_hosts).toEqual(['a.example.com']);
+    expect(created.body.config.network.allowed_hosts).toEqual(['a.example.com']);
 
     const cleared = await put(created.body.id, { config: { network: null } });
     expect(cleared.status).toBe(200);
-    // Cleared, not stored as a policy nothing can read.
-    expect(cleared.body.network).toEqual({});
+    // Cleared, not stored as a policy nothing can read. With nothing declared
+    // the published projection reports `unrestricted`, which is also what the
+    // sandbox runs — the policy is recorded, not enforced.
+    expect(cleared.body.config.network).toBeUndefined();
+    expect(cleared.body.config.networking).toEqual({ type: 'unrestricted' });
     expect(storedConfig(created.body.id).network).toBeUndefined();
 
     const republished = await put(created.body.id, {
@@ -294,7 +308,7 @@ describe('environment config admission', () => {
     expect(republished.status).toBe(200);
     const clearedAgain = await put(created.body.id, { config: { networking: null } });
     expect(clearedAgain.status).toBe(200);
-    expect(clearedAgain.body.network).toEqual({});
+    expect(clearedAgain.body.config.networking).toEqual({ type: 'unrestricted' });
   });
 
   it('lets a request naming one spelling repair a stored published declaration', async () => {
@@ -309,19 +323,23 @@ describe('environment config admission', () => {
     );
 
     const before = await app.request('/v1/environments/env_stored_type');
-    expect((await before.json() as any).hosting_type).toBe('cloud');
+    expect((await before.json() as any).config.type).toBe('cloud');
 
     // The Console editor only ever sends the local spelling; without superseding
     // the stored twin this would answer 400 for disagreeing with a value the
     // request never wrote, and the row could not be repaired at all.
     const repaired = await put('env_stored_type', { hosting_type: 'local', sandbox_provider: 'local' });
     expect(repaired.status).toBe(200);
-    expect(repaired.body.hosting_type).toBe('local');
+    // `local` projects to `cloud` on the published axis — the platform-served
+    // value — and the effective backend reports the declaration's resolution.
+    expect(repaired.body.config.type).toBe('cloud');
+    expect(repaired.body.config.hosting_type).toBe('local');
+    expect(repaired.body.effective_sandbox_provider).toBe('local');
     expect(storedConfig('env_stored_type').type).toBeUndefined();
     expect(storedConfig('env_stored_type').hosting_type).toBe('local');
   });
 
-  it('reports a stored declaration it cannot resolve as unknown, not as runnable', async () => {
+  it('reports a stored declaration it cannot resolve with no effective backend', async () => {
     db.prepare('INSERT INTO environments (id, name, description, config, metadata) VALUES (?, ?, ?, ?, ?)').run(
       'env_conflicting',
       'conflicting',
@@ -334,12 +352,12 @@ describe('environment config admission', () => {
     const body = await res.json() as any;
     // Resolution refuses this record (`invalid_environment_config`), so the
     // projection must not present a backend a session on it would not use.
-    expect(body.hosting_type).toBe('unknown');
+    expect(body.effective_sandbox_provider).toBeNull();
 
     // Declaring one spelling supersedes the stored twin, which repairs it.
     const repaired = await put('env_conflicting', { hosting_type: 'local' });
     expect(repaired.status).toBe(200);
-    expect(repaired.body.hosting_type).toBe('local');
+    expect(repaired.body.effective_sandbox_provider).toBe('local');
     expect(storedConfig('env_conflicting').type).toBeUndefined();
   });
 
@@ -368,12 +386,12 @@ describe('environment config admission', () => {
       config: { network: { type: 'limited', allowed_hosts: ['a.example.com'] } },
     });
     expect(repaired.status).toBe(200);
-    expect(repaired.body.network.allowed_hosts).toEqual(['a.example.com']);
+    expect(repaired.body.config.network.allowed_hosts).toEqual(['a.example.com']);
     expect(storedConfig('env_damaged_policy').networking).toBeUndefined();
 
     const cleared = await put('env_damaged_policy', { config: { network: null } });
     expect(cleared.status).toBe(200);
-    expect(cleared.body.network).toEqual({});
+    expect(cleared.body.config.networking).toEqual({ type: 'unrestricted' });
   });
 
   it('lets null clear a policy an older row stored in the published spelling', async () => {
@@ -389,7 +407,7 @@ describe('environment config admission', () => {
     expect(cleared.status).toBe(200);
     // Cleared through either spelling: the request named the policy, so the
     // stored twin does not come back.
-    expect(cleared.body.network).toEqual({});
+    expect(cleared.body.config.networking).toEqual({ type: 'unrestricted' });
     expect(storedConfig('env_legacy_clear').network).toBeUndefined();
     expect(storedConfig('env_legacy_clear').networking).toBeUndefined();
 
@@ -399,7 +417,7 @@ describe('environment config admission', () => {
     expect(republished.status).toBe(200);
     const clearedPublished = await put('env_legacy_clear', { config: { networking: null } });
     expect(clearedPublished.status).toBe(200);
-    expect(clearedPublished.body.network).toEqual({});
+    expect(clearedPublished.body.config.networking).toEqual({ type: 'unrestricted' });
   });
 
   it('accepts the published network spelling as a top-level field too', async () => {
@@ -411,8 +429,8 @@ describe('environment config admission', () => {
     });
 
     expect(status).toBe(201);
-    expect(body.network.allowed_hosts).toEqual(['top.example.com']);
-    expect(body.network.allow_mcp_server_network_access).toBe(true);
+    expect(body.config.network.allowed_hosts).toEqual(['top.example.com']);
+    expect(body.config.network.allow_mcp_server_network_access).toBe(true);
   });
 
   it('fills the unset permission flags with the restrictive default', async () => {
@@ -422,9 +440,9 @@ describe('environment config admission', () => {
     });
 
     expect(status).toBe(201);
-    expect(body.network.allow_mcp_server_network_access).toBe(false);
-    expect(body.network.allow_package_manager_network_access).toBe(false);
+    expect(body.config.network.allow_mcp_server_network_access).toBe(false);
+    expect(body.config.network.allow_package_manager_network_access).toBe(false);
     // `unrestricted` is the only type that widens anything, so anything else is limited.
-    expect(body.network.type).toBe('limited');
+    expect(body.config.network.type).toBe('limited');
   });
 });

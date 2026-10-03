@@ -190,13 +190,12 @@ export type Environment = {
   id: string;
   type: 'environment';
   name: string;
-  description: string;
-  hosting_type: EnvironmentHostingType;
-  sandbox_provider: string | null;
-  network: Record<string, unknown>;
-  packages: unknown[];
-  status: string;
+  description: string | null;
   config: Record<string, unknown>;
+  /** Local extension: the backend sessions on this Environment actually provision. */
+  effective_sandbox_provider: string | null;
+  packages_enforced: boolean;
+  networking_enforced: boolean;
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;

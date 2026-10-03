@@ -6,8 +6,9 @@ nothing reshapes a response: it creates an agent, an environment and a session,
 opens the session's event stream, sends a message, and reads the turn through to
 `session.status_idle` — including a tool call the agent executes and feeds back.
 The only differences from a quickstart written against the hosted service are
-`baseURL`, the credential, and the environment `config.type` (this runtime reads
-it as its own `hosting_type` and supports `local`; see
+`baseURL` and the credential — the environment request is the published
+`config: { type: "cloud", networking: { type: "unrestricted" } }`, which this
+runtime serves from the workspace's configured sandbox backend (see
 [`docs/api.md`](../../docs/api.md#environments)).
 
 ## Before you run it

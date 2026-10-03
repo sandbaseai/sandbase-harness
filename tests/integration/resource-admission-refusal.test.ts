@@ -310,8 +310,8 @@ describe('resource admission against the session backend', () => {
 
   it('answers an Environment that stopped resolving with a code, not a bare 500', async () => {
     // Resolving the Environment is part of the decision, so it can fail on its
-    // own: a stored config naming `cloud`, an unknown hosting type, or a damaged
-    // row. Creation and the event routes answer that with 400 and its own code,
+    // own: an unknown hosting type or a damaged row. Creation and the event
+    // routes answer that with 400 and its own code,
     // and the append route has to as well — it is mounted on its own and has no
     // shared error handler, so an unhandled throw would be a text/plain 500.
     db.exec(`INSERT INTO environments (id, name, config) VALUES ('env_legacy', 'legacy', '{"sandbox_provider":"local"}')`);
@@ -321,9 +321,9 @@ describe('resource admission against the session backend', () => {
     const sessionId = created.body.id as string;
 
     // The Environment the session already points at becomes one this build
-    // cannot read — what a legacy `hosting_type: "cloud"` row looks like — and
-    // resolution falls back to the production reader of that row.
-    db.exec(`UPDATE environments SET config = '{"hosting_type":"cloud"}' WHERE id = 'env_legacy'`);
+    // cannot read — a hosting type it does not know — and resolution falls back
+    // to the production reader of that row.
+    db.exec(`UPDATE environments SET config = '{"hosting_type":"team_server"}' WHERE id = 'env_legacy'`);
     delete environmentProviders.env_legacy;
 
     const fileId = await uploadFile('notes.txt', 'attached bytes');

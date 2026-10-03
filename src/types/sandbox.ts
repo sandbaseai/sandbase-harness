@@ -206,6 +206,9 @@ export interface ExecResult {
 
 export interface EnvironmentConfig {
   name: string;
+  /** The official CMA hosting declaration when one was written (`cloud` /
+   * `self_hosted`). Resolution keeps it alongside the effective provider. */
+  type?: string;
   sandbox_provider: SandboxProviderType;
   /** Default timeout in seconds (default: 300) */
   timeout?: number;

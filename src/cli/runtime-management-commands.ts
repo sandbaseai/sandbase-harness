@@ -240,7 +240,8 @@ function formatSettings(settings: RuntimeSettingsSummary): string {
 }
 
 function formatEnvironment(item: EnvironmentSummary): string {
-  return `${item.id}  ${item.name}  ${item.hosting_type}  sandbox=${item.sandbox_provider ?? '-'}  status=${item.status}`;
+  const type = typeof item.config.type === 'string' ? item.config.type : '-';
+  return `${item.id}  ${item.name}  ${type}  sandbox=${item.effective_sandbox_provider ?? '-'}  status=${item.archived_at ? 'archived' : 'active'}`;
 }
 
 function printJson(value: unknown) {

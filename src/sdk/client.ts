@@ -344,17 +344,29 @@ export interface EnvironmentSummary {
   id: string;
   type: 'environment';
   name: string;
-  description: string;
-  /** `unknown` is what the runtime reports for a stored config it cannot read. */
-  hosting_type: 'local' | 'docker' | 'kubernetes' | 'cloud' | 'self_hosted' | 'unknown';
-  sandbox_provider: string | null;
-  network: Record<string, unknown>;
-  packages: unknown[];
-  status: 'active' | 'archived';
+  description: string | null;
+  /**
+   * The Environment's declaration in the published `config` shape.
+   * `config.type` is the official two-value hosting axis — `"cloud"` means the
+   * workspace's configured default backend serves the environment —
+   * `config.networking` and `config.packages` are the published spellings.
+   * Local declaration keys this runtime stores (`hosting_type`, `network`,
+   * array-form `packages`) are echoed verbatim as local extensions.
+   */
   config: Record<string, unknown>;
+  /**
+   * Local extension: the backend sessions on this Environment actually
+   * provision. For `config.type: "cloud"` this is the workspace's configured
+   * sandbox provider; `null` when the stored config cannot be resolved.
+   */
+  effective_sandbox_provider: string | null;
+  /** Local extension: declared packages are recorded but not installed. */
+  packages_enforced: boolean;
+  /** Local extension: the declared network policy is recorded but not enforced. */
+  networking_enforced: boolean;
   metadata: Record<string, unknown>;
-  worker_keys: EnvironmentWorkerKeySummary[];
-  work_queue: Record<string, number>;
+  worker_keys?: EnvironmentWorkerKeySummary[];
+  work_queue?: Record<string, number>;
   created_at: string;
   updated_at: string;
   archived_at: string | null;
@@ -985,11 +997,12 @@ class EnvironmentsResource {
   create(input: {
     name: string;
     description?: string;
-    /** The published `config.type` spelling is accepted too; `cloud` is refused. */
+    /** The published `config.type` spelling is accepted too; `cloud` resolves to the workspace default backend. */
     hosting_type?: 'local' | 'docker' | 'kubernetes' | 'cloud' | 'self_hosted';
     sandbox_provider?: string;
     network?: Record<string, unknown>;
     packages?: unknown[];
+    /** The published shape is accepted verbatim: `{ type: "cloud", networking: {...} }`. */
     config?: Record<string, unknown>;
     metadata?: Record<string, unknown>;
   }): Promise<EnvironmentSummary> {
@@ -999,7 +1012,7 @@ class EnvironmentsResource {
   update(id: string, input: Partial<{
     name: string;
     description: string;
-    /** The published `config.type` spelling is accepted too; `cloud` is refused. */
+    /** The published `config.type` spelling is accepted too; `cloud` resolves to the workspace default backend. */
     hosting_type: 'local' | 'docker' | 'kubernetes' | 'cloud' | 'self_hosted';
     sandbox_provider: string;
     network: Record<string, unknown>;

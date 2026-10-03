@@ -3,7 +3,8 @@
 Contract area: `/v1/environments` — reusable execution environments and the
 published `config` shape they carry.
 Status: `supported` for the published hosting and network configuration shape,
-with `cloud` refused by name because no backend here can serve it. `partial` for
+with `cloud` — the published "the platform decides" value — accepted and
+resolved to the workspace's configured default backend. `partial` for
 the network policy: it is normalized and returned in one spelling, but no shipped
 sandbox provider enforces it, and this document says so rather than implying a
 declared limit is applied. See §4.
@@ -69,10 +70,15 @@ translation between the two spellings of the hosting axis live in
   renamed or repaired through the local spelling — so not through the Console,
   which only ever sends that one — and a request naming the hosting type once
   would be refused for disagreeing with a value it never sent.
-- `cloud` is refused at write time with `unsupported_hosting_type`, naming the
-  hosting types this build can execute, exactly as the local `hosting_type`
-  spelling is refused. An unrecognized value (`team_server`) is refused the same
-  way, by name.
+- `cloud` is accepted at write time, in either spelling: it is the published
+  "the platform decides" value, and on this runtime the platform is the
+  workspace — sessions on a `cloud` environment provision on the workspace's
+  configured default backend, the `sandbox.provider` the active Settings V2
+  configuration carries, with that provider's backend-specific options
+  (image, Kubernetes namespace, timeout) applied. The record keeps the `cloud`
+  declaration; it is never rewritten to a backend name. An unrecognized value
+  (`team_server`) is still refused at write time with `unsupported_hosting_type`,
+  naming the hosting types this build can serve.
 - `config.networking` is normalized into `config.network` by
   `normalizeEnvironmentNetwork` and the published key is consumed: one stored
   policy, one spelling, whichever spelling arrived. `allow_mcp_servers` becomes
@@ -91,44 +97,60 @@ translation between the two spellings of the hosting axis live in
   records it under the local one. A stored policy that is not an object is
   refused with a message naming the replacing request rather than dropped
   silently.
-- The response projects `hosting_type` from the declaration — either spelling —
-  so a caller of the published shape reads back the hosting it asked for rather
-  than the `local` default, and `network` in the normalized local spelling. A
-  stored declaration the resolution path would refuse — two spellings that
-  disagree, or a value that is not a name — projects as `unknown`, so a record is
-  never reported as runnable while a session on it would be refused.
+- The response projects the published `config` shape: `config.type` carries the
+  published two-value hosting axis — `self_hosted` only when the declaration
+  really names self-hosted worker hosting, `cloud` for every backend this
+  runtime itself serves — `config.networking` reports the declared policy in
+  the published spelling, and `config.packages` folds the local array spelling
+  into the published per-manager object. `effective_sandbox_provider` reports
+  the backend sessions on the environment actually provision, resolved through
+  the effective Settings V2 sandbox section, so a `cloud` declaration and the
+  backend it lands on are reported as two facts rather than one. A stored
+  declaration the resolution path would refuse — two spellings that disagree,
+  or a value that is not a name — projects `effective_sandbox_provider: null`,
+  so a record is never reported as runnable while a session on it would be
+  refused. `packages_enforced` and `networking_enforced` are `false`: the
+  declarations are recorded, not applied.
 - **The policy is recorded, not enforced.** No sandbox provider shipped in this
   runtime reads an environment's network policy, which is why the capability is
   `partial` rather than `supported` and why §4 states it as a difference.
 
 ## 3. Alignment
 
-Aligned for: the published hosting axis (`type`, both values understood, `cloud`
-refused rather than misread), the published `networking` object including its
-`limited` / `unrestricted` forms and its two permission keys, the fail-closed
-reading of a policy (limited, and a permission denied, unless the caller declared
-otherwise), refusing an environment this runtime cannot execute instead of
-accepting it and failing at session start, and reporting a declared policy back
-to the caller.
+Aligned for: the published hosting axis (`type` with both values understood,
+`cloud` accepted and resolved to the workspace default rather than misread),
+the published `networking` object including its `limited` / `unrestricted`
+forms and its two permission keys, the fail-closed reading of a policy
+(limited, and a permission denied, unless the caller declared otherwise),
+refusing an environment this runtime cannot execute instead of accepting it
+and failing at session start, and reporting a declared policy back to the
+caller.
 
 ## 4. Differences
 
 | Difference | Detail |
 | --- | --- |
-| `config.type: "cloud"` | Refused with `unsupported_hosting_type` and the available values, at write time. No backend here serves cloud hosting, and mapping it onto the local backend is what previously ran such sessions unsandboxed on the runtime host. |
-| Hosting spellings that disagree | Refused with `invalid_environment_config` rather than resolved by precedence. The published shape has one spelling, so a request carrying both is a caller error this runtime cannot guess at. A stored row that already holds both is refused at resolution and projects as `unknown`; naming either spelling in an update replaces it. |
-| Workspace default seeding | `env_default` seeds the workspace `sandbox.provider` setting on a workspace that has no settings row. An `env_default` declaring a hosting type this build cannot execute refuses that seeding rather than substituting `local`, so such a workspace does not start until the row is repaired — with an update, or in the database when the runtime is not running. The local `hosting_type` spelling behaved this way before this change; the published `cloud` spelling is newly readable and was previously stored and ignored, so the state is reachable from data the previous version accepted. |
+| `config.type: "cloud"` | Accepted and resolved to the workspace's configured default backend — the active Settings V2 `sandbox.provider` and its options — rather than to a managed cloud, which this runtime does not have. The declaration is stored as written, `config.type` reports `cloud` back, and `effective_sandbox_provider` reports which backend it lands on, so nothing claims managed hosting and nothing maps the declaration to `local` by default. |
+| Hosting spellings that disagree | Refused with `invalid_environment_config` rather than resolved by precedence. The published shape has one spelling, so a request carrying both is a caller error this runtime cannot guess at. A stored row that already holds both is refused at resolution and reports `effective_sandbox_provider: null`; naming either spelling in an update replaces it. |
+| Workspace default seeding | `env_default` seeds the workspace `sandbox.provider` setting on a workspace that has no settings row. A `cloud` declaration there asks the workspace default to decide, which is what a seed is, so it seeds the same platform default a config that declares nothing does. An `env_default` declaring a hosting type this build cannot execute at all refuses that seeding rather than substituting `local`, so such a workspace does not start until the row is repaired — with an update, or in the database when the runtime is not running. |
 | Network policy enforcement | Normalized, stored, and returned, but not applied: no shipped provider reads it. A session whose environment declares `limited` with an empty `allowed_hosts` gets the same egress as an environment that declares `unrestricted`. |
-| `config.packages` | Recorded and echoed as written, not interpreted, and the response's top-level `packages` stays the local list shape. Nothing installs declared packages for any provider, so the published object shape and the local `{ manager, package }` list are both inert configuration today. |
+| `config.packages` | Recorded and reported in the published per-manager object shape — the local `{ manager, package }` array is folded into it — and marked `packages_enforced: false`. Nothing installs declared packages for any provider, so the published object shape and the local list are both inert configuration today. |
 | Published delete | Not mounted. `POST /v1/environments/{id}/archive` is the local lifecycle verb; archived environments are excluded from the listing rather than removed. |
 | Environment listing | Serves its whole set rather than a window, and accepts no query parameter ([`pagination.md`](./pagination.md)). The route surface, with its verbs, is in [`routes.md`](./routes.md). |
 
 ## 5. Reason for the difference
 
-- `cloud` cannot be executed here: there is no cloud execution backend, so the
-  only answers are a refusal that names the alternatives or an acceptance that
-  lies about where the work will run. The refusal reuses the message and code the
-  local `hosting_type` spelling already produced, so one cause has one code.
+- `cloud` is what the published request shape sends for managed hosting, and
+  refusing it would make every published quickstart fail at write time. This
+  runtime has no managed cloud, but it does have the thing `cloud` asks for —
+  a platform that decides — so the honest answer is the one it gives: the
+  workspace's configured default backend, reported distinctly as
+  `effective_sandbox_provider` rather than hidden inside the declaration.
+  The alternative the previous version took, refusing the value by name,
+  left the published request shape unusable; the alternative before that,
+  reading `cloud` as `local`, ran those sessions unsandboxed on the runtime
+  host. The workspace default is neither: it is the backend the operator
+  configured, reported as itself.
 - The network policy is kept rather than dropped because the declaration is real
   information: a caller who wrote a limit should see it stored and returned, and
   a future provider that can enforce it must not have to ask callers to rewrite
@@ -150,25 +172,29 @@ to the caller.
   did not yet read, and refusing an update because of it would leave the record
   repairable only in the spelling the caller did not write. Stored records the
   runtime cannot resolve are still refused where they matter — resolution, and
-  the workspace-default seed — and are reported as `unknown` rather than as a
-  backend, so nothing is lowered to `local` and nothing is displayed as runnable
-  when it is not.
+  the workspace-default seed — and report `effective_sandbox_provider: null`
+  rather than a backend, so nothing is lowered to `local` and nothing is
+  displayed as runnable when it is not.
 - Inside one policy object, the local key wins over the published alias that
   names the same permission, because the local key is the one this runtime
   records. The result can only be stricter than the published spelling alone —
   never more permissive — which is why a mixed object is read rather than
   refused, and why the unit tests pin the direction.
-- The workspace-default seed refuses rather than substituting a backend because
-  that seed *is* the backend of every session created without an explicit
-  Environment: defaulting it to `local` would run exactly those sessions on the
-  runtime host. The cost is an unstartable workspace whose `env_default` declares
-  hosting this build cannot serve, which §4 records.
+- The workspace-default seed refuses an unservable declaration rather than
+  substituting a backend because that seed *is* the backend of every session
+  created without an explicit Environment: defaulting it to `local` would run
+  exactly those sessions on the runtime host. A `cloud` declaration is the one
+  case where substituting is what was asked for — it names the workspace
+  default itself — so it seeds the platform default instead of refusing. The
+  cost that remains is an unstartable workspace whose `env_default` declares
+  hosting this build cannot serve at all, which §4 records.
 
 ## 6. Corresponding tests
 
 - `tests/integration/environment-config-admission.test.ts` — every branch of the
-  write path: the published `type` accepted and resolved, `cloud` and unknown
-  values refused with `unsupported_hosting_type`, disagreeing hosting spellings
+  write path: the published `type` accepted and resolved, `cloud` accepted in
+  both spellings and unknown values refused with `unsupported_hosting_type`,
+  disagreeing hosting spellings
   refused with `invalid_environment_config`, non-string declarations refused,
   `networking` normalized into the local key with the published key consumed,
   network spellings compared, non-object policies refused, defaults filled, the
@@ -182,12 +208,17 @@ to the caller.
   unknown keys preserved, non-objects reported as no policy, and key-order
   independent comparison.
 - `tests/unit/sandbox-provider-names.test.ts` — the alias at the naming
-  boundary: resolution and projection from either spelling, `cloud` and unknown
-  values refused with the same code as the local spelling, disagreement refused
-  and projected as unreadable rather than as a backend, a non-name declaration
-  refused instead of read as absent, and the workspace-default seed refusing a
-  published hosting type it cannot serve while a workspace that already has
-  settings still seeds.
+  boundary: resolution and projection from either spelling, `cloud` resolving
+  to the workspace-default sentinel and unknown values refused with
+  `unsupported_hosting_type`, disagreement refused and projected as unreadable
+  rather than as a backend, a non-name declaration refused instead of read as
+  absent, and the workspace-default seed taking a `cloud` declaration as the
+  platform default while an unservable declaration still refuses.
+- `tests/unit/environment-cloud-hosting.test.ts` — the `cloud` resolution end
+  to end: the stored declaration stays `cloud` while the composed resolver
+  overlays the effective Settings V2 backend — a Docker workspace setting
+  resolves the session's provider and image — and the workspace-default seed
+  treats `cloud` like an undeclared row.
 - `tests/integration/api.test.ts` — the local environment surface: create, get,
   archive, the key-shaped response, and the session path that refuses an
   environment whose hosting type cannot execute.
@@ -197,9 +228,11 @@ to the caller.
 ## 7. Status
 
 `supported` for the published configuration shape: the hosting axis is read in
-both spellings through one vocabulary, `cloud` and unknown values are refused by
-name with an actionable message and the documented code, the published network
-vocabulary is accepted, and the response reports the hosting and the policy the
-record actually holds. `partial` overall, for the reason §4 records: the network
+both spellings through one vocabulary, `cloud` is accepted and resolved to the
+workspace default with the resolution reported as `effective_sandbox_provider`,
+unknown values are refused by name with an actionable message and the
+documented code, the published network vocabulary is accepted, and the response
+projects the published `config` shape beside the effective backend.
+`partial` overall, for the reason §4 records: the network
 policy is stored and returned but not enforced by any shipped provider, so a
 declared limit does not yet change what a session may reach.

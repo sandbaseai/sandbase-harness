@@ -65,9 +65,10 @@ export function sandboxProviderForSettings(provider: SandboxSettingProvider): Sa
 /**
  * The `hosting_type` vocabulary an Environment may declare.
  *
- * `cloud` is kept readable because existing rows and the official CMA shape use
- * it. No backend in this runtime can serve it, so it resolves to a refusal
- * rather than to another backend.
+ * `cloud` is the official spelling for "the platform decides where this
+ * runs". On this runtime the platform is the workspace itself, so it resolves
+ * to {@link WORKSPACE_DEFAULT_SANDBOX_PROVIDER} — the workspace's configured
+ * default backend, the same one `env_default` runs on.
  */
 export const ENVIRONMENT_HOSTING_TYPES = [
   'local',
@@ -149,19 +150,6 @@ export function readDeclaredHostingType(
 }
 
 /**
- * Reported as an Environment's `hosting_type` when its stored config cannot be
- * read at all.
- *
- * A projection has to say something, and the one thing it must not say is
- * `local`: an operator who reads `local`, edits the Environment, and saves it
- * would rewrite an unreadable record into local execution. This value is
- * deliberately unservable, so writing it back is refused and the record has to
- * be repaired instead — the runtime refuses to execute such an Environment
- * either way.
- */
-export const UNREADABLE_HOSTING_TYPE = 'unknown';
-
-/**
  * Hosting values that name a backend this runtime can actually run.
  *
  * `self_hosted` keeps its public spelling: it is the official value for a
@@ -182,6 +170,18 @@ const EXECUTABLE_HOSTING_PROVIDERS: Readonly<Record<string, SandboxProviderType>
  * {@link sandboxProviderForEnvironmentConfig}.
  */
 export const DEFAULT_SANDBOX_PROVIDER: SandboxProviderType = 'local';
+
+/**
+ * Sentinel for `config.type: "cloud"`: the published value for "the platform
+ * decides where this runs". This runtime's platform is the workspace itself,
+ * so `cloud` resolves to the same backend `env_default` serves — the sandbox
+ * provider Settings selects — rather than to a fixed one. It is a resolution
+ * marker, not a backend: {@link sandboxProviderForEnvironmentConfig} returns it
+ * and the caller that owns the effective Settings substitutes the real provider
+ * (`composition.ts`); the embedded fallback without Settings reads it as
+ * {@link DEFAULT_SANDBOX_PROVIDER}.
+ */
+export const WORKSPACE_DEFAULT_SANDBOX_PROVIDER: SandboxProviderType = 'workspace_default';
 
 export const ENVIRONMENT_CONFIG_ERROR_CODES = {
   /** The stored `environments.config` could not be read as a JSON object. */
@@ -247,14 +247,16 @@ export function parseEnvironmentConfig(config: string, context: string): Record<
 /**
  * Translate a declared `hosting_type` into the backend that serves it.
  *
- * `cloud` is refused explicitly. It names hosting on infrastructure the runtime
- * operator does not own; this runtime ships no such backend, so honoring the
- * value could only mean running somewhere the caller did not choose.
+ * `cloud` returns {@link WORKSPACE_DEFAULT_SANDBOX_PROVIDER}: the published
+ * value means "the platform decides", and on this runtime the platform is the
+ * workspace, so the workspace's configured default backend serves it — the
+ * same one `env_default` runs on.
  */
 export function sandboxProviderForHostingType(
   hostingType: string,
   context: string,
 ): SandboxProviderType {
+  if (hostingType === 'cloud') return WORKSPACE_DEFAULT_SANDBOX_PROVIDER;
   const provider = EXECUTABLE_HOSTING_PROVIDERS[hostingType];
   if (provider) return provider;
   throw new EnvironmentConfigError(
@@ -271,13 +273,9 @@ export function sandboxProviderForHostingType(
  * read two different reasons for the same value.
  */
 export function hostingTypeRefusal(hostingType: string): string {
-  if (hostingType === 'cloud') {
-    return 'hosting_type "cloud" is not supported: this runtime has no cloud execution backend. '
-      + `Use one of: ${Object.keys(EXECUTABLE_HOSTING_PROVIDERS).join(', ')}.`;
-  }
   return `hosting_type "${hostingType}" is not a known hosting type `
     + `(known: ${ENVIRONMENT_HOSTING_TYPES.join(', ')}). `
-    + `This runtime can execute: ${Object.keys(EXECUTABLE_HOSTING_PROVIDERS).join(', ')}.`;
+    + `This runtime can execute: ${Object.keys(EXECUTABLE_HOSTING_PROVIDERS).join(', ')}, cloud.`;
 }
 
 /**
@@ -308,30 +306,23 @@ export function sandboxProviderForEnvironmentConfig(
 }
 
 /**
- * The public `hosting_type` projection for an Environment.
+ * The published `config.type` axis value an Environment config projects to.
  *
- * A declared hosting type is echoed, in either spelling — the published `type`
- * is reported as the local `hosting_type` so a caller of the official shape
- * reads back the hosting it asked for instead of the `local` default. Otherwise
- * the declared backend names the same thing — reporting `kubernetes` as `cloud`
- * described hosting this runtime does not have — and a config that declares
- * neither is reported as the backend it resolves to. A value this runtime does
- * not recognize is echoed verbatim rather than replaced, so a stored record is
- * never displayed as a backend it did not name, and a declaration that is not a
- * name at all — or two spellings that disagree, which the resolution path
- * refuses — is reported as {@link UNREADABLE_HOSTING_TYPE} rather than as a
- * backend a session on this record would not use.
+ * `self_hosted` only when the declaration names self-hosted worker hosting —
+ * a machine the caller operates. Everything this runtime itself serves is
+ * `cloud`, the official "the platform decides" value: an explicitly declared
+ * `cloud`, a backend declaration like `docker` or `kubernetes`, and a config
+ * that declares nothing all run wherever this workspace provisions, which is
+ * the same axis value the managed service would report. An unreadable
+ * declaration is reported as `cloud` too — `effective_sandbox_provider` is
+ * where "cannot be resolved" surfaces, so the hosting axis does not lie about
+ * which side hosts it.
  */
-export function environmentHostingProjection(config: Record<string, unknown>): string {
-  // Read through the same function resolution uses, so a record cannot be
-  // reported as runnable and refused when a session is created on it.
+export function publishedEnvironmentHostingType(config: Record<string, unknown>): 'cloud' | 'self_hosted' {
   const declared = readDeclaredHostingType(config, 'Environment');
-  if (!declared.ok) return UNREADABLE_HOSTING_TYPE;
-  if (declared.value) return declared.value;
-  const provider = config.sandbox_provider;
-  if (provider === undefined || provider === null) return DEFAULT_SANDBOX_PROVIDER;
-  if (typeof provider !== 'string') return UNREADABLE_HOSTING_TYPE;
-  return provider.trim() || DEFAULT_SANDBOX_PROVIDER;
+  return (declared.ok && declared.value === 'self_hosted') || config.sandbox_provider === 'self_hosted'
+    ? 'self_hosted'
+    : 'cloud';
 }
 
 /**
@@ -343,7 +334,9 @@ export function environmentHostingProjection(config: Record<string, unknown>): s
  * when a session booted.
  */
 export function hostingTypeError(hostingType: string): string | undefined {
-  return EXECUTABLE_HOSTING_PROVIDERS[hostingType] ? undefined : hostingTypeRefusal(hostingType);
+  return hostingType === 'cloud' || EXECUTABLE_HOSTING_PROVIDERS[hostingType]
+    ? undefined
+    : hostingTypeRefusal(hostingType);
 }
 
 /**
@@ -352,14 +345,20 @@ export function hostingTypeError(hostingType: string): string | undefined {
  * Settings V2 can only name the backends its schema has ids for, so a declared
  * backend outside that set cannot become the workspace default. Returning
  * `local` for it is what previously turned an unrecognized default into
- * unsandboxed execution; this refuses instead.
+ * unsandboxed execution; this refuses instead. `cloud` is the exception: it
+ * asks the workspace default to decide, which is what the undeclared seed is.
  */
 export function workspaceDefaultSettingForEnvironmentConfig(
   config: Record<string, unknown>,
   context: string,
 ): SandboxSettingProvider {
   const provider = sandboxProviderForEnvironmentConfig(config, context);
-  const setting = sandboxSettingForProvider(provider);
+  // `cloud` defers to the workspace default, and the default this seed serves
+  // is the one an undeclared workspace gets — the same `local` an empty config
+  // resolves to. That is the declaration's meaning, not a substitution.
+  const setting = provider === WORKSPACE_DEFAULT_SANDBOX_PROVIDER
+    ? sandboxSettingForProvider(DEFAULT_SANDBOX_PROVIDER)
+    : sandboxSettingForProvider(provider);
   if (setting) return setting;
   throw new EnvironmentConfigError(
     ENVIRONMENT_CONFIG_ERROR_CODES.unresolvableSandboxProvider,

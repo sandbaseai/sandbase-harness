@@ -18,8 +18,9 @@ export function Environments({ data, onNew, onOpenEnvironment }: { data: Console
   const [status, setStatus] = useState('all');
   const environments = data.environments.filter((environment) => {
     const q = query.toLowerCase();
-    const matchesStatus = status === 'all' || environment.status === status;
-    const matchesQuery = environment.id.toLowerCase().includes(q) || environment.name.toLowerCase().includes(q) || environment.description.toLowerCase().includes(q);
+    const environmentStatus = environment.archived_at ? 'archived' : 'active';
+    const matchesStatus = status === 'all' || environmentStatus === status;
+    const matchesQuery = environment.id.toLowerCase().includes(q) || environment.name.toLowerCase().includes(q) || (environment.description ?? '').toLowerCase().includes(q);
     return matchesStatus && matchesQuery;
   });
 
@@ -76,7 +77,7 @@ export function Environments({ data, onNew, onOpenEnvironment }: { data: Console
                 <td className="selectCol" onClick={(event) => event.stopPropagation()}><input type="checkbox" aria-label={`Select ${environment.id}`} /></td>
                 <td><strong className="monoText">{shortId(environment.id)}</strong></td>
                 <td>{environment.name}</td>
-                <td><StatusPill status={environment.status} /></td>
+                <td><StatusPill status={environment.archived_at ? 'archived' : 'active'} /></td>
                 <td><span className="softChip inlineChip">{environmentKind(environment)}</span></td>
                 <td>{formatDateShort(environment.updated_at)}</td>
                 <td className="actionsCol" onClick={(event) => event.stopPropagation()}>
@@ -97,7 +98,7 @@ export function Environments({ data, onNew, onOpenEnvironment }: { data: Console
             </span>
             <span className="mobileAgentMeta">
               <span>{environmentKind(environment)}</span>
-              <StatusPill status={environment.status} />
+              <StatusPill status={environment.archived_at ? 'archived' : 'active'} />
             </span>
           </button>
         ))}

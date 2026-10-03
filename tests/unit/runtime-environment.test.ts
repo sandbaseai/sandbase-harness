@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeRuntimeEnvironment } from '@/core/runtime/composition.js';
-import { ENVIRONMENT_CONFIG_ERROR_CODES } from '@/sandbox/provider-names.js';
+import { ENVIRONMENT_CONFIG_ERROR_CODES, WORKSPACE_DEFAULT_SANDBOX_PROVIDER } from '@/sandbox/provider-names.js';
 
 describe('runtime environment normalization', () => {
   it('defaults to local sandbox with a stable timeout', () => {
@@ -85,19 +85,20 @@ describe('runtime environment normalization', () => {
     })).toMatchObject({ sandbox_provider: 'local' });
   });
 
-  it('refuses cloud hosting instead of falling back to local execution', () => {
-    expect(() => normalizeRuntimeEnvironment({
+  it('resolves cloud hosting to the workspace-default sentinel', () => {
+    // `cloud` is "the platform decides": normalization surfaces the sentinel
+    // and `resolveEnvironmentConfig` substitutes the workspace's effective
+    // backend — the sentinel itself is never a provisioning target.
+    expect(normalizeRuntimeEnvironment({
       id: 'env_cloud',
       name: 'cloud',
       config: '{"hosting_type":"cloud"}',
-    })).toThrow(/no cloud execution backend/);
+    })).toMatchObject({ sandbox_provider: WORKSPACE_DEFAULT_SANDBOX_PROVIDER });
   });
 
-  it('resolves an explicitly named backend over an unusable hosting descriptor', () => {
-    // Resolution answers "where does this run" and the registry validates the
-    // named backend; the API refuses the `cloud` descriptor at write time so no
-    // new row can be created this way. An existing row still executes on the
-    // backend it names rather than on the local host.
+  it('resolves an explicitly named backend over the hosting descriptor', () => {
+    // Resolution answers "where does this run": `sandbox_provider` wins, so a
+    // cloud declaration with an explicit backend executes on that backend.
     expect(normalizeRuntimeEnvironment({
       id: 'env_cloud_docker',
       name: 'cloud docker',

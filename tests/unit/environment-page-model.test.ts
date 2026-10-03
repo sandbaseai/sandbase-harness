@@ -10,8 +10,8 @@ import type { Environment } from '../../apps/console/src/types';
 
 describe('environment page model helpers', () => {
   it('maps hosting types to labels and sandbox providers', () => {
-    expect(environmentKind(environment({ hosting_type: 'self_hosted' }))).toBe('Self-hosted');
-    expect(environmentKind(environment({ config: { sandbox_provider: 'docker' } }))).toBe('Docker');
+    expect(environmentKind(environment({ effective_sandbox_provider: 'self_hosted' }))).toBe('Self-hosted');
+    expect(environmentKind(environment({ effective_sandbox_provider: 'docker', config: { sandbox_provider: 'docker' } }))).toBe('Docker');
     expect(sandboxProviderForHostingType('self_hosted')).toBe('self_hosted');
     expect(sandboxProviderForHostingType('docker')).toBe('docker');
     expect(sandboxProviderForHostingType('local')).toBe('local');
@@ -20,6 +20,7 @@ describe('environment page model helpers', () => {
 
   it('builds an editor draft from API environment data', () => {
     const draft = environmentDraftFromApi(environment({
+      effective_sandbox_provider: 'docker',
       config: {
         network: {
           type: 'unrestricted',
@@ -93,12 +94,10 @@ function environment(overrides: Partial<Environment> = {}): Environment {
     type: 'environment',
     name: 'Test',
     description: 'Test environment',
-    hosting_type: 'cloud',
-    sandbox_provider: null,
-    network: {},
-    packages: [],
-    status: 'active',
-    config: {},
+    config: { type: 'cloud', networking: { type: 'unrestricted' }, packages: { type: 'packages' } },
+    effective_sandbox_provider: 'local',
+    packages_enforced: false,
+    networking_enforced: false,
     metadata: {},
     created_at: '2026-01-01T00:00:00.000Z',
     updated_at: '2026-01-02T00:00:00.000Z',

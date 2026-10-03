@@ -16,14 +16,16 @@ import { tmpdir } from 'node:os';
 import {
   ENVIRONMENT_CONFIG_ERROR_CODES,
   EnvironmentConfigError,
-  environmentHostingProjection,
   hostingTypeError,
   isEnvironmentConfigError,
   parseEnvironmentConfig,
+  publishedEnvironmentHostingType,
+  readDeclaredHostingType,
   sandboxProviderForEnvironmentConfig,
   sandboxProviderForHostingType,
   sandboxProviderForSettings,
   sandboxSettingForProvider,
+  WORKSPACE_DEFAULT_SANDBOX_PROVIDER,
   workspaceDefaultSettingForEnvironmentConfig,
   type SandboxSettingProvider,
 } from '@/sandbox/provider-names.js';
@@ -100,26 +102,21 @@ describe('environment hosting_type resolution', () => {
     expect(sandboxProviderForEnvironmentConfig({ hosting_type: 'self_hosted' }, context)).toBe('self_hosted');
   });
 
-  it('refuses cloud hosting instead of resolving it to a backend', () => {
-    // `cloud` names hosting on machines this runtime does not own. No backend
-    // here can serve it, and reading it as `local` is what ran those sessions
-    // unsandboxed on the runtime host.
-    expect(() => sandboxProviderForHostingType('cloud', 'Environment env_x'))
-      .toThrow(EnvironmentConfigError);
-    try {
-      sandboxProviderForHostingType('cloud', 'Environment env_x');
-      expect.unreachable('cloud hosting must not resolve');
-    } catch (err) {
-      expect(isEnvironmentConfigError(err)).toBe(true);
-      expect((err as EnvironmentConfigError).code).toBe(ENVIRONMENT_CONFIG_ERROR_CODES.unsupportedHostingType);
-      expect((err as Error).message).toContain('Environment env_x');
-      expect((err as Error).message).toContain('no cloud execution backend');
-    }
+  it('resolves cloud hosting to the workspace-default sentinel, not to a backend', () => {
+    // `cloud` is the official "the platform decides" value. The sentinel is a
+    // resolution marker — the caller that owns the effective Settings swaps in
+    // the workspace default, and nothing here pretends a managed cloud exists.
+    expect(sandboxProviderForHostingType('cloud', 'Environment env_x'))
+      .toBe(WORKSPACE_DEFAULT_SANDBOX_PROVIDER);
+    expect(sandboxProviderForEnvironmentConfig({ hosting_type: 'cloud' }, 'Environment env_x'))
+      .toBe(WORKSPACE_DEFAULT_SANDBOX_PROVIDER);
+    expect(sandboxProviderForEnvironmentConfig({ type: 'cloud' }, 'Environment env_x'))
+      .toBe(WORKSPACE_DEFAULT_SANDBOX_PROVIDER);
   });
 
   it('refuses a hosting type it does not know', () => {
     expect(hostingTypeError('team_server')).toContain('not a known hosting type');
-    expect(hostingTypeError('cloud')).toContain('no cloud execution backend');
+    expect(hostingTypeError('cloud')).toBeUndefined();
     expect(hostingTypeError('docker')).toBeUndefined();
     expect(() => sandboxProviderForEnvironmentConfig({ hosting_type: 'team_server' }, 'Environment env_x'))
       .toThrow(EnvironmentConfigError);
@@ -167,31 +164,34 @@ describe('environment hosting_type resolution', () => {
     // `null` and an empty string are how a client clears a field.
     expect(sandboxProviderForEnvironmentConfig({ sandbox_provider: null }, 'Environment env_x')).toBe('local');
     expect(sandboxProviderForEnvironmentConfig({ hosting_type: '' }, 'Environment env_x')).toBe('local');
-    // Such a record is not reported as local either.
-    expect(environmentHostingProjection({ sandbox_provider: 7 })).toBe('unknown');
-    expect(environmentHostingProjection({ hosting_type: [] })).toBe('unknown');
+    // Such a record does not read as a clean declaration either.
+    expect(readDeclaredHostingType({ hosting_type: 7 }, 'Environment').ok).toBe(false);
+    expect(readDeclaredHostingType({ hosting_type: [] }, 'Environment').ok).toBe(false);
   });
 
-  it('reports hosting from the backend when no hosting type is declared', () => {
-    // `kubernetes` used to be reported as `cloud`, which described hosting this
-    // runtime does not have.
-    expect(environmentHostingProjection({ sandbox_provider: 'kubernetes' })).toBe('kubernetes');
-    expect(environmentHostingProjection({ sandbox_provider: 'docker' })).toBe('docker');
-    expect(environmentHostingProjection({ sandbox_provider: 'self_hosted' })).toBe('self_hosted');
-    expect(environmentHostingProjection({ hosting_type: 'self_hosted' })).toBe('self_hosted');
-    // A declared hosting type is echoed, including one this build refuses, so
-    // the operator can see what the record actually says.
-    expect(environmentHostingProjection({ hosting_type: 'cloud' })).toBe('cloud');
-    expect(environmentHostingProjection({ hosting_type: 'team_server' })).toBe('team_server');
-    // Nothing declared resolves to the default backend the runtime uses.
-    expect(environmentHostingProjection({})).toBe('local');
+  it('projects the published two-value hosting axis', () => {
+    // `self_hosted` only when the declaration names a caller-operated worker;
+    // every backend this runtime itself serves is `cloud`, the published
+    // "the platform decides" value.
+    expect(publishedEnvironmentHostingType({ sandbox_provider: 'kubernetes' })).toBe('cloud');
+    expect(publishedEnvironmentHostingType({ sandbox_provider: 'docker' })).toBe('cloud');
+    expect(publishedEnvironmentHostingType({ sandbox_provider: 'self_hosted' })).toBe('self_hosted');
+    expect(publishedEnvironmentHostingType({ hosting_type: 'self_hosted' })).toBe('self_hosted');
+    expect(publishedEnvironmentHostingType({ type: 'self_hosted' })).toBe('self_hosted');
+    expect(publishedEnvironmentHostingType({ hosting_type: 'cloud' })).toBe('cloud');
+    // An unreadable declaration is `cloud` too — `effective_sandbox_provider`
+    // is where "cannot be resolved" is reported.
+    expect(publishedEnvironmentHostingType({ hosting_type: 'team_server' })).toBe('cloud');
+    expect(publishedEnvironmentHostingType({})).toBe('cloud');
   });
 
   it('refuses to seed a workspace default with a backend Settings V2 cannot name', () => {
     expect(workspaceDefaultSettingForEnvironmentConfig({ hosting_type: 'self_hosted' }, 'The default'))
       .toBe('remote');
-    expect(() => workspaceDefaultSettingForEnvironmentConfig({ hosting_type: 'cloud' }, 'The default'))
-      .toThrow(EnvironmentConfigError);
+    // `cloud` defers to the workspace default, which is what the undeclared
+    // seed is — `local`, the same value a config that declares nothing seeds.
+    expect(workspaceDefaultSettingForEnvironmentConfig({ hosting_type: 'cloud' }, 'The default'))
+      .toBe('local');
     expect(() => workspaceDefaultSettingForEnvironmentConfig({ sandbox_provider: 'microsandbox' }, 'The default'))
       .toThrow(EnvironmentConfigError);
   });
@@ -205,15 +205,9 @@ describe('environment hosting_type resolution', () => {
     expect(sandboxProviderForEnvironmentConfig({ type: 'local' }, 'Environment env_x')).toBe('local');
   });
 
-  it('refuses the published cloud hosting with the same code as the local spelling', () => {
-    try {
-      sandboxProviderForEnvironmentConfig({ type: 'cloud' }, 'Environment env_x');
-      expect.unreachable('published cloud hosting must not resolve');
-    } catch (err) {
-      expect(isEnvironmentConfigError(err)).toBe(true);
-      expect((err as EnvironmentConfigError).code).toBe(ENVIRONMENT_CONFIG_ERROR_CODES.unsupportedHostingType);
-      expect((err as Error).message).toContain('no cloud execution backend');
-    }
+  it('reads the published cloud hosting as the workspace-default declaration', () => {
+    expect(sandboxProviderForEnvironmentConfig({ type: 'cloud' }, 'Environment env_x'))
+      .toBe(WORKSPACE_DEFAULT_SANDBOX_PROVIDER);
     // An unrecognized published value is refused by name, not defaulted.
     try {
       sandboxProviderForEnvironmentConfig({ type: 'team_server' }, 'Environment env_x');
@@ -256,36 +250,36 @@ describe('environment hosting_type resolution', () => {
     expect(sandboxProviderForEnvironmentConfig({ type: '' }, 'Environment env_x')).toBe('local');
   });
 
-  it('reports the published hosting type as the local projection', () => {
-    expect(environmentHostingProjection({ type: 'self_hosted' })).toBe('self_hosted');
-    // Echoed even when this build refuses to execute it, like the local spelling.
-    expect(environmentHostingProjection({ type: 'cloud' })).toBe('cloud');
-    expect(environmentHostingProjection({ type: 'team_server' })).toBe('team_server');
-    // A declaration that is not a name is not reported as the local default.
-    expect(environmentHostingProjection({ type: 7 })).toBe('unknown');
-    // The hosting declaration is preferred to the backend, which is how the
-    // local `hosting_type` has always been projected.
-    expect(environmentHostingProjection({ type: 'docker', sandbox_provider: 'local' })).toBe('docker');
-    expect(environmentHostingProjection({ sandbox_provider: 'docker' })).toBe('docker');
-    expect(environmentHostingProjection({})).toBe('local');
+  it('reports the published hosting type on the two-value axis', () => {
+    expect(publishedEnvironmentHostingType({ type: 'self_hosted' })).toBe('self_hosted');
+    expect(publishedEnvironmentHostingType({ type: 'cloud' })).toBe('cloud');
+    expect(publishedEnvironmentHostingType({ type: 'team_server' })).toBe('cloud');
+    // A declaration that is not a name projects `cloud` — "cannot be resolved"
+    // is reported through `effective_sandbox_provider`, not the hosting axis.
+    expect(publishedEnvironmentHostingType({ type: 7 })).toBe('cloud');
+    // The hosting declaration is preferred to the backend on the axis.
+    expect(publishedEnvironmentHostingType({ type: 'docker', sandbox_provider: 'local' })).toBe('cloud');
+    expect(publishedEnvironmentHostingType({ sandbox_provider: 'docker' })).toBe('cloud');
+    expect(publishedEnvironmentHostingType({})).toBe('cloud');
   });
 
-  it('reports two stored spellings that disagree as unreadable, not as runnable', () => {
+  it('reports two stored spellings that disagree as unresolvable, not as runnable', () => {
     // Resolution refuses this record, so a projection naming one of the two
     // values would present a backend a session on it would not use.
-    expect(environmentHostingProjection({ hosting_type: 'local', type: 'docker' })).toBe('unknown');
+    expect(readDeclaredHostingType({ hosting_type: 'local', type: 'docker' }, 'Environment').ok).toBe(false);
     expect(() => sandboxProviderForEnvironmentConfig(
       { hosting_type: 'local', type: 'docker' },
       'Environment env_x',
     )).toThrow(EnvironmentConfigError);
     // Agreement is readable, and so is either spelling alone.
-    expect(environmentHostingProjection({ hosting_type: 'docker', type: 'docker' })).toBe('docker');
-    expect(environmentHostingProjection({ type: 'self_hosted' })).toBe('self_hosted');
+    const agreed = readDeclaredHostingType({ hosting_type: 'docker', type: 'docker' }, 'Environment');
+    expect(agreed.ok && agreed.value).toBe('docker');
+    expect(publishedEnvironmentHostingType({ type: 'self_hosted' })).toBe('self_hosted');
   });
 });
 
 describe('the workspace default Environment seed', () => {
-  it('refuses to seed from a published hosting type it cannot serve, and boots once settings exist', () => {
+  it('seeds the platform default from a cloud env_default, like an undeclared row', () => {
     const directory = mkdtempSync(join(tmpdir(), 'ma-provider-names-'));
     const db = new Database(join(directory, 'settings.db'));
     try {
@@ -293,19 +287,17 @@ describe('the workspace default Environment seed', () => {
       db.exec(`INSERT INTO environments (id, name, config) VALUES ('env_default', 'local', '{}')`);
       const first = getOrSeedRuntimeSettings(db, {}, directory);
 
-      // The row the version before this one wrote: it stored the published
-      // shape verbatim, so the cloud declaration it ignored is now read.
+      // `cloud` asks the workspace default to decide — which is exactly what a
+      // seed is. It must not refuse boot the way an unservable concrete backend
+      // does, and it must not seed anything but the platform default.
       db.exec(`UPDATE environments SET config = '{"type":"cloud"}' WHERE id = 'env_default'`);
-      // A workspace that already has settings boots: the row seeds nothing, and
-      // the Environment refuses its own sessions instead.
       expect(() => getOrSeedRuntimeSettings(db, {}, directory)).not.toThrow();
       expect(getOrSeedRuntimeSettings(db, {}, directory).effective_config.sandbox)
         .toEqual(first.effective_config.sandbox);
 
-      // With no settings row, the seed refuses rather than substituting local
-      // for a workspace default that declares hosting it cannot serve.
       db.exec('DELETE FROM runtime_settings');
-      expect(() => getOrSeedRuntimeSettings(db, {}, directory)).toThrow(/no cloud execution backend/);
+      const reseeded = getOrSeedRuntimeSettings(db, {}, directory);
+      expect(reseeded.saved_config.sandbox.provider).toBe('local');
     } finally {
       db.close();
       rmSync(directory, { recursive: true, force: true });

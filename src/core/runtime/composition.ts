@@ -9,6 +9,7 @@ import {
   parseEnvironmentConfig,
   sandboxProviderForEnvironmentConfig,
   sandboxProviderForSettings,
+  WORKSPACE_DEFAULT_SANDBOX_PROVIDER,
 } from '@/sandbox/provider-names.js';
 import type { EnvironmentConfig, KubernetesEnvironmentConfig } from '@/types/sandbox.js';
 
@@ -59,8 +60,12 @@ export function composeRuntimeFromSettings({
       if (!row) return undefined;
       const environment = normalizeRuntimeEnvironment(row);
       // env_default is the workspace fallback; named Environments remain
-      // explicit session-level sandbox overrides.
-      if (row.id !== 'env_default') return environment;
+      // explicit session-level sandbox overrides — unless they declared
+      // `type: "cloud"`, the published "platform decides" value, which on
+      // this runtime resolves to the workspace's configured default backend.
+      if (row.id !== 'env_default' && environment.sandbox_provider !== WORKSPACE_DEFAULT_SANDBOX_PROVIDER) {
+        return environment;
+      }
       return {
         ...environment,
         ...sandboxConfigFromSettings(effectiveSettings.sandbox),
@@ -73,10 +78,11 @@ export function normalizeRuntimeEnvironment(row: { id: string; name: string; con
   const context = `Environment ${row.id}${row.name ? ` ("${row.name}")` : ''}`;
   const parsed = parseEnvironmentConfig(row.config, context);
   // The declared backend — or the hosting type behind it — decides where this
-  // Environment runs. An unreadable row, `hosting_type: "cloud"`, or any other
-  // value this runtime cannot serve is refused here instead of being replaced
-  // by the local backend, which used to run isolated configurations on the host
-  // with no error at all.
+  // Environment runs. An unreadable row or a value this runtime cannot serve
+  // is refused here instead of being replaced by the local backend, which used
+  // to run isolated configurations on the host with no error at all. `cloud`
+  // reads as the workspace-default sentinel and is substituted by the caller
+  // that owns the effective Settings.
   const sandboxProvider = sandboxProviderForEnvironmentConfig(parsed, context);
 
   return {

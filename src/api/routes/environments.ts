@@ -16,14 +16,16 @@ import {
 import { rejectUnexpectedQueryParams } from './query-params.js';
 import { SHIPPED_SANDBOX_PROVIDER_TYPES } from '@/types/sandbox.js';
 import {
+  DEFAULT_SANDBOX_PROVIDER,
   ENVIRONMENT_CONFIG_ERROR_CODES,
   ENVIRONMENT_HOSTING_FIELDS,
-  environmentHostingProjection,
   hostingTypeError,
   isEnvironmentConfigError,
   parseEnvironmentConfig,
+  publishedEnvironmentHostingType,
   readDeclaredHostingType,
-  UNREADABLE_HOSTING_TYPE,
+  sandboxProviderForEnvironmentConfig,
+  WORKSPACE_DEFAULT_SANDBOX_PROVIDER,
 } from '@/sandbox/provider-names.js';
 import {
   normalizeEnvironmentNetwork,
@@ -55,7 +57,7 @@ export function environmentRoutes(deps: ServerDeps) {
     const rejected = rejectUnexpectedQueryParams(c, []);
     if (rejected) return rejected;
     const rows = deps.db.prepare('SELECT * FROM environments WHERE archived_at IS NULL ORDER BY created_at DESC').all() as unknown as EnvironmentRow[];
-    return c.json(cursorPageOf(rows.map(toEnvironment), {}));
+    return c.json(cursorPageOf(rows.map((row) => toApiEnvironment(row, deps)), {}));
   });
 
   app.post('/environments', async (c) => {
@@ -80,7 +82,7 @@ export function environmentRoutes(deps: ServerDeps) {
         JSON.stringify(stringRecordField(body.value.metadata)),
       );
       const row = deps.db.prepare('SELECT * FROM environments WHERE id = ? AND archived_at IS NULL').get(id) as unknown as EnvironmentRow;
-      return c.json(toEnvironment(row), 201);
+      return c.json(toApiEnvironment(row, deps), 201);
     } catch (err: any) {
       if (String(err.message).includes('UNIQUE')) return conflict(c, 'Environment id already exists');
       return c.json({ error: { type: 'internal_error', message: err.message } }, 500);
@@ -89,7 +91,7 @@ export function environmentRoutes(deps: ServerDeps) {
 
   app.get('/environments/:id', (c) => {
     const row = deps.db.prepare('SELECT * FROM environments WHERE id = ? AND archived_at IS NULL').get(c.req.param('id')) as EnvironmentRow | undefined;
-    return row ? c.json(toEnvironment(row)) : notFound(c, 'Environment not found');
+    return row ? c.json(toApiEnvironment(row, deps)) : notFound(c, 'Environment not found');
   });
 
   app.put('/environments/:id', async (c) => {
@@ -129,10 +131,10 @@ export function environmentRoutes(deps: ServerDeps) {
       id,
     );
     const row = deps.db.prepare('SELECT * FROM environments WHERE id = ? AND archived_at IS NULL').get(id) as unknown as EnvironmentRow;
-    return c.json(toEnvironment(row));
+    return c.json(toApiEnvironment(row, deps));
   });
 
-  app.post('/environments/:id/archive', (c) => archiveResource(c, deps, 'environments', toEnvironment));
+  app.post('/environments/:id/archive', (c) => archiveResource(c, deps, 'environments', (row: EnvironmentRow) => toApiEnvironment(row, deps)));
 
   // --- Self-hosted worker keys (R9.14) -------------------------------------
   //
@@ -246,35 +248,135 @@ function activeEnvironmentId(c: any, deps: ServerDeps): string | undefined {
   return row ? id : undefined;
 }
 
-function toEnvironment(row: EnvironmentRow) {
+/**
+ * The `/v1` Environment read shape.
+ *
+ * The published object carries `config` — the stored declaration, projected —
+ * plus the local extension fields that say what the declaration resolves to.
+ * Local-only response fields (`hosting_type`, `sandbox_provider`, `network`,
+ * `packages`, `status`) are not emitted: the values they reported now live
+ * inside `config` or in `effective_sandbox_provider`, which answers the only
+ * question those fields could not — where sessions on this Environment
+ * actually run.
+ */
+function toApiEnvironment(row: EnvironmentRow, deps: ServerDeps) {
   let config: Record<string, unknown>;
-  let unreadable = false;
   try {
     config = parseEnvironmentConfig(row.config, `Environment ${row.id}`);
   } catch {
-    // A row this build cannot read is reported as unreadable rather than as the
-    // backend an empty config would resolve to: showing `local` is what let an
-    // operator open the damaged Environment, save the form, and thereby store a
-    // local one. `unknown` is unservable, so that save is refused instead.
     config = {};
-    unreadable = true;
   }
   return {
     id: row.id,
     type: 'environment' as ResourceKind,
     name: row.name,
-    description: row.description ?? '',
-    hosting_type: unreadable ? UNREADABLE_HOSTING_TYPE : environmentHostingType(config),
-    sandbox_provider: typeof config.sandbox_provider === 'string' ? config.sandbox_provider : null,
-    network: environmentNetworkProjection(config),
-    packages: Array.isArray(config.packages) ? config.packages : [],
-    status: row.archived_at ? 'archived' : 'active',
-    config,
+    description: row.description || null,
+    config: projectEnvironmentConfig(config),
+    effective_sandbox_provider: effectiveProviderFor(row.id, config, deps),
+    // Declared but not applied: no sandbox provider installs declared packages
+    // or enforces the declared network policy yet.
+    packages_enforced: false,
+    networking_enforced: false,
     metadata: parseObject(row.metadata),
     created_at: row.created_at,
     updated_at: row.updated_at ?? row.created_at,
     archived_at: row.archived_at ?? null,
   };
+}
+
+/**
+ * The backend sessions on this Environment actually provision.
+ *
+ * The composition resolver is the authority — it overlays the effective
+ * Settings V2 sandbox configuration, which is what makes `cloud` mean the
+ * workspace default. A row the resolver cannot read reports `null` rather than
+ * a substituted backend, and a caller that still sees the workspace-default
+ * sentinel (the embedded path has no Settings) reports the declared default it
+ * would fall back to.
+ */
+function effectiveProviderFor(
+  environmentId: string,
+  config: Record<string, unknown>,
+  deps: ServerDeps,
+): string | null {
+  try {
+    const provider = deps.sessionManager.environmentSandboxProvider(environmentId)
+      ?? sandboxProviderForEnvironmentConfig(config, `Environment ${environmentId}`);
+    return provider === WORKSPACE_DEFAULT_SANDBOX_PROVIDER ? DEFAULT_SANDBOX_PROVIDER : provider;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Project the stored config onto the published Environment `config` shape.
+ *
+ * Stored keys are preserved verbatim — `hosting_type`, `network`, and array
+ * `packages` are this runtime's local spellings and stay readable. The
+ * published keys are normalized on top: `type` is the official two-value
+ * hosting axis (`self_hosted` only when the declaration really names
+ * self-hosted worker hosting; `cloud` — "the platform decides" — for every
+ * backend this runtime itself serves), `networking` is the published network
+ * spelling, and `packages` is the published per-manager list.
+ */
+function projectEnvironmentConfig(config: Record<string, unknown>): Record<string, unknown> {
+  return {
+    ...config,
+    type: publishedEnvironmentHostingType(config),
+    networking: officialNetworkingProjection(config),
+    packages: officialPackagesProjection(config.packages),
+  };
+}
+
+/**
+ * The published `networking` spelling of the declared policy.
+ *
+ * Local canonical policy keys (`allow_mcp_server_network_access`,
+ * `allow_package_manager_network_access`) are renamed to the published
+ * `allow_mcp_servers`/`allow_package_managers`. An undeclared or unreadable
+ * policy projects as `unrestricted`, which is also what the sandbox runs —
+ * the policy is not enforced, so nothing is over-claimed.
+ */
+function officialNetworkingProjection(config: Record<string, unknown>): Record<string, unknown> {
+  const policy = normalizeEnvironmentNetwork(config.network)
+    ?? normalizeEnvironmentNetwork(config.networking);
+  if (!policy || policy.type === 'unrestricted') return { type: 'unrestricted' };
+  return {
+    type: 'limited',
+    allowed_hosts: policy.allowed_hosts,
+    allow_mcp_servers: policy.allow_mcp_server_network_access,
+    allow_package_managers: policy.allow_package_manager_network_access,
+  };
+}
+
+/**
+ * The published `packages` spelling of the declared package list.
+ *
+ * The local array spelling (`{ manager, package }` entries) is folded into the
+ * published per-manager lists; a stored published spelling is merged by the
+ * same keys. A manager outside the official six keeps its own list — a
+ * declaration that does not fit the vocabulary is still reported, not dropped.
+ */
+function officialPackagesProjection(declared: unknown): Record<string, unknown> {
+  const byManager: Record<string, string[]> = {
+    apt: [], cargo: [], gem: [], go: [], npm: [], pip: [],
+  };
+  const add = (manager: unknown, pkg: unknown) => {
+    if (typeof manager !== 'string' || !manager.trim() || typeof pkg !== 'string') return;
+    (byManager[manager.trim()] ??= []).push(pkg);
+  };
+  if (Array.isArray(declared)) {
+    for (const entry of declared) {
+      if (!isPlainObject(entry)) continue;
+      add(entry.manager, entry.package);
+    }
+  } else if (isPlainObject(declared)) {
+    for (const [manager, list] of Object.entries(declared)) {
+      if (manager === 'type' || !Array.isArray(list)) continue;
+      for (const pkg of list) add(manager, pkg);
+    }
+  }
+  return { type: 'packages', ...byManager };
 }
 
 /**
@@ -472,20 +574,6 @@ function unreadableStoredPolicy(key: string): { ok: false; message: string; code
 }
 
 /**
- * The declared network policy, in the local spelling.
- *
- * A stored row that holds only the published `networking` is read here too, so a
- * policy written before both spellings were accepted is still reported instead of
- * disappearing from the response. A policy that cannot be read at all reports as
- * an empty object: nothing executes on it, so there is no backend to misreport.
- */
-function environmentNetworkProjection(config: Record<string, unknown>): Record<string, unknown> {
-  return normalizeEnvironmentNetwork(config.network)
-    ?? normalizeEnvironmentNetwork(config.networking)
-    ?? {};
-}
-
-/**
  * Reject an Environment whose declared backend or hosting type this runtime
  * cannot execute.
  *
@@ -538,20 +626,6 @@ function hostingFieldError(config: Record<string, unknown>): string | undefined 
     if (typeof value !== 'string') return `${key} must be a string`;
   }
   return undefined;
-}
-
-/**
- * The public `hosting_type` an Environment reports.
- *
- * Shared with the runtime so a backend the runtime can execute is never
- * described as hosting it does not have: a `kubernetes` Environment used to be
- * reported as `cloud`, and a config that declared only a backend used to fall
- * through to `cloud` as well. A declared value that this runtime does not
- * recognize is echoed verbatim rather than replaced, and a config that declares
- * nothing reports the backend it resolves to.
- */
-function environmentHostingType(config: Record<string, unknown>): string {
-  return environmentHostingProjection(config);
 }
 
 interface EnvironmentRow {

@@ -111,8 +111,10 @@ import {
   PI_RPC_TIMEOUT_CODE,
 } from '@/strategy/pi/rpc-wire.js';
 import {
+  DEFAULT_SANDBOX_PROVIDER,
   parseEnvironmentConfig,
   sandboxProviderForEnvironmentConfig,
+  WORKSPACE_DEFAULT_SANDBOX_PROVIDER,
 } from '@/sandbox/provider-names.js';
 import {
   WORK_LEASE_LOST_CODE,
@@ -964,7 +966,21 @@ export class SessionManager {
     ).get(environmentId) as { config: string } | undefined;
     if (!row) return undefined;
     const context = `Environment ${environmentId}`;
-    return sandboxProviderForEnvironmentConfig(parseEnvironmentConfig(row.config, context), context);
+    const provider = sandboxProviderForEnvironmentConfig(parseEnvironmentConfig(row.config, context), context);
+    // `cloud` resolves to the workspace default backend. This fallback path
+    // has no effective Settings to read that default from — the composed
+    // resolver does — so the declared default stands in for it.
+    return provider === WORKSPACE_DEFAULT_SANDBOX_PROVIDER ? DEFAULT_SANDBOX_PROVIDER : provider;
+  }
+
+  /**
+   * The backend sessions on an Environment actually provision, as resolved by
+   * the runtime's effective Settings — Settings-backed in the composed
+   * runtime, declared-only in embedded use. Exposed for read-model
+   * projections such as the Environment API's `effective_sandbox_provider`.
+   */
+  environmentSandboxProvider(environmentId: string): string | undefined {
+    return this.resolveEnvironmentSandboxProvider(environmentId);
   }
 
   /**

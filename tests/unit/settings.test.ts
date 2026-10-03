@@ -980,9 +980,9 @@ describe('Settings V2 activation', () => {
   });
 
   it('refuses to seed the workspace default from an unservable Environment', () => {
-    // The seed IS the workspace default backend. `cloud` used to be reduced to
-    // `local` here, which made every session without an explicit Environment run
-    // unsandboxed on the runtime host.
+    // The seed IS the workspace default backend. An unusable declaration used
+    // to be reduced to `local` here, which made every session without an
+    // explicit Environment run unsandboxed on the runtime host.
     const directory = mkdtempSync(join(tmpdir(), 'ma-settings-environment-seed-fail-closed-'));
     directories.push(directory);
     const db = new Database(join(directory, 'settings.db'));
@@ -990,11 +990,11 @@ describe('Settings V2 activation', () => {
     db.prepare(`INSERT INTO environments (id, name, config) VALUES (?, ?, ?)`).run(
       'env_default',
       'default',
-      JSON.stringify({ hosting_type: 'cloud' }),
+      JSON.stringify({ hosting_type: 'team_server' }),
     );
 
     try {
-      expect(() => getOrSeedRuntimeSettings(db, {}, directory)).toThrow(/no cloud execution backend/);
+      expect(() => getOrSeedRuntimeSettings(db, {}, directory)).toThrow(/not a known hosting type/);
       // Nothing was persisted, so the workspace is not left half-seeded.
       expect(db.prepare(`SELECT COUNT(*) AS count FROM runtime_settings`).get()).toEqual({ count: 0 });
     } finally {

@@ -153,8 +153,8 @@ describe('environments CLI group', () => {
 
     const created = (await listEnvironments(app)).find((item) => item.name === 'plain');
     expect(created).toBeDefined();
-    expect(created!.hosting_type).toBe('local');
-    expect(created!.sandbox_provider).toBe('local');
+    expect((created!.config as Record<string, unknown>).hosting_type).toBe('local');
+    expect(created!.effective_sandbox_provider).toBe('local');
 
     // Read back through the single-resource route, which is a different handler than the
     // listing, so the config is confirmed to be persisted rather than projected.
@@ -238,13 +238,12 @@ describe('environments CLI group', () => {
     const { log } = await capture(() => environmentArchiveCommand(doomed.id, { port: String(port) }));
     expect(log.join('\n')).toContain(`Archived environment: ${doomed.id} (doomed)`);
 
-    // The archive call answers with the archived row itself, so `status` is on the response
-    // the command already has. Asserting it through `--json` checks the row the route
-    // produced rather than only the sentence the command printed from it.
+    // The archive call answers with the archived row itself, so `archived_at` is on the
+    // response the command already has. Asserting it through `--json` checks the row the
+    // route produced rather than only the sentence the command printed from it.
     const asJson = await capture(() =>
       environmentArchiveCommand(doomedJson.id, { port: String(port), json: true }));
-    const archivedRow = JSON.parse(asJson.log.join('\n')) as { status: string; archived_at: string | null };
-    expect(archivedRow.status).toBe('archived');
+    const archivedRow = JSON.parse(asJson.log.join('\n')) as { archived_at: string | null };
     expect(archivedRow.archived_at).not.toBeNull();
 
     // Archiving is terminal for the single-resource read and hides the row from the
