@@ -77,8 +77,9 @@ describe('Console Tool Runtime confirmation adapter', () => {
     expect(beginToolConfirmation(inFlight, 'call_pending')).toBe(false);
     const source = readFileSync('apps/console/src/components/pages/SessionPages.tsx', 'utf8');
     expect(source).toContain('beginToolConfirmation(confirmingToolIdsRef.current, toolUseId)');
-    expect(source).toContain('disabled={confirmingToolIds.has(entry.toolUseId)}');
     expect(source).toContain('toolConfirmationPayload(toolUseId, result)');
+    const card = readFileSync('apps/console/src/components/session/ApprovalCard.tsx', 'utf8');
+    expect(card).toContain('disabled={confirmingToolIds.has(entry.toolUseId)}');
   });
 
   it('maps tool results to Completed/Failed cards', () => {
@@ -149,7 +150,7 @@ describe('Console custom tool result submission', () => {
   it('passes the agent.custom_tool_use event id, not the block id', () => {
     // The published contract's `custom_tool_use_id` names the use event.
     const entry = firstToolEntry([customUse('cust_9', 'evt_nine')]);
-    const source = readFileSync('apps/console/src/components/pages/SessionPages.tsx', 'utf8');
+    const source = readFileSync('apps/console/src/components/session/ApprovalCard.tsx', 'utf8');
     expect(source).toContain('onSubmitResult(entry.toolUseId!, entry.id');
     expect(entry.id).toBe('evt_nine');
   });

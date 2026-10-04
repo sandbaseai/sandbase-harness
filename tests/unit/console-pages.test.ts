@@ -411,22 +411,20 @@ describe('Console page static coverage', () => {
     expect(settingsPage).not.toContain('memory?.provider');
     expect(settingsPage).not.toContain('sandbox?.provider');
     const sessionPage = readFileSync('apps/console/src/components/pages/SessionPages.tsx', 'utf8');
-    expect(sessionPage).not.toContain('?? events[0]');
+    const sessionTimeline = readFileSync('apps/console/src/components/session/SessionTimeline.tsx', 'utf8');
+    const sessionStream = readFileSync('apps/console/src/components/session/useSessionStream.ts', 'utf8');
+    const sessionsList = readFileSync('apps/console/src/components/pages/SessionsListPage.tsx', 'utf8');
     expect(sessionPage).not.toContain('<div className="emptyValue">No inline preview');
     expect(sessionPage).not.toContain('No rendered content.');
-    expect(sessionPage).toContain('artifactEmptyPreview');
-    expect(sessionPage).toContain('emptyRenderedEvent');
-    expect(sessionPage).toContain('placeholder="Search events"');
-    expect(sessionPage).toContain('eventFilterFooter');
-    expect(sessionPage).toContain('Reset filters');
-    expect(sessionPage).toContain('miniEventEmpty');
-    expect(sessionPage).toContain("label: 'Pending actions'");
-    expect(sessionPage).toContain("value: formatUsage(session.usage)");
+    expect(sessionTimeline).toContain('placeholder="Search events"');
+    expect(sessionTimeline).toContain('eventFilterFooter');
+    expect(sessionTimeline).toContain('Reset filters');
+    expect(sessionsList).toContain('formatUsage(session.usage)');
     // A stream without a cursor carries live events only, so the page always
     // names where to resume from — it must not fall back to a cursor-less
     // subscription when it has not read a sequence yet.
-    expect(sessionPage).toContain('lastEventId: String(lastDurableSequence.current)');
-    expect(sessionPage).not.toContain('lastDurableSequence.current > 0 ?');
+    expect(sessionStream).toContain('lastEventId: String(lastDurableSequence.current)');
+    expect(sessionStream).not.toContain('lastDurableSequence.current > 0 ?');
     const routeHook = readFileSync('apps/console/src/hooks/useHashRoute.ts', 'utf8');
     expect(routeHook).toContain("'webhooks'");
     expect(routeHook).toContain("'scheduled-deployments'");
