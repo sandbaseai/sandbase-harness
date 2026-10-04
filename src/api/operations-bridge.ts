@@ -21,6 +21,10 @@ import {
   retryDueWebhookDeliveries,
   sessionEventWebhookId,
 } from '@/core/operations/webhook-dispatcher.js';
+import {
+  budgetReachedDedupKey,
+  webhookEventsForSessionEvent,
+} from '@/core/operations/webhook-events.js';
 import { rearmScheduledDeployments, runDueScheduledDeployments } from '@/core/operations/scheduler.js';
 import { sweepExpiredParkedWaits } from '@/core/operations/parked-wait-sweep.js';
 
@@ -59,7 +63,11 @@ export function webhookSigningSecret(dataDir: string | undefined): string {
 
 /**
  * A broadcast listener that projects each durable session event to every
- * matching webhook subscription.
+ * matching webhook subscription — through the official event catalog.
+ *
+ * `webhookEventsForSessionEvent` decides which webhook events a stream event
+ * raises; a stream event with no published counterpart (an `agent.message`, a
+ * `span.*`) is dropped, so a subscription only ever sees catalog names.
  *
  * The write to the event log has already completed by the time this runs, so a
  * failed delivery can lose a notification but never a session event.
@@ -71,36 +79,55 @@ export function createWebhookEventListener(opts: {
   fetchImpl?: typeof fetch;
   sustainedFailureWindowSeconds?: number;
 }): (event: SessionEvent) => void {
+  // The published `session.budget_reached` fires at most once per budget value.
+  // The set lives with the listener because the dedup window it guards is the
+  // listener's own lifetime: a restart that re-fired once would report a
+  // transition the budget already caused, which is the same lie as reporting
+  // it twice in one lifetime — but the trigger itself (a `budget_reached`
+  // idle) cannot recur for the same unraised budget, so process memory is the
+  // whole window the rule needs.
+  const budgetReachedSent = new Set<string>();
   return (event: SessionEvent) => {
+    const raised = webhookEventsForSessionEvent(event);
+    if (raised.length === 0) return;
     const createdAt = event.createdAt instanceof Date
       ? event.createdAt.toISOString()
       : new Date(event.createdAt).toISOString();
-    void dispatchWebhookEvent(
-      opts.db,
-      {
-        type: event.type,
-        // The payload is a reference, not the resource: a receiver fetches
-        // `GET /v1/sessions/<id>` for current state. Shipping a projection here
-        // would also make a retry carry a snapshot the session has since moved
-        // past.
-        subjectId: event.sessionId,
-        // Deterministic per (stream event, webhook type): one stream event can
-        // raise more than one webhook event, and every retry of a trigger must
-        // keep the `webhook-id` it first carried.
-        id: sessionEventWebhookId(event.id, event.type),
-        created_at: createdAt,
-      },
-      {
-        secret: opts.webhookSecret,
-        dataDir: opts.dataDir,
-        fetchImpl: opts.fetchImpl,
-        sustainedFailureWindowSeconds: opts.sustainedFailureWindowSeconds,
-      },
-    ).catch(() => {
-      // dispatchWebhookEvent records failed attempts as delivery rows; a
-      // rejection here means the delivery could not even be recorded, which no
-      // in-band handler can improve on.
-    });
+    for (const webhookEvent of raised) {
+      if (webhookEvent.type === 'session.budget_reached') {
+        const budget = opts.db.prepare('SELECT budget FROM sessions WHERE id = ?')
+          .get(event.sessionId) as { budget: string | null } | undefined;
+        const dedupKey = budgetReachedDedupKey(event.sessionId, budget?.budget ?? null);
+        if (budgetReachedSent.has(dedupKey)) continue;
+        budgetReachedSent.add(dedupKey);
+      }
+      void dispatchWebhookEvent(
+        opts.db,
+        {
+          type: webhookEvent.type,
+          // The payload is a reference, not the resource: a receiver fetches
+          // `GET /v1/sessions/<id>` for current state. Shipping a projection here
+          // would also make a retry carry a snapshot the session has since moved
+          // past.
+          subjectId: webhookEvent.subjectId,
+          // Deterministic per (stream event, webhook type): one stream event can
+          // raise more than one webhook event, and every retry of a trigger must
+          // keep the `webhook-id` it first carried.
+          id: sessionEventWebhookId(event.id, webhookEvent.type),
+          created_at: createdAt,
+        },
+        {
+          secret: opts.webhookSecret,
+          dataDir: opts.dataDir,
+          fetchImpl: opts.fetchImpl,
+          sustainedFailureWindowSeconds: opts.sustainedFailureWindowSeconds,
+        },
+      ).catch(() => {
+        // dispatchWebhookEvent records failed attempts as delivery rows; a
+        // rejection here means the delivery could not even be recorded, which no
+        // in-band handler can improve on.
+      });
+    }
   };
 }
 

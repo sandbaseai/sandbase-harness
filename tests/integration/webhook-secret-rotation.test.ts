@@ -66,7 +66,7 @@ describe('Webhook signing-secret rotation', () => {
   }
 
   async function createWebhook(url = 'https://example.com/hook') {
-    const { res, body } = await post('/v1/webhooks', { url, events: ['turn_complete'], name: url });
+    const { res, body } = await post('/v1/webhooks', { url, events: ['session.status_idled'], name: url });
     expect(res.status).toBe(201);
     expect(body.secret_key).toMatch(/^whsec_/);
     return body as { id: string; secret_key: string };
@@ -75,7 +75,7 @@ describe('Webhook signing-secret rotation', () => {
   /** One dispatch pass, as the repeated fetch calls it produced. */
   async function deliver() {
     const fetchImpl = vi.fn(async () => ({ status: 204 })) as unknown as typeof fetch;
-    await dispatchWebhookEvent(db, { type: 'turn_complete', subjectId: 'sess_1' }, {
+    await dispatchWebhookEvent(db, { type: 'session.status_idled', subjectId: 'sess_1' }, {
       secret: 'legacy-key',
       dataDir,
       fetchImpl,
@@ -156,7 +156,7 @@ describe('Webhook signing-secret rotation', () => {
     // legacy derivation; rotating is the call that takes it off that derivation.
     db.prepare(
       `INSERT INTO webhooks (id, name, url, events, created_at, updated_at)
-       VALUES ('wh_legacy', 'Legacy', 'https://example.com/legacy', '["turn_complete"]', datetime('now'), datetime('now'))`,
+       VALUES ('wh_legacy', 'Legacy', 'https://example.com/legacy', '["session.status_idled"]', datetime('now'), datetime('now'))`,
     ).run();
     const rotated = await post('/v1/webhooks/wh_legacy/rotate-secret');
     expect(rotated.res.status).toBe(200);

@@ -66,7 +66,7 @@ describe('webhook delivery does not follow redirects', () => {
     db.prepare(
       `INSERT INTO webhooks (id, name, url, events, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(id, id, url, JSON.stringify(['*']), fixedNow.toISOString(), fixedNow.toISOString());
+    ).run(id, id, url, JSON.stringify(['session.status_idled', 'session.status_terminated']), fixedNow.toISOString(), fixedNow.toISOString());
   }
 
   function deliveryRow(id: string) {
@@ -92,7 +92,7 @@ describe('webhook delivery does not follow redirects', () => {
     subscribe('wh_redir', `http://127.0.0.1:${redirector.port}/hook`);
 
     const results = await dispatchWebhookEvent(db, {
-      type: 'session.status_idle',
+      type: 'session.status_idled',
       subjectId: 'sess_1',
     }, { secret: 'whsec_redir_test', now: () => fixedNow });
 
@@ -148,7 +148,7 @@ describe('webhook delivery does not follow redirects', () => {
     subscribe('wh_307', `http://127.0.0.1:${redirector.port}/hook`);
 
     const results = await dispatchWebhookEvent(db, {
-      type: 'turn_complete',
+      type: 'session.status_terminated',
       subjectId: 'sess_1',
     }, { secret: 'whsec_redir_test', now: () => fixedNow });
 
@@ -169,7 +169,7 @@ describe('webhook delivery does not follow redirects', () => {
     subscribe('wh_ok', `http://127.0.0.1:${endpoint.port}/hook`);
 
     const results = await dispatchWebhookEvent(db, {
-      type: 'session.status_idle',
+      type: 'session.status_idled',
       subjectId: 'sess_1',
     }, { secret: 'whsec_redir_test', now: () => fixedNow });
 
@@ -191,7 +191,7 @@ describe('webhook delivery does not follow redirects', () => {
     subscribe('wh_503', `http://127.0.0.1:${endpoint.port}/hook`);
 
     const results = await dispatchWebhookEvent(db, {
-      type: 'turn_complete',
+      type: 'session.status_terminated',
       subjectId: 'sess_1',
     }, { secret: 'whsec_redir_test', now: () => fixedNow });
 

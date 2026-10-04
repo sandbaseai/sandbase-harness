@@ -173,7 +173,7 @@ describe('Console/API no-port E2E flow', () => {
     const webhook = await postJson('/v1/webhooks', {
       name: 'E2E webhook',
       url: 'https://example.invalid/webhook',
-      events: ['session.completed'],
+      events: ['session.created'],
     });
     expect(webhook.status).toBe(201);
 

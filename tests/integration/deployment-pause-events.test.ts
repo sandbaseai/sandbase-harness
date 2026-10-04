@@ -230,16 +230,15 @@ describe('Deployment pause webhook events', () => {
     expect(receivedFor(webhookId, 'deployment.paused')).toHaveLength(1);
   });
 
-  it('matches a wildcard subscription and leaves an unrelated one untouched', async () => {
-    const wildcard = await subscribe(['deployment.*']);
+  it('reaches a subscription that names the event and leaves an unrelated one untouched', async () => {
+    const named = await subscribe(['deployment.paused', 'deployment.unpaused', 'deployment.updated', 'deployment.archived']);
     const unrelated = await subscribe(['agent.created']);
     const id = await createDeployment('wildcards');
 
     await post(`/v1/deployments/${id}/pause`);
 
-    // The `deployment.*` subscriber matched the new name through the existing
-    // prefix matcher, so the name is not special-cased anywhere.
-    expect(receivedFor(wildcard, 'deployment.paused')).toHaveLength(1);
+    // The name flows through list matching rather than a special case.
+    expect(receivedFor(named, 'deployment.paused')).toHaveLength(1);
     // Nothing at all reached the subscriber on another family — asserted over every
     // event it could have taken, not just the two new names.
     const everything = received.filter((item) => item.headers?.['x-sandbase-webhook-endpoint-id'] === unrelated);

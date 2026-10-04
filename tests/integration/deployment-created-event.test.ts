@@ -240,18 +240,15 @@ describe('deployment.created', () => {
     expect(receivedFor(webhookId, 'deployment.created')[0].body.data.id).toBe(res.body.id);
   });
 
-  it('matches a wildcard subscription and leaves another family untouched', async () => {
-    const wildcard = await subscribe(['deployment.*']);
-    const star = await subscribe(['*']);
+  it('reaches a subscription that names the event and leaves another family untouched', async () => {
+    const named = await subscribe(['deployment.paused', 'deployment.unpaused', 'deployment.updated', 'deployment.created']);
     const unrelated = await subscribe(['agent.created']);
 
     const res = await create({ name: 'created-wild', agent_id: 'agent_one', cron: '0 20 * * 5' });
     expect(res.status).toBe(201);
 
-    // The new name flows through the existing prefix matcher rather than a
-    // special case, and `*` reaches it too.
-    expect(receivedFor(wildcard, 'deployment.created')).toHaveLength(1);
-    expect(receivedFor(star, 'deployment.created')).toHaveLength(1);
+    // The name flows through list matching rather than a special case.
+    expect(receivedFor(named, 'deployment.created')).toHaveLength(1);
     const everything = received.filter((item) => item.headers?.['x-sandbase-webhook-endpoint-id'] === unrelated);
     expect(everything).toEqual([]);
   });

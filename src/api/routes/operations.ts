@@ -9,6 +9,7 @@ import {
   retryDueWebhookDeliveries,
 } from '@/core/operations/webhook-dispatcher.js';
 import { signWebhookDelivery } from '@/core/operations/webhook-signature.js';
+import { invalidWebhookEventNames } from '@/core/operations/webhook-events.js';
 import {
   mintAndStoreWebhookSecret,
   resolveWebhookSigningSecret,
@@ -66,9 +67,13 @@ export function operationsRoutes(deps: ServerDeps, options: OperationsRoutesOpti
     const body = await readObjectBody(c);
     if (!body.ok) return body.response;
     const url = stringField(body.value.url);
-    if (!url || !isHttpUrl(url)) return invalid(c, 'url must be an http(s) URL');
+    if (!url || !isHttpUrl(url)) return invalid(c, 'url must be an https:// URL, or an http:// loopback URL (localhost, 127.0.0.1, or ::1)');
     const events = stringArray(body.value.events);
     if (events.length === 0) return invalid(c, 'events must contain at least one event name');
+    const invalidNames = invalidWebhookEventNames(events);
+    if (invalidNames.length > 0) {
+      return invalid(c, `unknown event name(s): ${invalidNames.join(', ')}`);
+    }
     const id = `wh_${nanoid(18)}`;
     deps.db.prepare(`
       INSERT INTO webhooks (id, name, url, events, description, metadata, created_at, updated_at)
@@ -128,9 +133,13 @@ export function operationsRoutes(deps: ServerDeps, options: OperationsRoutesOpti
     const existing = deps.db.prepare('SELECT * FROM webhooks WHERE id = ? AND archived_at IS NULL').get(id) as WebhookRow | undefined;
     if (!existing) return notFound(c, 'Webhook not found');
     const url = body.value.url === undefined ? existing.url : stringField(body.value.url);
-    if (!url || !isHttpUrl(url)) return invalid(c, 'url must be an http(s) URL');
+    if (!url || !isHttpUrl(url)) return invalid(c, 'url must be an https:// URL, or an http:// loopback URL (localhost, 127.0.0.1, or ::1)');
     const events = body.value.events === undefined ? parseArray(existing.events) : stringArray(body.value.events);
     if (events.length === 0) return invalid(c, 'events must contain at least one event name');
+    const invalidNames = invalidWebhookEventNames(events);
+    if (invalidNames.length > 0) {
+      return invalid(c, `unknown event name(s): ${invalidNames.join(', ')}`);
+    }
     // The published delivery behaviour sets an endpoint to `disabled` and states that the
     // disable is reversible by re-enabling it; until this route wrote `status`, nothing
     // could re-enable one — the dispatcher already selected `status = 'active'`, so a
@@ -506,10 +515,21 @@ function parseArray(value: string | null): string[] {
   }
 }
 
+/**
+ * The endpoint-address rule, wider than the published HTTPS-on-443 one for a
+ * documented reason: this runtime is local-first, so the receiver a webhook
+ * exists to talk to is usually on the same host. `https://` is accepted
+ * everywhere; `http://` is accepted for loopback names only, since an
+ * `http://` endpoint anywhere else would carry signed payloads over a network
+ * in cleartext.
+ */
 function isHttpUrl(value: string) {
   try {
     const url = new URL(value);
-    return url.protocol === 'http:' || url.protocol === 'https:';
+    if (url.protocol === 'https:') return true;
+    if (url.protocol !== 'http:') return false;
+    const host = url.hostname;
+    return host === 'localhost' || host === '127.0.0.1' || host === '[::1]' || host === '::1';
   } catch {
     return false;
   }

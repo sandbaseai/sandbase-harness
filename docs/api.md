@@ -2383,14 +2383,32 @@ for webhook test delivery, scheduled run-now, and deterministic outcome
 evaluation. A background worker delivers webhook events and runs cron
 schedules, so an unwatched runtime still delivers.
 
-The event names the runtime raises are the session event types plus
-`deployment.created`, `deployment.paused`, `deployment.unpaused`,
-`deployment.updated`, `deployment.archived`, `deployment_run.started`,
-`deployment_run.succeeded`, and `deployment_run.failed`. The rest of
-the published event table — `agent.*`, `environment.*`, `vault.*`,
-`vault_credential.*`, and `deployment.deleted` — is
-accepted in a subscription and never produced, so a receiver cannot distinguish
-an unimplemented event from a quiet one.
+Subscriptions may only name events from the published catalog — the
+`BetaWebhook*EventData.type` union in the official SDK. `POST` and `PUT` under
+`/v1/webhooks` refuse `*`, `prefix.*`, and any unknown name with `400`, so a
+stored subscription can never be broader than the contract. The durable
+session stream is projected onto the catalog rather than forwarded:
+`session.status_running` arrives as `session.status_run_started`,
+`session.status_idle` as `session.status_idled` — plus
+`session.budget_reached` when the idle's stop reason names it, at most once
+per session and budget value — `session.status_rescheduled` and
+`session.status_terminated` under their own names, and
+`span.outcome_evaluation_end` as `session.outcome_evaluation_ended`. Stream
+events with no published counterpart (`agent.message`, `user.message`,
+`span.model_request_*`, `session.usage`, `session.error`) are dropped.
+
+The resource families publish on transitions: `session.created` /
+`session.archived` on the routes (and `session.updated` / `session.deleted`
+from the stream), `agent.created` / `agent.updated` (a new version only) /
+`agent.archived`, `environment.created` / `environment.updated` (a changed
+field only) / `environment.archived` / `environment.deleted`, `vault.created` /
+`vault.archived` with one `vault_credential.archived` per credential, the
+credential `created` / `archived` / `deleted` triple, `memory_store.created` /
+`memory_store.archived` / `memory_store.deleted`, and the deployment and timed-run events below.
+The catalog names a subscription may list but nothing yet produces are
+`session.pending`, `session.running`, `session.idled`,
+`session.requires_action`, `session.thread_*`, `agent.deleted`,
+`vault.deleted`, `vault_credential.refresh_failed`, and `deployment.deleted` — each waits on a surface that does not exist yet.
 
 A **timed** run publishes `deployment_run.started` and then exactly one of
 `deployment_run.succeeded` / `deployment_run.failed`; all three name the same run,

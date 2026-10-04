@@ -139,8 +139,13 @@ export async function runDueScheduledDeployments(
   const results: SchedulerRunResult[] = [];
   for (const schedule of rows) {
     const result = runSchedule(db, sessionManager, schedule, 'scheduled', now);
-    // Both events carry the run's own id, which is what the published table uses
-    // to tie an outcome to the run that started.
+    // A scheduled run that materialized a session is a session creation like
+    // any other: `session.created` names the session it produced, and the run
+    // events name the run, which is what the published table uses to tie an
+    // outcome to the run that started.
+    if (result.session_id) {
+      await emit({ type: 'session.created', subjectId: result.session_id });
+    }
     await emit({ type: 'deployment_run.started', subjectId: result.id });
     await emit({
       type: result.status === 'created_session' ? 'deployment_run.succeeded' : 'deployment_run.failed',

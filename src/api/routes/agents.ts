@@ -25,6 +25,7 @@ import {
   parseAgentDefinitionFromRow,
   refreshAgentsFromDb,
 } from '@/core/agent/store.js';
+import { publishOperationEvent } from './operation-events.js';
 
 export function agentsRoutes(deps: ServerDeps) {
   const app = new Hono();
@@ -85,6 +86,7 @@ export function agentsRoutes(deps: ServerDeps) {
     insertAgentVersion(deps, id, 1, agent.name, agent);
     refreshAgentsFromDb(deps.db, deps.agents);
 
+    await publishOperationEvent(deps, { type: 'agent.created', subjectId: id });
     return c.json(toApiAgent(agent, agentRowMeta(deps, id)), 201);
   });
 
@@ -205,6 +207,10 @@ export function agentsRoutes(deps: ServerDeps) {
 
     refreshAgentsFromDb(deps.db, deps.agents);
 
+    // `agent.updated` fires only on a real transition — this path is reached
+    // exactly when a new immutable version was written; the equal-definition
+    // retry returned above without one (`订阅Webhook.md:52`).
+    await publishOperationEvent(deps, { type: 'agent.updated', subjectId: id });
     return c.json(toApiAgent(agent, agentRowMeta(deps, id)));
   };
 
@@ -224,7 +230,7 @@ export function agentsRoutes(deps: ServerDeps) {
   // endpoint's identity (`contracts/anthropic-cma/routes.md:24`).
   app.post('/:id', updateAgent);
 
-  app.post('/:id/archive', (c) => {
+  app.post('/:id/archive', async (c) => {
     const id = c.req.param('id');
     const existing = activeAgentRow(deps, id);
     if (!existing) {
@@ -239,6 +245,9 @@ export function agentsRoutes(deps: ServerDeps) {
       WHERE id = ?
     `).run(id);
     refreshAgentsFromDb(deps.db, deps.agents);
+    // `activeAgentRow` refuses already-archived rows, so reaching this line is
+    // the transition — a re-archive answered 404 above and raises nothing.
+    await publishOperationEvent(deps, { type: 'agent.archived', subjectId: id });
     return c.json(agent ? toApiAgent(agent, agentRowMeta(deps, id)) : { id, status: 'archived' });
   });
 

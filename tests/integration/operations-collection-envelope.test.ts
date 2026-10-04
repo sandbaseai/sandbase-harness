@@ -63,7 +63,7 @@ describe('operations collection envelope', () => {
 
     const webhook = await post('/v1/webhooks', {
       url: 'https://example.test/hook',
-      events: ['session.completed'],
+      events: ['session.created'],
     });
     expect(webhook.res.status).toBe(201);
     const schedule = await post('/v1/scheduled-deployments', {

@@ -55,6 +55,7 @@ import {
   normalizeSystemMessageContent,
   systemMessageContentError,
 } from './system-message.js';
+import { publishOperationEvent } from './operation-events.js';
 import type { LoopEngineSteerReceipt } from '@/strategy/loop-engine/adapter.js';
 
 export function sessionsRoutes(deps: ServerDeps) {
@@ -173,6 +174,7 @@ export function sessionsRoutes(deps: ServerDeps) {
         metadata,
         ...(budget.budget ? { budget: budget.budget } : {}),
       }, initialEvents.events ?? []);
+      await publishOperationEvent(deps, { type: 'session.created', subjectId: session.id });
       return c.json(toApiSession(session, session.agentDefinition ?? findAgentById(deps, session.agentId), sessionDerived(session.id)), 201);
     } catch (err) {
       if (err instanceof UnsupportedCapabilityError) {
@@ -845,7 +847,14 @@ export function sessionsRoutes(deps: ServerDeps) {
   app.post('/:id/archive', async (c) => {
     const sessionId = c.req.param('id');
     try {
+      // `archive` is idempotent — a second call returns the same session — but
+      // the published `session.archived` fires only on the transition, so the
+      // read-before tells the two apart.
+      const wasArchived = sessionManager.get(sessionId)?.archivedAt != null;
       const session = await sessionManager.archive(sessionId);
+      if (!wasArchived) {
+        await publishOperationEvent(deps, { type: 'session.archived', subjectId: sessionId });
+      }
       return c.json(toApiSession(session, session.agentDefinition ?? findAgentById(deps, session.agentId), sessionDerived(session.id)));
     } catch (err: any) {
       if (err.message?.includes('not found')) {

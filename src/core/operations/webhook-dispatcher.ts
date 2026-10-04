@@ -615,8 +615,14 @@ function parsePayloadId(payloadJson: string): string | null {
   }
 }
 
+/**
+ * Exact-name matching only. The published subscription vocabulary is the event
+ * catalog — there is no `*` or `prefix.*` in it — so a wildcard stored by a
+ * pre-validation subscription matches nothing rather than silently widening
+ * what the endpoint receives.
+ */
 function eventMatches(subscriptions: string[], event: string): boolean {
-  return subscriptions.includes('*') || subscriptions.includes(event) || subscriptions.some((item) => item.endsWith('.*') && event.startsWith(item.slice(0, -1)));
+  return subscriptions.includes(event);
 }
 
 /**

@@ -58,7 +58,7 @@ describe('Webhook endpoint signing secret', () => {
     return request('/v1/webhooks', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url: 'https://example.com/hook', events: ['turn_complete'], ...body }),
+      body: JSON.stringify({ url: 'https://example.com/hook', events: ['session.status_idled'], ...body }),
     });
   }
 
@@ -146,7 +146,7 @@ describe('Webhook endpoint signing secret', () => {
     db.prepare(
       `INSERT INTO webhooks (id, name, url, events, created_at, updated_at)
        VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`,
-    ).run('wh_pre_m038', 'Legacy', 'https://example.com/legacy', JSON.stringify(['*']));
+    ).run('wh_pre_m038', 'Legacy', 'https://example.com/legacy', JSON.stringify(['session.status_idled']));
 
     const stored = storedSecret('wh_pre_m038');
     expect(stored.secret_ciphertext).toBeNull();

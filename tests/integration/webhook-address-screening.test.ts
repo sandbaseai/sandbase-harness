@@ -101,7 +101,7 @@ describe('webhook address screening', () => {
     db.prepare(
       `INSERT INTO webhooks (id, name, url, events, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(id, id, url, JSON.stringify(['*']), '2026-07-23T00:00:00.000Z', '2026-07-23T00:00:00.000Z');
+    ).run(id, id, url, JSON.stringify([EVENT]), '2026-07-23T00:00:00.000Z', '2026-07-23T00:00:00.000Z');
   }
 
   function webhookRow(id: string) {

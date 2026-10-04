@@ -132,7 +132,7 @@ describe('webhook sustained-failure auto-disable', () => {
     db.prepare(
       `INSERT INTO webhooks (id, name, url, events, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run(id, id, url, JSON.stringify(['*']), T0.toISOString(), T0.toISOString());
+    ).run(id, id, url, JSON.stringify([EVENT]), T0.toISOString(), T0.toISOString());
   }
 
   function webhookRow(id: string) {

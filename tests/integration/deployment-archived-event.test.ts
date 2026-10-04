@@ -219,19 +219,16 @@ describe('deployment.archived', () => {
     expect(receivedFor(webhookId, 'deployment.archived')[0].body.data.id).toBe(id);
   });
 
-  it('matches a wildcard subscription and leaves another family untouched', async () => {
-    const wildcard = await subscribe(['deployment.*']);
-    const star = await subscribe(['*']);
+  it('reaches a subscription that names the event and leaves another family untouched', async () => {
+    const named = await subscribe(['deployment.paused', 'deployment.unpaused', 'deployment.updated', 'deployment.archived']);
     const unrelated = await subscribe(['agent.archived']);
     const id = await createDeployment('archived-wild');
 
     const res = await archive(`/v1/deployments/${id}/archive`);
     expect(res.status).toBe(200);
 
-    // The name flows through the existing prefix matcher rather than a special
-    // case, and `*` reaches it too.
-    expect(receivedFor(wildcard, 'deployment.archived')).toHaveLength(1);
-    expect(receivedFor(star, 'deployment.archived')).toHaveLength(1);
+    // The name flows through list matching rather than a special case.
+    expect(receivedFor(named, 'deployment.archived')).toHaveLength(1);
     expect(received.filter((item) => item.headers?.['x-sandbase-webhook-endpoint-id'] === unrelated)).toEqual([]);
   });
 
@@ -271,7 +268,9 @@ describe('deployment.archived', () => {
   });
 
   it('leaves the webhook archive route publishing nothing while still archiving', async () => {
-    const webhookId = await subscribe(['webhook.archived', 'deployment.archived']);
+    // `webhook.*` is not in the published catalog, so it cannot be subscribed;
+    // the subscription that could take a leak is the deployment one.
+    const webhookId = await subscribe(['deployment.archived']);
     const created = await app.request('/v1/webhooks', {
       method: 'POST',
       headers: CMA_HEADERS,

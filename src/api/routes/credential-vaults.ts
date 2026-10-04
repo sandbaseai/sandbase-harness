@@ -33,6 +33,7 @@ import {
   parseIncludeArchived,
   rejectUnexpectedQueryParams,
 } from './query-params.js';
+import { publishOperationEvent } from './operation-events.js';
 
 /**
  * The vault listing's ordering, as the token a page cursor carries.
@@ -127,6 +128,7 @@ export function credentialVaultRoutes(deps: ServerDeps) {
         JSON.stringify(stringRecordField(body.value.metadata)),
       );
       const row = deps.db.prepare(vaultSelect('WHERE v.id = ? AND v.archived_at IS NULL')).get(id) as unknown as VaultRow;
+      await publishOperationEvent(deps, { type: 'vault.created', subjectId: id });
       return c.json(toVault(row, deps), 201);
     } catch (err: any) {
       if (String(err.message).includes('UNIQUE')) return conflict(c, 'Credential vault id already exists');
@@ -207,6 +209,11 @@ export function credentialVaultRoutes(deps: ServerDeps) {
     );
     deps.db.prepare('UPDATE credential_vaults SET updated_at = datetime(\'now\') WHERE id = ?').run(vaultId);
     const row = deps.db.prepare('SELECT * FROM credential_records WHERE id = ?').get(id) as unknown as CredentialRow;
+    await publishOperationEvent(deps, {
+      type: 'vault_credential.created',
+      subjectId: id,
+      extra: { vault_id: vaultId },
+    });
     return c.json(withWarnings(toCredential(row), parsed.warnings), 201);
   });
 
@@ -214,7 +221,28 @@ export function credentialVaultRoutes(deps: ServerDeps) {
 
   app.delete('/:id/credentials/:credentialId', (c) => updateCredentialState(c, deps, 'deleted'));
 
-  app.post('/:id/archive', (c) => archiveResource(c, deps, 'credential_vaults', (row) => toVault(row, deps)));
+  // Archiving a vault archives its credentials with it: the published table
+  // emits one `vault_credential.archived` per credential alongside the vault's
+  // own event (`订阅Webhook.md:37-38`). A 404 — missing or already archived —
+  // raises nothing.
+  app.post('/:id/archive', async (c) => {
+    const vaultId = c.req.param('id');
+    const credentials = deps.db.prepare(
+      "SELECT id FROM credential_records WHERE vault_id = ? AND archived_at IS NULL AND status != 'deleted'",
+    ).all(vaultId) as Array<{ id: string }>;
+    const response = archiveResource(c, deps, 'credential_vaults', (row) => toVault(row, deps));
+    if (response.status === 200) {
+      for (const credential of credentials) {
+        await publishOperationEvent(deps, {
+          type: 'vault_credential.archived',
+          subjectId: credential.id,
+          extra: { vault_id: vaultId },
+        });
+      }
+      await publishOperationEvent(deps, { type: 'vault.archived', subjectId: vaultId });
+    }
+    return response;
+  });
 
   // --- Credential rotation, use and audit (published) ----------------------
   //
@@ -512,7 +540,7 @@ function secretHint(value: string) {
   return visible ? `••••${visible}` : '••••';
 }
 
-function updateCredentialState(c: any, deps: ServerDeps, status: 'archived' | 'deleted') {
+async function updateCredentialState(c: any, deps: ServerDeps, status: 'archived' | 'deleted') {
   const vaultId = c.req.param('id');
   const credentialId = c.req.param('credentialId');
   const vault = deps.db.prepare('SELECT id FROM credential_vaults WHERE id = ? AND archived_at IS NULL').get(vaultId);
@@ -525,6 +553,13 @@ function updateCredentialState(c: any, deps: ServerDeps, status: 'archived' | 'd
     'UPDATE credential_records SET status = ?, archived_at = datetime(\'now\'), updated_at = datetime(\'now\') WHERE id = ? AND vault_id = ?',
   ).run(status, credentialId, vaultId);
   deps.db.prepare('UPDATE credential_vaults SET updated_at = datetime(\'now\') WHERE id = ?').run(vaultId);
+  // The row filter above only admits a credential that was not already in the
+  // target state, so reaching here is the transition itself.
+  await publishOperationEvent(deps, {
+    type: status === 'archived' ? 'vault_credential.archived' : 'vault_credential.deleted',
+    subjectId: credentialId,
+    extra: { vault_id: vaultId },
+  });
   const row = deps.db.prepare('SELECT * FROM credential_records WHERE id = ? AND vault_id = ?').get(credentialId, vaultId) as unknown as CredentialRow;
   return c.json(toCredential(row));
 }

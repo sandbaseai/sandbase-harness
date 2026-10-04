@@ -60,9 +60,15 @@ is created `active` (the schema default) and stays `active` until archived.
 `webhook-dispatcher.ts` is the delivery engine:
 
 - `dispatchWebhookEvent` selects `archived_at IS NULL AND status = 'active'`
-  rows, matches the event name against each subscription's `events` array
-  (exact, `*`, or a `prefix.*` wildcard), and delivers synchronously, returning
-  one delivery record per match.
+  rows, matches the event name against each subscription's `events` array by
+  exact name, and delivers synchronously, returning one delivery record per
+  match. The `*` and `prefix.*` wildcard spellings are gone rather than merely
+  unused: `POST` and `PUT` under `/v1/webhooks` validate every entry against
+  `OFFICIAL_WEBHOOK_EVENTS` (`src/core/operations/webhook-events.ts`, the
+  `BetaWebhook*EventData.type` union transcribed from
+  `@anthropic-ai/sdk@0.129.0`) and answer `400` naming each unrecognized
+  entry, so a stored subscription can only ever name an event the published
+  contract defines.
 - `makePayload` builds the published envelope
   `{type: 'event', id, created_at, data: {type, id, organization_id, workspace_id, ...}}`.
   The root `type` is the literal `event`, the root `id` is the `whe_` webhook
@@ -75,27 +81,46 @@ is created `active` (the schema default) and stays `active` until archived.
   `sessionEventWebhookId` hashes the stream event id and the webhook event
   name — so one stream event can raise more than one webhook event without two
   deliveries sharing a `webhook-id`.
-- Two sources raise events. Session events reach the dispatcher through a
-  broadcast listener the runtime installs (`operations-bridge.ts`), which fires
-  and forgets because it runs on the hot path of every session event. Operations
-  events have no such channel, so the route that causes one publishes it through
+- Two sources raise events, and both pass through the catalog. Session stream
+  events reach the dispatcher through a broadcast listener the runtime installs
+  (`operations-bridge.ts`), which fires and forgets because it runs on the hot
+  path of every session event — but only after `webhookEventsForSessionEvent`
+  projects the durable event onto the published names. A stream event with no
+  published counterpart (`agent.message`, `user.message`, `span.model_request_*`,
+  `session.usage`, `session.error`) is dropped, so a subscription sees catalog
+  names and nothing else. One stream event can raise two webhook events — an
+  idle with `stop_reason.type: "budget_reached"` raises `session.status_idled`
+  and `session.budget_reached` — and the budget companion fires at most once
+  per `(session, budget value)`, so a session that idles twice on the same
+  ceiling reports it once while a raised ceiling re-arms it. Operations events
+  have no stream, so the route that causes one publishes it through
   `src/api/routes/operation-events.ts`, which awaits the attempt: these are rare
   control-plane calls, and waiting means the delivery row exists before the
   caller is told the state change succeeded. Both sources end in
   `dispatchWebhookEvent`, so matching, signing, retries and delivery rows behave
   identically; only the place the event is raised differs. A failing delivery
   never fails the state change — the result is discarded and a rejection caught.
-- The event names the runtime can currently raise are therefore the session
-  event types plus `deployment.created`, `deployment.paused`,
-  `deployment.unpaused`, `deployment.updated`, `deployment.archived`,
-  `deployment_run.started`, `deployment_run.succeeded`, and
-  `deployment_run.failed`. **The
-  rest of
-  the published table is not emitted**: `agent.*`, `environment.*`, `vault.*`,
-  `vault_credential.*`, and `deployment.deleted` are names a subscription may list
-  and
-  nothing produces. A subscription is accepted as written, so an unrecognized
-  name is silent rather than refused. §4 records this.
+- The catalog names the runtime currently emits:
+
+  | Family | Emitted | Subscribable but never emitted |
+  | --- | --- | --- |
+  | sessions | `session.created`, `session.updated`, `session.archived`, `session.deleted`, `session.status_run_started`, `session.status_idled`, `session.status_rescheduled`, `session.status_terminated`, `session.budget_reached`, `session.outcome_evaluation_ended` | `session.pending`, `session.running`, `session.idled`, `session.requires_action`, `session.thread_*` (no multiagent surface) |
+  | agents | `agent.created`, `agent.updated` (a new version only), `agent.archived` | `agent.deleted` (no delete route) |
+  | environments | `environment.created`, `environment.updated` (a changed field only), `environment.archived`, `environment.deleted` | — |
+  | vaults | `vault.created`, `vault.archived`, `vault_credential.created`, `vault_credential.archived`, `vault_credential.deleted` | `vault.deleted` (no delete route), `vault_credential.refresh_failed` (no refresh path) |
+  | memory stores | `memory_store.created`, `memory_store.archived`, `memory_store.deleted` | — |
+  | deployments | `deployment.created`, `deployment.updated`, `deployment.paused`, `deployment.unpaused`, `deployment.archived` | `deployment.deleted` (no delete route) |
+  | deployment runs | `deployment_run.started`, `deployment_run.succeeded`, `deployment_run.failed` | — |
+
+  Session lifecycle events that have no stream event of their own —
+  `session.created`, `session.archived` — are published on the transition:
+  the REST routes through `operation-events.ts`, and a timed run that
+  materialized a session from `runDueScheduledDeployments`, so a repeated
+  archive and a failed run raise nothing. `session.updated` and
+  `session.deleted` ride the stream because the session manager already writes
+  those durable events. A vault archive
+  publishes one `vault_credential.archived` per live credential alongside the
+  vault's own event, per the published table.
 - A **timed** run publishes `deployment_run.started` and then exactly one of
   `deployment_run.succeeded` / `deployment_run.failed`, and all three name the same
   run: `data: {type: 'deployment_run', id: <run id>}`, the id of the
@@ -355,8 +380,8 @@ implemented differently, as §4 records.
 
 | Difference | Detail |
 | --- | --- |
-| Delivery payload envelope | Now the published body: `{type: "event", id, created_at, data: {type, id, organization_id, workspace_id}}`, verified end-to-end by the official SDK's `client.beta.webhooks.unwrap` (conformance test §6). `organization_id` / `workspace_id` are the local constants `org_local` / `wrkspc_local` — a real org/workspace does not exist locally, and the constants keep the field set a receiver destructures. The event names carried in `data.type` remain the vocabulary row below: the session stream still forwards raw session event names rather than the published `session.*` event names, which is the gap that remains. |
-| Event coverage | The published table names events across agents, environments, vaults and credentials, deployments, deployment runs, and sessions. The runtime raises the session event types, the five deployment lifecycle events and the three timed-run events listed in the webhook event vocabulary row below. A subscription listing a name nothing produces is accepted and simply silent, which is indistinguishable from "that event has not happened yet" — so a receiver cannot tell an unimplemented event from a quiet one. Recorded rather than papered over by refusing unknown names, which would break a subscription created against the published list. |
+| Delivery payload envelope | Now the published body: `{type: "event", id, created_at, data: {type, id, organization_id, workspace_id}}`, verified end-to-end by the official SDK's `client.beta.webhooks.unwrap` (conformance test §6). `organization_id` / `workspace_id` are the local constants `org_local` / `wrkspc_local` — a real org/workspace does not exist locally, and the constants keep the field set a receiver destructures. `data.type` carries the published event name: the session stream is projected through `webhookEventsForSessionEvent` rather than forwarded raw, so the names a receiver sees are the catalog's. |
+| Event coverage | Most of the published table is emitted — the per-family split is the table in §2. The names a subscription may still list and never receive are the ones with no producing surface at all: `session.pending`, `session.running`, `session.idled`, `session.requires_action`, the `session.thread_*` family (no multiagent surface), `agent.deleted`, `vault.deleted`, `vault_credential.refresh_failed`, and `deployment.deleted`. They remain subscribable because the SDK declares them and a published client config must not be refused — silence on a declared event is meaningful, silence on an undeclared one is refused at subscription time instead. |
 | `deployment.paused` causes | The published description covers a requested pause **and** an automatic pause after a non-recoverable trigger failure, and states that recoverable failures including rate limits do not pause. Only the requested cause exists: the automatic one needs the failure taxonomy of the run path, which the `M042` migration comment records as arriving with that work. The event is raised only when the state changes, so a repeat pause is silent. |
 | `deployment.created` scope | Emitted by both mount prefixes of the create route. A create refused before the insert publishes nothing. A deployment created already `paused` is reported by `deployment.created` alone, not by `deployment.paused`: that pair reports a transition, and a resource coming into existence paused has not moved from anything. |
 | `deployment.archived` causes | Only the **direct** cause exists. The published row gives a second one — the deployment's agent being archived — and adds that an agent's deletion archives its scheduled deployments **at the next scheduled run**, while a deployment with no schedule is never auto-archived. Neither is implemented: `POST /v1/agents/{id}/archive` (`src/api/routes/agents.ts:164`) updates only the `agents` table and touches no `scheduled_deployments` row, and `src/core/operations/scheduler.ts` reads deployments and re-arms `next_run_at` / `last_run_at` without ever archiving one. The prerequisite the published rule assumes is also absent: a deployment here cannot have "no schedule" — `cron` is `NOT NULL` and every create arms `next_run_at` — so a deployment that is never auto-archived has no representation. That is a behaviour of the scheduler and the agent route, recorded here rather than half-built. |
@@ -370,7 +395,7 @@ implemented differently, as §4 records.
 | Secret rotation | A window is opened by `POST /v1/webhooks/{id}/rotate-secret` and closed by `POST /v1/webhooks/{id}/retire-secret`, with both signatures carried in `webhook-signature` while it is open. Nothing retires the previous secret automatically: the operator decides when the old value stops being accepted, because only they know when every receiver has moved. |
 | Delivery trigger | The runtime's own bridge ticks every 60 seconds and projects each durable event as it is broadcast, so an unwatched runtime delivers; `POST /webhooks/dispatch` and `POST /webhooks/retry-due` remain for on-demand passes. The tick is when a due retry is picked up; the retry delay itself follows the retry backoff row. |
 | Subscription management surface | REST under `/v1/webhooks` with the `/v1/x` mirror. `PUT /{id}` is the enable/disable surface: it writes the published `status` field, and omitting it leaves the stored value unchanged like every other field in that partial update, so a rename cannot silently re-enable an endpoint an operator switched off. |
-| Webhook event vocabulary | Subscriptions name SandBase event types, and are accepted as written — an unrecognized name is silent rather than refused. Producers exist for the deployment lifecycle (`deployment.created`, `.paused`, `.unpaused`, `.updated`, `.archived`) and for timed runs (`deployment_run.started`, `.succeeded`, `.failed`); `agent.*`, `environment.*`, `vault.*`, `vault_credential.*` and `deployment.deleted` have none. The runtime also publishes its own names (`turn_complete`, `span.*`), which are not in the published table. The envelope carries the event name in `data.type` as published; the names themselves are still the local vocabulary rather than the published event-name mapping, which the delivery payload envelope row records. The `session.updated` name recorded here earlier had no producer either and has been removed rather than kept as a documented event; see `events.md` §4. |
+| Webhook event vocabulary | Subscriptions name events from `OFFICIAL_WEBHOOK_EVENTS` — the 44-name union transcribed from `BetaWebhook*EventData.type` in `@anthropic-ai/sdk@0.129.0`. Both write paths (`POST /v1/webhooks`, `PUT /v1/webhooks/{id}`) refuse a name outside it, including the `*` and `prefix.*` spellings the dispatcher used to honour, with `400` naming the offenders. The session stream is projected: `session.status_running` arrives as `session.status_run_started`, `session.status_idle` as `session.status_idled` (plus `session.budget_reached` when the idle's `stop_reason.type` names it, deduplicated per session and budget value), `span.outcome_evaluation_end` as `session.outcome_evaluation_ended`, and every other stream event is dropped — `agent.message`, `user.message`, `span.model_request_*`, `session.usage` and `session.error` are session telemetry, not webhook events. |
 | Deployment endpoint paths | Both spellings are served: the published `/v1/deployments` and the historical local `/v1/scheduled-deployments`. They are one router mounted twice (`src/api/routes/deployments.ts`), so they cannot diverge route by route, and the local spelling is neither deprecated nor redirected. The published contract also updates a deployment with `POST /v1/deployments/{id}` while this runtime uses `PUT`; the verb is not aliased, so a client written against the published verb still gets no route for that one call. |
 | Deployment control surface | Create, read, update, archive, manual run, run-due, **pause and unpause**. `POST /{id}/pause` records `paused_reason: {"type": "manual"}`; `POST /{id}/unpause` clears it and resumes from the next scheduled instant. Pause suppresses the scheduler and leaves the `run` endpoint open, which the published contract requires. The automatic pause after a non-recoverable trigger failure is **not** implemented, so `paused_reason` only ever holds `manual`: a caller can tell "paused by a person" from "not paused", but not yet from "paused by the runtime". |
 | Paused semantics | A paused deployment still accepts a manual `run`. The route previously refused any status but `active`, which was reachable only through `paused` — the one status `定时部署.md:490` says must still run. The scheduler path was already correct (`runDueScheduledDeployments` selects `status = 'active'`), so pause already suppressed timed runs and only the manual path was wrongly closed. Unpausing does not catch up missed triggers: a stored `next_run_at` that has already passed is recomputed forward, and one still in the future is left alone. |
@@ -429,6 +454,21 @@ implemented differently, as §4 records.
 - `tests/conformance/webhook-unwrap.test.ts` — a real delivery to a live
   receiver verified by the official SDK's `client.beta.webhooks.unwrap`, and a
   one-byte body mutation rejected by the same call.
+- `tests/unit/webhook-events.test.ts` — the catalog itself (the 44-name union,
+  no wildcards, uniqueness), the refusal helper's order-preserving offender
+  list, every row of the stream projection including the `budget_reached`
+  companion on `metadata.stop_reason`, the internal events that must drop, and
+  the budget dedup key.
+- `tests/integration/webhook-event-catalog.test.ts` — the subscription boundary
+  and the emission rules end to end: `*`, `prefix.*`, and unknown names refused
+  on create and update with the stored list untouched; every catalog name
+  accepted; a mixed stream delivering only the published names a subscription
+  listed; `session.budget_reached` once per budget value and again after the
+  ceiling moves; environment create/change/no-op/archive covering the
+  `environment.*` family including the no-event-on-no-op and re-archive rules;
+  `agent.updated` firing only when a new version is written; a vault archive
+  raising one `vault_credential.archived` per credential; and the memory-store
+  pair.
 - `tests/integration/webhook-endpoint-secret.test.ts` — the secret returned once at
   creation and absent from every read, the row holding ciphertext that decrypts
   back to it (including from a second handle), a different secret per
@@ -471,8 +511,8 @@ implemented differently, as §4 records.
   events delivered to a real HTTP receiver on an ephemeral loopback port, with
   the recorded delivery asserted alongside the received request; the
   `{type: 'deployment', id}` reference; delivery to every matching subscription
-  rather than the first; a `deployment.*` wildcard matching and an unrelated
-  subscriber receiving nothing at all; both mount prefixes publishing; a repeat
+  rather than the first; a subscription naming the event among several matching
+  and an unrelated subscriber receiving nothing at all; both mount prefixes publishing; a repeat
   pause and a repeat resume raising nothing; and an unreachable subscriber
   leaving the pause committed with the failed attempt recorded for the retry
   sweep. Every assertion is scoped to the subscription its case created, because
@@ -495,8 +535,8 @@ implemented differently, as §4 records.
   run publishing nothing while still recording its run; **a manual run passing
   `trigger_type: "scheduled"`** publishing nothing, which is the case that
   distinguishes the path-based rule from the obvious one, since that field is
-  caller-supplied; no due deployment publishing nothing; the wildcard matcher
-  reaching both events while another family stays untouched; a subscriber on an
+  caller-supplied; no due deployment publishing nothing; a subscription naming
+  both run events receiving them while another family stays untouched; a subscriber on an
   unreachable port leaving **both** due runs executed *and* its failed attempts
   recorded for retry; and the background tick — the other door onto the timed path
   — reporting its runs too.
@@ -505,8 +545,8 @@ implemented differently, as §4 records.
   archived row, measured **inside the receiver** so the ordering claim means
   something; a repeat archive asserted on **both** halves (the `404` and the
   silence), because either alone passes for the wrong reason; a 404 for an
-  unknown id publishing nothing; both mount prefixes; the wildcard and `prefix.*`
-  matchers reaching it while another family stays untouched; an unreachable
+  unknown id publishing nothing; both mount prefixes; a subscription naming the
+  event among several reaching it while another family stays untouched; an unreachable
   subscriber leaving the archive committed; the agent-archived cascade recorded
   as **absent** so implementing it later must update the expectation
   deliberately; and the webhook archive route still publishing nothing, which is
@@ -517,8 +557,8 @@ implemented differently, as §4 records.
   **inside the receiver** so the ordering claim means something (a read after the
   create returns would find the row either way); each of the four refusals
   publishing nothing; a deployment created already `paused` publishing the create
-  and no pause event; both mount prefixes; the wildcard and `prefix.*` matchers
-  reaching it while another family stays untouched; and an unreachable subscriber
+  and no pause event; both mount prefixes; a subscription naming the event among
+  several reaching it while another family stays untouched; and an unreachable subscriber
   leaving the create committed.
 - `tests/integration/deployment-updated-event.test.ts` — `deployment.updated`
   published for each of the eight fields `PUT` writes, each one asserted twice:
@@ -563,12 +603,18 @@ attempt, the background tick that delivers without a caller, the
 pause state, `deployment.updated` for the field changes a `PUT` makes,
 `deployment.created` on both mount prefixes, `deployment.archived` for the
 direct cause, the three `deployment_run.*` events for a timed run, the
-published `/v1/deployments` alias, the jittered retry backoff, and the redirect
-and sustained-failure auto-disable rules are the aligned parts. The published
-delivery envelope, the private-address rule as a default (it is opt-in here),
+published `/v1/deployments` alias, the jittered retry backoff, the redirect
+and sustained-failure auto-disable rules, the published delivery envelope, the
+catalog-bounded subscription vocabulary, the session-stream projection onto the
+published names, and the resource lifecycle events across agents,
+environments, vaults, memory stores and deployments are the aligned parts. The
+private-address rule as a default (it is opt-in here),
 the automatic pause cause, the `deployment.archived` agent-cascade cause,
-`deployment.deleted`, `trigger_context.scheduled_at`, the rest of the published
-event table, the asymmetric failure split and a persisted in-progress run state
+`deployment.deleted`, `trigger_context.scheduled_at`, the catalog names with no
+producing surface (`session.pending`/`running`/`idled`/`requires_action`,
+`session.thread_*`, `agent.deleted`, `vault.deleted`,
+`vault_credential.refresh_failed`, `memory_store.deleted`), the asymmetric
+failure split and a persisted in-progress run state
 are absent or differ, and are listed in §4 so that "covered by a contract" does
 not read as "implemented". Neither entry is `supported`; neither is `unavailable`, because
 the resource, the delivery engine, the scheduler and the run records are real

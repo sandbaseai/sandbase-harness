@@ -66,7 +66,7 @@ describe('Operations bridge (webhooks + scheduled deployments)', () => {
     // workspace-derived key signs it.
     db.prepare(
       `INSERT INTO webhooks (id, name, url, events, description, status, metadata, created_at, updated_at)
-       VALUES ('wh_test', 'local', 'https://hooks.example.test/sessions', '["user.message"]', '', 'active', '{}', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
+       VALUES ('wh_test', 'local', 'https://hooks.example.test/sessions', '["session.status_idled"]', '', 'active', '{}', '2026-01-01T00:00:00.000Z', '2026-01-01T00:00:00.000Z')`,
     ).run();
     requests = [];
     sessionManager = new SessionManager(db);
@@ -84,7 +84,7 @@ describe('Operations bridge (webhooks + scheduled deployments)', () => {
     );
 
     await sessionManager.sendEvent('sess_a', {
-      type: 'user.message',
+      type: 'session.status_idle',
       content: [{ type: 'text', text: 'hello' }],
     } as never);
     await sleep(30);
@@ -98,7 +98,7 @@ describe('Operations bridge (webhooks + scheduled deployments)', () => {
     expect(payload).toMatchObject({
       type: 'event',
       data: {
-        type: 'user.message',
+        type: 'session.status_idled',
         id: 'sess_a',
         organization_id: 'org_local',
         workspace_id: 'wrkspc_local',
@@ -183,7 +183,7 @@ describe('Operations bridge (webhooks + scheduled deployments)', () => {
       .run(new Date(Date.now() - 2_000).toISOString(), 'wh_test');
 
     await sessionManager.sendEvent('sess_a', {
-      type: 'user.message',
+      type: 'session.status_idle',
       content: [{ type: 'text', text: 'streak' }],
     } as never);
     await sleep(30);
@@ -207,7 +207,7 @@ describe('Operations bridge (webhooks + scheduled deployments)', () => {
 
     // The listener half is live: one durable event reaches the subscription.
     await sessionManager.sendEvent('sess_a', {
-      type: 'user.message',
+      type: 'session.status_idle',
       content: [{ type: 'text', text: 'composed' }],
     } as never);
     await sleep(30);

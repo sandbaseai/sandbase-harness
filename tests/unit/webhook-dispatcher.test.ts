@@ -71,7 +71,7 @@ describe('webhook dispatcher', () => {
     db.prepare(
       `INSERT INTO webhooks (id, name, url, events, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run('wh_ok', 'OK', 'https://example.com/hook', JSON.stringify(['session.*']), fixedNow.toISOString(), fixedNow.toISOString());
+    ).run('wh_ok', 'OK', 'https://example.com/hook', JSON.stringify(['session.status_running']), fixedNow.toISOString(), fixedNow.toISOString());
     const fetchImpl = vi.fn(async () => ({ status: 204 })) as unknown as typeof fetch;
 
     const results = await dispatchWebhookEvent(db, {
@@ -110,7 +110,7 @@ describe('webhook dispatcher', () => {
     db.prepare(
       `INSERT INTO webhooks (id, name, url, events, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
-    ).run('wh_hdr', 'HDR', 'https://example.com/hook', JSON.stringify(['*']), fixedNow.toISOString(), fixedNow.toISOString());
+    ).run('wh_hdr', 'HDR', 'https://example.com/hook', JSON.stringify(['session.status_idled']), fixedNow.toISOString(), fixedNow.toISOString());
     const fetchImpl = vi.fn(async () => ({ status: 204 })) as unknown as typeof fetch;
 
     await dispatchWebhookEvent(db, {
@@ -240,8 +240,8 @@ describe('webhook dispatcher', () => {
       `INSERT INTO webhooks (id, name, url, events, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)`,
     );
-    insert.run('wh_fresh', 'Fresh', 'https://example.com/fresh', JSON.stringify(['*']), fixedNow.toISOString(), fixedNow.toISOString());
-    insert.run('wh_legacy', 'Legacy', 'https://example.com/legacy', JSON.stringify(['*']), fixedNow.toISOString(), fixedNow.toISOString());
+    insert.run('wh_fresh', 'Fresh', 'https://example.com/fresh', JSON.stringify(['turn_complete']), fixedNow.toISOString(), fixedNow.toISOString());
+    insert.run('wh_legacy', 'Legacy', 'https://example.com/legacy', JSON.stringify(['turn_complete']), fixedNow.toISOString(), fixedNow.toISOString());
     // Only the first endpoint has a minted secret; the second is what a row
     // written before M038 looks like.
     const minted = mintAndStoreWebhookSecret(db, 'wh_fresh', dataDir);

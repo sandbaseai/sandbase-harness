@@ -320,8 +320,8 @@ describe('deployment_run lifecycle events', () => {
     expect(mine).toHaveLength(0);
   });
 
-  it('reaches a wildcard subscription and leaves another family alone', async () => {
-    const runWebhook = await subscribe(['deployment_run.*']);
+  it('reaches a subscription that names the events and leaves another family alone', async () => {
+    const runWebhook = await subscribe(['deployment_run.started', 'deployment_run.succeeded', 'deployment_run.failed']);
     const otherWebhook = await subscribe(['environment.archived']);
     insertDueDeployment('sched_wildcard');
 
@@ -337,7 +337,7 @@ describe('deployment_run lifecycle events', () => {
 
   it('runs every due deployment even when the subscriber cannot be reached', async () => {
     // Port 1 refuses immediately: no network egress, and no timing dependence.
-    const deadWebhook = await subscribe(['deployment_run.*'], 'http://127.0.0.1:1/hook');
+    const deadWebhook = await subscribe(['deployment_run.started', 'deployment_run.succeeded', 'deployment_run.failed'], 'http://127.0.0.1:1/hook');
     insertDueDeployment('sched_dead_one');
     insertDueDeployment('sched_dead_two');
 
@@ -360,7 +360,7 @@ describe('deployment_run lifecycle events', () => {
   });
 
   it('reports runs triggered by the background tick, the other door onto the timed path', async () => {
-    const webhookId = await subscribe(['deployment_run.*']);
+    const webhookId = await subscribe(['deployment_run.started', 'deployment_run.succeeded', 'deployment_run.failed']);
     insertDueDeployment('sched_tick');
 
     const stop = startOperationsTimers({

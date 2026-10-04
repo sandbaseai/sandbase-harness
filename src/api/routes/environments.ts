@@ -38,6 +38,7 @@ import {
   listEnvironmentWorkerKeys,
   revokeEnvironmentWorkerKey,
 } from '@/core/auth/environment-worker-keys.js';
+import { publishOperationEvent } from './operation-events.js';
 
 type ResourceKind = 'environment';
 
@@ -84,6 +85,7 @@ export function environmentRoutes(deps: ServerDeps) {
         JSON.stringify(stringRecordField(body.value.metadata)),
       );
       const row = deps.db.prepare('SELECT * FROM environments WHERE id = ? AND archived_at IS NULL').get(id) as unknown as EnvironmentRow;
+      await publishOperationEvent(deps, { type: 'environment.created', subjectId: id });
       return c.json(toApiEnvironment(row, deps), 201);
     } catch (err: any) {
       if (String(err.message).includes('UNIQUE')) return conflict(c, 'Environment id already exists');
@@ -101,7 +103,7 @@ export function environmentRoutes(deps: ServerDeps) {
   app.put('/environments/:id', updateEnvironment);
   app.post('/environments/:id', updateEnvironment);
 
-  app.delete('/environments/:id', (c) => {
+  app.delete('/environments/:id', async (c) => {
     const id = c.req.param('id');
     const existing = deps.db.prepare('SELECT id FROM environments WHERE id = ?').get(id) as { id: string } | undefined;
     if (!existing) return notFound(c, 'Environment not found');
@@ -122,10 +124,20 @@ export function environmentRoutes(deps: ServerDeps) {
       deps.db.prepare('DELETE FROM environment_worker_keys WHERE environment_id = ?').run(id);
       deps.db.prepare('DELETE FROM environments WHERE id = ?').run(id);
     });
+    await publishOperationEvent(deps, { type: 'environment.deleted', subjectId: id });
     return c.json({ id, type: 'environment_deleted' });
   });
 
-  app.post('/environments/:id/archive', (c) => archiveResource(c, deps, 'environments', (row: EnvironmentRow) => toApiEnvironment(row, deps)));
+  // `archiveResource` answers 404 for an already-archived row, so a successful
+  // response is the transition itself — a re-archive raises nothing
+  // (`订阅Webhook.md:79`).
+  app.post('/environments/:id/archive', async (c) => {
+    const response = archiveResource(c, deps, 'environments', (row: EnvironmentRow) => toApiEnvironment(row, deps));
+    if (response.status === 200) {
+      await publishOperationEvent(deps, { type: 'environment.archived', subjectId: c.req.param('id') });
+    }
+    return response;
+  });
 
   async function updateEnvironment(c: any) {
     const body = await readObjectBody(c);
@@ -157,16 +169,30 @@ export function environmentRoutes(deps: ServerDeps) {
     if (body.value.metadata !== undefined && body.value.metadata !== null && !isPlainObject(body.value.metadata)) {
       return invalid(c, 'metadata must be an object');
     }
+    const nextDescription = descriptionPatch(body.value.description, existing.description);
+    const nextMetadata = mergeMetadataPatch(existing.metadata, body.value.metadata);
+    // `environment.updated` fires only when the write changes a stored field:
+    // an idempotent retry that re-sends the same values is not a transition
+    // (`订阅Webhook.md:78`). `config` is compared as parsed objects because
+    // column order is not part of its meaning.
+    const changed =
+      name !== existing.name
+      || nextDescription !== existing.description
+      || JSON.stringify(config) !== JSON.stringify(storedConfig)
+      || JSON.stringify(nextMetadata) !== JSON.stringify(parseObject(existing.metadata));
     deps.db.prepare(
       'UPDATE environments SET name = ?, description = ?, config = ?, metadata = ?, updated_at = datetime(\'now\') WHERE id = ?',
     ).run(
       name,
-      descriptionPatch(body.value.description, existing.description),
+      nextDescription,
       JSON.stringify(config),
-      JSON.stringify(mergeMetadataPatch(existing.metadata, body.value.metadata)),
+      JSON.stringify(nextMetadata),
       id,
     );
     const row = deps.db.prepare('SELECT * FROM environments WHERE id = ? AND archived_at IS NULL').get(id) as unknown as EnvironmentRow;
+    if (changed) {
+      await publishOperationEvent(deps, { type: 'environment.updated', subjectId: id });
+    }
     return c.json(toApiEnvironment(row, deps));
   }
 
