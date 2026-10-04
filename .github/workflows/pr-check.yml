@@ -52,3 +52,9 @@ jobs:
           l_max_size: 1000
           xl_label: 'size/xl'
           fail_if_xl: false
+          # The size/xl label already carries the signal; an empty message
+          # disables the action's default per-PR comment.
+          message_if_xl: ''
+          # Line counts in lockfiles and bulk API-reference data do not
+          # reflect review effort, so they do not count toward the size cutoffs.
+          files_to_ignore: 'package-lock.json apps/console/src/components/pages/settings/api-reference/*.json'
