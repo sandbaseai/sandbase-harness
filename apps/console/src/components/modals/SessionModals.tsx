@@ -492,3 +492,137 @@ export function SessionSettingsModal({
     </Modal>
   );
 }
+
+export function DefineOutcomeModal({
+  session,
+  data,
+  onClose,
+  onSaved,
+}: {
+  session: Session;
+  data: ConsoleData;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [description, setDescription] = useState('');
+  const [rubricMode, setRubricMode] = useState<'text' | 'file'>('text');
+  const [rubricText, setRubricText] = useState('');
+  const [rubricFileId, setRubricFileId] = useState('');
+  const [maxIterations, setMaxIterations] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    const trimmedDescription = description.trim();
+    if (!trimmedDescription) {
+      setError('Description is required.');
+      return;
+    }
+    // The published contract requires a rubric: inline text or a reference to
+    // an uploaded file — both spellings are validated server-side too.
+    let rubric: Record<string, unknown>;
+    if (rubricMode === 'file') {
+      if (!rubricFileId) {
+        setError('Choose an uploaded file for the rubric.');
+        return;
+      }
+      rubric = { type: 'file', file_id: rubricFileId };
+    } else {
+      if (!rubricText.trim()) {
+        setError('Rubric text is required.');
+        return;
+      }
+      rubric = { type: 'text', content: rubricText.trim() };
+    }
+    let max: number | undefined;
+    if (maxIterations.trim()) {
+      const parsed = Number(maxIterations);
+      if (!Number.isInteger(parsed) || parsed < 1 || parsed > 20) {
+        setError('Max iterations must be an integer between 1 and 20.');
+        return;
+      }
+      max = parsed;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      await postJson(`/v1/sessions/${encodeURIComponent(session.id)}/events`, {
+        events: [{
+          type: 'user.define_outcome',
+          description: trimmedDescription,
+          rubric,
+          ...(max !== undefined ? { max_iterations: max } : {}),
+        }],
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title="Define outcome" subtitle={session.title || session.id} onClose={onClose} size="medium">
+      <form className="sessionForm" onSubmit={submit}>
+        {error ? <div className="banner error">{error}</div> : null}
+        <p className="modalBody">
+          Sends a <code>user.define_outcome</code> event: the agent works toward the
+          description and a grader scores each iteration against the rubric.
+        </p>
+        <label className="sessionField">
+          <span>Description <RequiredMark /></span>
+          <textarea
+            value={description}
+            onChange={(event) => setDescription(event.target.value)}
+            rows={3}
+            placeholder="What a successful session looks like"
+          />
+        </label>
+        <label className="sessionField">
+          <span>Rubric <RequiredMark /></span>
+          <div className="segment compactSegment">
+            <button type="button" className={rubricMode === 'text' ? 'active' : ''} onClick={() => setRubricMode('text')}>Text</button>
+            <button type="button" className={rubricMode === 'file' ? 'active' : ''} onClick={() => setRubricMode('file')}>File</button>
+          </div>
+        </label>
+        {rubricMode === 'text' ? (
+          <label className="sessionField">
+            <span>Rubric text</span>
+            <textarea
+              value={rubricText}
+              onChange={(event) => setRubricText(event.target.value)}
+              rows={4}
+              spellCheck={false}
+              placeholder="Criteria the grader scores against"
+            />
+          </label>
+        ) : (
+          <label className="sessionField">
+            <span>Rubric file</span>
+            <select value={rubricFileId} onChange={(event) => setRubricFileId(event.target.value)}>
+              <option value="">Choose an uploaded file…</option>
+              {data.files.map((file) => (
+                <option key={file.id} value={file.id}>{file.name}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label className="sessionField">
+          <span>Max iterations <small className="optionalPill">1-20; empty uses the default of 3</small></span>
+          <input
+            value={maxIterations}
+            onChange={(event) => setMaxIterations(event.target.value)}
+            inputMode="numeric"
+            placeholder="3"
+          />
+        </label>
+        <div className="modalActions">
+          <button className="secondaryButton" type="button" onClick={onClose}>Cancel</button>
+          <button className="primaryButton" type="submit" disabled={saving}>{saving ? 'Defining…' : 'Define outcome'}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}

@@ -46,7 +46,7 @@ export const NAV_GROUPS: Array<{ label: string; items: Array<{ id: ViewId; label
     items: [
       { id: 'webhooks', label: 'Webhooks', icon: Activity },
       { id: 'scheduled-deployments', label: 'Scheduled', icon: Clock },
-      { id: 'outcomes', label: 'Outcomes', icon: Check },
+      { id: 'outcomes', label: 'Outcome templates', icon: Check },
     ],
   },
   {

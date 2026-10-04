@@ -3715,6 +3715,67 @@ label.searchBox input {
   color: var(--muted);
 }
 
+.outcomeStrip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+}
+
+.outcomeCard {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+
+.outcomeCardHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+
+.outcomeCardHead strong {
+  flex: 1;
+  min-width: 0;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.outcomeCardMeta {
+  display: flex;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.outcomeExplanation {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 12px;
+}
+
+.status.satisfied {
+  background: var(--success-soft);
+  color: var(--success);
+}
+
+.status.pending,
+.status.evaluating {
+  background: var(--info-soft);
+  color: var(--info);
+}
+
+.status.max_iterations_reached,
+.status.interrupted,
+.status.budget_reached {
+  background: var(--warning-soft, #fff7d6);
+  color: var(--warning, #9a6700);
+}
+
 .sessionMetaRow > span:not(.resourceBadge) {
   display: inline-flex;
   align-items: center;

@@ -318,8 +318,13 @@ export function OutcomesPage({ data, onRefresh }: OperationsPageProps) {
     <section className="stack">
       <div className="pageIntro">
         <div>
-          <h1>Outcomes</h1>
-          <p>Define expected run outcomes and record session evaluations for deployment-quality feedback.</p>
+          <h1>Outcome templates (local)</h1>
+          <p>
+            Local reusable outcome definitions — a SandBase extension, not part of the published
+            event protocol. The official flow declares an outcome inside a session by sending a
+            <code> user.define_outcome </code> event (Session page → Actions → Define outcome);
+            its evaluations surface on the session's <code>outcome_evaluations</code>.
+          </p>
         </div>
         <div className="toolbarActions">
           <button className="primaryButton" type="button" onClick={() => setCreateOpen(true)}>

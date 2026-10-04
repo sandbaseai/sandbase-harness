@@ -1,9 +1,9 @@
-import { Archive, ChevronDown, Clock, Cloud, Copy, Download, Info, Keyboard, MessageSquare, Monitor, Plus, Search, Send, Settings, Square, Trash2, X } from 'lucide-react';
+import { Archive, ChevronDown, Clock, Cloud, Copy, Download, Info, Keyboard, MessageSquare, Monitor, Plus, Search, Send, Settings, Square, Target, Trash2, X } from 'lucide-react';
 import { type Dispatch, type FormEvent, type SetStateAction, useEffect, useRef, useState } from 'react';
 import { deleteJson, getPage, postJson, readEventStream } from '../../api';
 import { EmptyState, FilterSelect, LoadingState, ResourceBadge, StatusPill, Toolbar } from '../Common';
 import { Modal } from '../Modal';
-import { SessionSettingsModal } from '../modals/SessionModals';
+import { DefineOutcomeModal, SessionSettingsModal } from '../modals/SessionModals';
 import {
   MarkdownMessage,
   eventKind,
@@ -174,6 +174,7 @@ export function SessionDetail({
   const [filterOpen, setFilterOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [defineOutcomeOpen, setDefineOutcomeOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [actionError, setActionError] = useState('');
   const [selectedKinds, setSelectedKinds] = useState<Set<SessionEventKind>>(new Set(SESSION_EVENT_KINDS));
@@ -546,6 +547,9 @@ export function SessionDetail({
             {actionsOpen ? (
               <div className="agentMenu sessionActionsMenu">
                 <button type="button" onClick={() => { setActionsOpen(false); setSettingsOpen(true); }}><Settings size={18} />Session settings</button>
+                {displayStatus !== 'terminated' && displayStatus !== 'archived' ? (
+                  <button type="button" onClick={() => { setActionsOpen(false); setDefineOutcomeOpen(true); }}><Target size={18} />Define outcome</button>
+                ) : null}
                 <button type="button" onClick={() => void interrupt()}><Square size={18} />Send interrupt</button>
                 {!session.archived_at ? (
                   <button type="button" onClick={() => void archive()}><Archive size={18} />Archive session</button>
@@ -556,6 +560,25 @@ export function SessionDetail({
           </div>
         </div>
       </div>
+
+      {(session.outcome_evaluations ?? []).length > 0 ? (
+        <div className="outcomeStrip" aria-label="Outcome evaluations">
+          {(session.outcome_evaluations ?? []).map((evaluation) => (
+            <div key={evaluation.outcome_id} className="outcomeCard">
+              <div className="outcomeCardHead">
+                <Target size={15} />
+                <strong>{evaluation.description}</strong>
+                <StatusPill status={evaluation.result} />
+              </div>
+              <div className="outcomeCardMeta">
+                <span>iteration {evaluation.iteration}</span>
+                {evaluation.completed_at ? <span>{relativeDate(evaluation.completed_at)}</span> : null}
+              </div>
+              {evaluation.explanation ? <p className="outcomeExplanation">{evaluation.explanation}</p> : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
 
       <div className="sessionToolbar">
         <div className="segment compactSegment">
@@ -727,6 +750,19 @@ export function SessionDetail({
           onClose={() => setSettingsOpen(false)}
           onSaved={async () => {
             setSettingsOpen(false);
+            await loadEvents({ silent: true });
+            onRefresh();
+          }}
+        />
+      ) : null}
+
+      {defineOutcomeOpen ? (
+        <DefineOutcomeModal
+          session={session}
+          data={data}
+          onClose={() => setDefineOutcomeOpen(false)}
+          onSaved={async () => {
+            setDefineOutcomeOpen(false);
             await loadEvents({ silent: true });
             onRefresh();
           }}
