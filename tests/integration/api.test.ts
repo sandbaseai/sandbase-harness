@@ -2883,7 +2883,10 @@ description: Uploaded from a compressed package.
         path: '/folder/b',
         content: 'beta',
       });
-      expect(archivedMemoryCreate.res.status).toBe(404);
+      // An archived store is read-only by name: writes refuse with the
+      // archived conflict rather than the 404 a missing store gets.
+      expect(archivedMemoryCreate.res.status).toBe(409);
+      expect((archivedMemoryCreate.body as any).error.code).toBe('memory_store_archived');
     });
 
     it('creates a memory store and manages memories by path', async () => {
