@@ -137,7 +137,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@anthropic-ai/sdk": "0.129.0",
+    "@anthropic-ai/sdk": "0.131.0",
     "@babel/parser": "7.29.9",
     "@playwright/test": "1.63.0",
     "@testing-library/dom": "10.4.2",
