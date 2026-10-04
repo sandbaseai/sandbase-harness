@@ -36,9 +36,11 @@ is that runtime layer — not a visual workflow builder and not another model SD
 ## Features
 
 - Claude Managed Agents-style `/v1` API and local Console
-- SQLite-backed agents, sessions, environments, credential vaults, memory
-  stores, files, skills, and API keys
+- SQLite metadata by default for agents, sessions, environments, credential
+  vaults, memory stores, files, skills, and API keys — local file/skill bytes
+  in the workspace state directory
 - Resumable Server-Sent Events for session replay and debugging
+- One active model provider boundary configured through Settings V2
 - Sandbox backends: local process, Docker (per-session containers), Kubernetes
   (kubectl exec/cp), self-hosted worker queue
 - MCP toolsets, permission policies, built-in tools, and skill packages
@@ -285,7 +287,10 @@ Clients send `Authorization: Bearer <key>`.
 
 - **DeepSeek Harness plugin** — run this runtime as a DSH plugin over MCP
   stdio: install, preflight, tool list, and troubleshooting live in
-  [`examples/deepseek-harness`](examples/deepseek-harness/README.md).
+  [`examples/deepseek-harness`](examples/deepseek-harness/README.md). A DSH
+  project can also take a portable Skill from GitHub source —
+  `npx --yes github:sandbaseai/sandbase-skills add multi-source-search`
+  installs into `.dsh/skills/multi-source-search`.
 - **Agent Plugins 1.0 clients** (Copilot CLI, VS Code) and the standalone
   **MCP bridge container** — see [`agent-plugin/PLUGIN.md`](agent-plugin/PLUGIN.md).
 - **Use cases** — the [Showcase](docs/showcase.md) walks through an auditable
@@ -304,6 +309,8 @@ Clients send `Authorization: Bearer <key>`.
 - [Usage Guide](docs/usage.md)
 - [API Reference](docs/api.md)
 - [Skills](docs/skills.md)
+- [DeepSeek V4](docs/deepseek-v4.md)
+- [MiniMax](docs/minimax.md)
 - [Deployment](docs/deployment.md)
 - [Architecture](docs/spec/architecture.md)
 - [DeepSeek Harness integration](examples/deepseek-harness/README.md)

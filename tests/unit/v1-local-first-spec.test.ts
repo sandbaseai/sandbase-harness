@@ -24,6 +24,8 @@ describe('v1 local-first architecture spec', () => {
     const readme = read('README.md');
     const docsIndex = read('docs/README.md');
     const apiMatrix = read('docs/api-matrix.md');
+    const apiDoc = read('docs/api.md');
+    const installDoc = read('docs/installation.md');
     const extendedRoutes = read('src/api/routes/extended.ts');
     const runtimeEntry = read('src/index.ts');
     const settingsPage = read('apps/console/src/components/pages/settings/SettingsPage.tsx');
@@ -31,8 +33,8 @@ describe('v1 local-first architecture spec', () => {
     expect(readme).toContain('SQLite metadata');
     expect(readme).toContain('local file/skill');
     expect(readme).toContain('One active model provider boundary');
-    expect(readme).toContain('"hosting_type": "local"');
-    expect(readme).toContain('"sandbox_provider": "local"');
+    expect(apiDoc).toContain('"hosting_type": "local"');
+    expect(installDoc).toContain('sandbox_provider: local');
     expect(readme).not.toContain('"name": "Default cloud"');
     expect(readme).not.toContain('Local, Docker, and self-hosted sandbox provider support');
     expect(readme).not.toContain('OpenAI-compatible, Ollama-compatible, and Anthropic model adapters');

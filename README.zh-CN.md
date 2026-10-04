@@ -270,7 +270,16 @@ curl -X POST http://127.0.0.1:3000/v1/api-keys \
 ## 集成与示例
 
 - **DeepSeek Harness 插件**——把本运行时作为 DSH 插件通过 MCP stdio 接入：
-  安装、预检、工具列表与故障排查见
+
+  ~~~bash
+  export MANAGED_AGENTS_URL=http://127.0.0.1:3000
+  dsh plugin --profile web add -w ../sandbase-harness
+  dsh web
+  ~~~
+
+  DSH 项目还可以从 GitHub 源码安装可移植 Skill：
+  `npx --yes github:sandbaseai/sandbase-skills add multi-source-search`
+  会写入 `.dsh/skills/multi-source-search`。预检、工具列表与故障排查见
   [`examples/deepseek-harness`](examples/deepseek-harness/README.md)。
 - **Agent Plugins 1.0 客户端**（Copilot CLI、VS Code）与独立的
   **MCP Bridge 容器**——见 [`agent-plugin/PLUGIN.md`](agent-plugin/PLUGIN.md)。
