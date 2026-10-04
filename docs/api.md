@@ -2337,11 +2337,24 @@ pass back as `page`, and a cursor issued for another view or another collection 
 refused rather than followed. An unimplemented query parameter is a `400` naming it
 and naming the accepted three, exactly as on the vault listing.
 
+`POST /v1/memory_stores/{store_id}` updates a store with patch semantics:
+`name` (1–255 characters, no control characters), `description` (`null` or an
+empty string clears it), and a `metadata` patch whose `null` or `""` values
+delete keys while omitted fields are preserved. `PUT` answers the same patch as
+a deprecated alias. `DELETE /v1/memory_stores/{store_id}` physically removes
+the store together with its memory and version rows and returns
+`{id, type: "memory_store_deleted"}`; it answers `409` `memory_store_in_use`
+while a non-terminal session mounts the store. An archived store is read-only —
+the update and every memory write answer `409` `memory_store_archived` rather
+than a `404` — while archiving itself remains terminal.
+
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/v1/memory_stores` | List memory stores. Archived stores are excluded unless `?include_archived=true`. |
 | `POST` | `/v1/memory_stores` | Create a memory store. |
 | `GET` | `/v1/memory_stores/{store_id}` | Retrieve a memory store. |
+| `POST` | `/v1/memory_stores/{store_id}` | Update a memory store with patch semantics (`PUT` is a deprecated alias). |
+| `DELETE` | `/v1/memory_stores/{store_id}` | Delete a memory store and its contents. Returns `{id, type: "memory_store_deleted"}`. |
 | `POST` | `/v1/memory_stores/{store_id}/archive` | Archive a memory store. |
 | `GET` | `/v1/memory_stores/{store_id}/memories` | List memories. |
 | `POST` | `/v1/memory_stores/{store_id}/memories` | Add a memory. |

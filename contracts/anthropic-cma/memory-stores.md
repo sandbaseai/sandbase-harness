@@ -84,6 +84,27 @@ Scoping:
 - `depth` accepts only `0` or `1`; any other value is a 400 rather than being
   coerced to a nearest legal value.
 
+Store lifecycle:
+
+- `POST /memory_stores/:id` is the published update verb and `PUT` is kept as
+  the local alias; both run the same patch semantics. `name` is validated
+  against the published bound (1–255 characters, no control characters) and
+  names are not unique — the schema's original `UNIQUE` was lost in a table
+  rebuild, recorded rather than re-imposed. `description` clears on `null` or
+  an empty string; `metadata` merges key-by-key and deletes a key on `null` or
+  `""`; omitted fields are preserved.
+- `DELETE /memory_stores/:id` physically removes the store and cascades over
+  `memory_records` and `memory_versions` in one transaction, answering
+  `{id, type: "memory_store_deleted"}`. A store mounted by a **non-terminal**
+  session — a `session_resource_instances` row of type `memory_store` naming
+  the store — refuses with `409` `memory_store_in_use`; a terminal session's
+  mount is history and does not block.
+- An archived store is read-only: the store update and every memory write
+  (create, update, delete) refuse with `409` `memory_store_archived` rather
+  than the `404` a missing store gets, so "archived" and "absent" answer
+  differently. The single-resource read keeps its `404` for an archived store;
+  `include_archived` on the listing remains the read path for it.
+
 Preconditions:
 
 - A write may carry a `content_sha256` precondition. A mismatch returns 409
@@ -185,6 +206,13 @@ per-write version auditing.
   a repeated parameter each refused, the archived store still `404` on its own
   read, and the refusal worded identically to the vault listing's so the shared
   implementation cannot drift.
+- `tests/integration/memory-store-update-delete.test.ts` — the update patch
+  semantics (name bound, description clear, metadata merge), the PUT alias, the
+  in-use and archived write refusals, and the delete cascade over
+  `memory_records` and `memory_versions`.
+- `tests/conformance/memory-store-update-delete.test.ts` — the official SDK's
+  `memoryStores.update` / `.delete` driven against a live runtime, including
+  the archived-store refusal as a `ConflictError`.
 - `tests/integration/collection-pagination.test.ts` — the published `limit`/`page`
   window on this listing and the vault listing together: the default page of 20,
   a walk that partitions the collection exactly once, `prev_page` returning the

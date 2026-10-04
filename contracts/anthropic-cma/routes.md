@@ -94,7 +94,10 @@ every row is mounted, and every mounted route has a row.
 | GET | `/v1/files/{id}/content` | `src/api/routes/files.ts` |
 | GET | `/v1/memory_stores` | `src/api/routes/memory-stores.ts` |
 | POST | `/v1/memory_stores` | `src/api/routes/memory-stores.ts` |
+| DELETE | `/v1/memory_stores/{id}` | `src/api/routes/memory-stores.ts` |
 | GET | `/v1/memory_stores/{id}` | `src/api/routes/memory-stores.ts` |
+| POST | `/v1/memory_stores/{id}` | `src/api/routes/memory-stores.ts` |
+| PUT | `/v1/memory_stores/{id}` | `src/api/routes/memory-stores.ts` |
 | POST | `/v1/memory_stores/{id}/archive` | `src/api/routes/memory-stores.ts` |
 | GET | `/v1/memory_stores/{id}/memories` | `src/api/routes/memory-stores.ts` |
 | POST | `/v1/memory_stores/{id}/memories` | `src/api/routes/memory-stores.ts` |

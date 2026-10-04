@@ -80,6 +80,90 @@
     ]
   },
   {
+    "id": "memory-stores-update",
+    "group": "Memory stores",
+    "title": "Update memory store",
+    "method": "POST",
+    "path": "/v1/memory_stores/{memory_store_id}",
+    "summary": "Patch a memory store's name, description, and metadata. Omitted fields are preserved; description clears on null or empty string; a metadata key set to null or \"\" is deleted. An archived store is read-only and answers 409 memory_store_archived. PUT is a deprecated alias with identical semantics.",
+    "parameters": [
+      {
+        "name": "name",
+        "type": "string",
+        "description": "New store name, 1-255 characters without control characters."
+      },
+      {
+        "name": "description",
+        "type": "string",
+        "description": "New description. null or an empty string clears it."
+      },
+      {
+        "name": "metadata",
+        "type": "object",
+        "description": "Metadata patch: a string value upserts the key, null or \"\" deletes it."
+      }
+    ],
+    "response": [
+      {
+        "name": "memory_store",
+        "type": "object",
+        "description": "The updated memory store."
+      }
+    ]
+  },
+  {
+    "id": "memory-stores-update-put",
+    "group": "Memory stores",
+    "title": "Update memory store (deprecated PUT alias)",
+    "method": "PUT",
+    "path": "/v1/memory_stores/{memory_store_id}",
+    "summary": "Deprecated alias of POST /v1/memory_stores/{memory_store_id} with identical patch semantics. Use POST.",
+    "parameters": [
+      {
+        "name": "name",
+        "type": "string",
+        "description": "New store name, 1-255 characters without control characters."
+      },
+      {
+        "name": "description",
+        "type": "string",
+        "description": "New description. null or an empty string clears it."
+      },
+      {
+        "name": "metadata",
+        "type": "object",
+        "description": "Metadata patch: a string value upserts the key, null or \"\" deletes it."
+      }
+    ],
+    "response": [
+      {
+        "name": "memory_store",
+        "type": "object",
+        "description": "The updated memory store."
+      }
+    ]
+  },
+  {
+    "id": "memory-stores-delete",
+    "group": "Memory stores",
+    "title": "Delete memory store",
+    "method": "DELETE",
+    "path": "/v1/memory_stores/{memory_store_id}",
+    "summary": "Physically delete a memory store and cascade over its memory and version rows. Returns {id, type: \"memory_store_deleted\"}. Refuses with 409 memory_store_in_use while a non-terminal session mounts the store.",
+    "response": [
+      {
+        "name": "id",
+        "type": "string",
+        "description": "The deleted store's identifier."
+      },
+      {
+        "name": "type",
+        "type": "string",
+        "description": "Always memory_store_deleted."
+      }
+    ]
+  },
+  {
     "id": "memory-list",
     "group": "Memory stores",
     "title": "List memories",
