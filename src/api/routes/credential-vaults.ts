@@ -7,7 +7,9 @@ import { cursorPageOf, cursorQueryMismatch, decodeCursor, encodeCursor, normaliz
 import { encryptSecret } from '@/core/security/secrets.js';
 import { normalizeCredentialNetworkPolicy } from '@/core/credentials/policy.js';
 import {
+  checkCredentialUpdate,
   parseCredentialAuth,
+  resolveInjectionLocation,
   toCanonicalCredential,
   type CredentialInjectionLocation,
 } from '@/core/credentials/canonical-credential.js';
@@ -315,6 +317,72 @@ export function credentialVaultRoutes(deps: ServerDeps) {
     if (!vault) return notFound(c, 'Credential vault not found');
     const row = liveCredential(deps, vaultId, c.req.param('credentialId'));
     return row ? c.json(toCredential(row)) : notFound(c, 'Credential not found');
+  });
+
+  // The published credential update. `auth` is a type-discriminated partial
+  // update whose `type` must match the stored credential — a credential's kind
+  // is part of its identity, like the structural fields
+  // `checkCredentialUpdate` locks. Secret-bearing fields (`token`,
+  // `access_token`, `secret_value`) are re-encrypted, carry the same
+  // `rotate` audit entry a rotation writes, and trigger the same live MCP
+  // transport rebuild. `display_name`/`name` and `metadata` follow the same
+  // patch rules the vault update uses.
+  app.post('/:id/credentials/:credentialId', async (c) => {
+    const body = await readObjectBody(c);
+    if (!body.ok) return body.response;
+    const vaultId = c.req.param('id');
+    const credentialId = c.req.param('credentialId');
+    const vault = deps.db.prepare('SELECT id FROM credential_vaults WHERE id = ? AND archived_at IS NULL').get(vaultId);
+    if (!vault) return notFound(c, 'Credential vault not found');
+    const existing = liveCredential(deps, vaultId, credentialId);
+    if (!existing) return notFound(c, 'Credential not found');
+
+    const hasCanonicalName = body.value.display_name !== undefined;
+    const hasLocalName = body.value.name !== undefined;
+    if (hasCanonicalName && hasLocalName) return invalid(c, 'supply only one of display_name or name');
+    const namePatch = hasCanonicalName ? body.value.display_name : body.value.name;
+    let name = existing.name;
+    if (namePatch !== undefined) {
+      const next = stringField(namePatch);
+      if (!next) return invalid(c, 'display_name is required');
+      if (next.length > 255) return invalid(c, 'display_name must be 255 characters or fewer');
+      name = next;
+    }
+    if (body.value.metadata !== undefined && body.value.metadata !== null && typeof body.value.metadata !== 'object') {
+      return invalid(c, 'metadata must be an object');
+    }
+
+    const authPatch = applyCredentialAuthPatch(body.value.auth, existing, deps);
+    if (!authPatch.ok) return invalid(c, authPatch.message);
+
+    deps.db.prepare(
+      `UPDATE credential_records
+       SET name = ?, metadata = ?, network = ?, injection_locations = ?,
+           secret_ciphertext = ?, secret_nonce = ?, secret_tag = ?, value_hint = ?,
+           updated_at = datetime('now')
+       WHERE id = ? AND vault_id = ?`,
+    ).run(
+      name,
+      JSON.stringify(mergeMetadataPatch(existing.metadata, body.value.metadata)),
+      JSON.stringify(authPatch.network ?? parseObject(existing.network)),
+      JSON.stringify(authPatch.injectionTokens ?? parseStringArray(existing.injection_locations)),
+      authPatch.secret?.ciphertext ?? existing.secret_ciphertext,
+      authPatch.secret?.nonce ?? existing.secret_nonce,
+      authPatch.secret?.tag ?? existing.secret_tag,
+      authPatch.secret ? secretHint(authPatch.secret.value) : existing.value_hint,
+      credentialId,
+      vaultId,
+    );
+    deps.db.prepare('UPDATE credential_vaults SET updated_at = datetime(\'now\') WHERE id = ?').run(vaultId);
+
+    if (authPatch.secret) {
+      appendCredentialAuditEvent(deps.db, { vaultId, credentialId, action: 'rotate' });
+      // The secret is committed above; live MCP transports are rebuilt for the
+      // same reason the rotate route rebuilds them.
+      await deps.sessionManager.refreshVaultMcpCredentials(vaultId);
+    }
+    const row = deps.db.prepare('SELECT * FROM credential_records WHERE id = ? AND vault_id = ?').get(credentialId, vaultId) as unknown as CredentialRow;
+    return c.json(withWarnings(toCredential(row), authPatch.warnings));
   });
 
   app.post('/:id/credentials/:credentialId/archive', (c) => updateCredentialState(c, deps, 'archived'));
@@ -690,6 +758,93 @@ function mergeMetadataPatch(stored: string | null | undefined, patch: unknown): 
     else merged[key] = String(value);
   }
   return merged;
+}
+
+/**
+ * Resolve the `auth` half of the published credential update against the stored
+ * row. The `type` is part of the credential's identity: a mismatch or a change
+ * to a locked structural field is a `400`, not a silent drop — the same rule
+ * `checkCredentialUpdate` documents for the structural fields.
+ *
+ * Secret-bearing fields are re-encrypted and reported through `secret` so the
+ * route can stamp the hint, write the `rotate` audit entry, and rebuild live
+ * MCP transports exactly once. `expires_at` and `refresh` are accepted with a
+ * warning rather than persisted, matching the create path: this runtime does
+ * not track OAuth expiry or run a refresh loop, and refusing the fields would
+ * reject payloads the published shape legitimately sends.
+ */
+function applyCredentialAuthPatch(
+  value: unknown,
+  existing: CredentialRow,
+  deps: ServerDeps,
+):
+  | { ok: true; secret?: { value: string; ciphertext: string; nonce: string; tag: string }; network?: Record<string, unknown>; injectionTokens?: string[]; warnings: string[] }
+  | { ok: false; message: string } {
+  const warnings: string[] = [];
+  if (value === undefined) return { ok: true, warnings };
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
+    return { ok: false, message: 'auth must be an object' };
+  }
+  const auth = value as Record<string, unknown>;
+
+  const declaredType = stringField(auth.type);
+  if (!declaredType) return { ok: false, message: 'auth.type is required' };
+  const localType = declaredType === 'static_bearer' ? 'bearer_token' : declaredType;
+  if (!['mcp_oauth', 'bearer_token', 'environment_variable'].includes(localType)) {
+    return { ok: false, message: 'auth.type must be one of mcp_oauth, static_bearer, environment_variable' };
+  }
+  if (localType !== existing.auth_type) {
+    return {
+      ok: false,
+      message: `auth.type is immutable: this credential is ${existing.auth_type === 'bearer_token' ? 'static_bearer' : existing.auth_type}, not ${declaredType}`,
+    };
+  }
+
+  const locked = checkCredentialUpdate(auth, {
+    mcpServerUrl: existing.mcp_server_url,
+    secretName: existing.variable_name,
+  });
+  if (!locked.ok) return { ok: false, message: locked.message };
+
+  const result: {
+    ok: true;
+    secret?: { value: string; ciphertext: string; nonce: string; tag: string };
+    network?: Record<string, unknown>;
+    injectionTokens?: string[];
+    warnings: string[];
+  } = { ok: true, warnings };
+
+  const secretField = localType === 'environment_variable' ? 'secret_value' : localType === 'mcp_oauth' ? 'access_token' : 'token';
+  if (auth[secretField] !== undefined) {
+    const secret = stringField(auth[secretField]);
+    if (!secret) return { ok: false, message: `auth.${secretField} must be a non-empty string` };
+    result.secret = { value: secret, ...encryptSecret(secret, deps.workspace?.dataDir) };
+  }
+
+  if (localType === 'environment_variable') {
+    if (auth.injection_location !== undefined) {
+      const location = resolveInjectionLocation(auth.injection_location);
+      if (!location.ok) return { ok: false, message: `auth.${location.message}` };
+      result.injectionTokens = injectionTokens(location.value);
+    }
+    if (auth.networking !== undefined) {
+      // Full replacement: `null` clears the restriction to unrestricted.
+      result.network = auth.networking === null
+        ? { type: 'unrestricted', allowed_hosts: [] as string[] }
+        : { ...normalizeCredentialNetworkPolicy(auth.networking) };
+    }
+  }
+
+  if (localType === 'mcp_oauth') {
+    if (auth.expires_at !== undefined) {
+      warnings.push('auth.expires_at is accepted but not persisted: this runtime does not track OAuth token expiry, so the token is used until replaced.');
+    }
+    if (auth.refresh !== undefined) {
+      warnings.push('auth.refresh is accepted but not executed: this runtime does not refresh OAuth access tokens, so an expired token will fail the outbound request.');
+    }
+  }
+
+  return result;
 }
 
 async function updateCredentialState(c: any, deps: ServerDeps, status: 'archived') {

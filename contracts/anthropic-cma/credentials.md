@@ -236,6 +236,22 @@ Vault and credential lifecycle:
   credential. The projection carries the canonical `auth` object, the local
   fields, and `value_hint` — never the secret material, on this route or any
   other.
+- `POST /v1/vaults/{vault_id}/credentials/{credential_id}` is the published
+  credential update (`CredentialUpdateParams`). `display_name` (1–255
+  characters) replaces the name with the local `name` spelling accepted as an
+  alias, and `metadata` is the same merge patch the vault update runs. `auth`
+  is a type-discriminated partial update: `auth.type` is immutable and must
+  match the stored credential (`static_bearer` is the canonical spelling of a
+  stored `bearer_token`), and a change to a locked structural field
+  (`mcp_server_url`, `secret_name`, `token_endpoint`, `client_id`) is a `400`
+  naming the field. `token` / `access_token` / `secret_value` are re-encrypted,
+  rotate `value_hint`, write a `rotate` audit event, and rebuild the live MCP
+  transports of sessions referencing the vault, exactly as the `rotate` route
+  does. `injection_location` and `networking` replace wholesale, and
+  `networking: null` clears the restriction to unrestricted. `expires_at` and
+  `refresh` are accepted with a warning rather than persisted — the runtime
+  does not track OAuth expiry — so the response carries the warning beside the
+  projection.
 - `DELETE /v1/vaults/{vault_id}/credentials/{credential_id}` is a physical
   delete that answers `{id, type: "vault_credential_deleted"}`; a second delete
   is `404`. The audit trail survives: the `delete` event and every earlier event
@@ -252,14 +268,12 @@ URL with normalization, write-only secret handling, locked structural fields,
 the `injection_location` create rules and the both-fields-resolved read
 projection, rotation that preserves identity and reconnects the MCP transports of
 the sessions that reference the vault, the published `/v1/vaults*` paths, the
-published vault update/delete and credential retrieve/delete verbs with their
-`vault_in_use`/`vault_archived` refusals and tombstone envelopes, and the
+published vault update/delete and credential retrieve/update/delete verbs with
+their `vault_in_use`/`vault_archived` refusals and tombstone envelopes, and the
 session path that injects a
 vault's environment into its own sandbox commands and into a stdio MCP server the
 agent declares, attaches a `static_bearer` credential to the url-transport server
 whose URL it was keyed to, and redacts what each of them returns.
-There is no credential update route: structural fields are locked, so a change
-means archive and recreate.
 
 ## 4. Differences
 
@@ -349,6 +363,15 @@ means archive and recreate.
   allowed, credential retrieve carrying no secret material, the
   `vault_credential_deleted` tombstone and second-delete `404`, the audit trail
   surviving at vault scope, and both prefixes serving the same verbs.
+- `tests/integration/vault-credential-update.test.ts` — the published update:
+  `display_name`/`metadata` patch rules, `auth.type` immutability, locked
+  structural fields, secret rotation re-encrypting and writing a `rotate`
+  audit event, wholesale `injection_location`/`networking` replacement with
+  `networking: null` clearing, the `expires_at`/`refresh` warnings, a null
+  secret refused, and both prefixes.
+- `tests/conformance/vault-credential-update.test.ts` — the pinned official
+  SDK's `credentials.update()` against the live runtime: the partial update
+  applies, no secret material is echoed, and a type mismatch is a 400.
 - `tests/integration/collection-pagination.test.ts` — the published `limit`/`page`
   window on this listing and the memory-store listing together: the default page
   of 20, a walk that partitions the collection exactly once, `prev_page` returning

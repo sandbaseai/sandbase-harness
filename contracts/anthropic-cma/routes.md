@@ -63,6 +63,7 @@ every row is mounted, and every mounted route has a row.
 | POST | `/v1/credential-vaults/{id}/credentials` | `src/api/routes/credential-vaults.ts` |
 | DELETE | `/v1/credential-vaults/{id}/credentials/{credentialId}` | `src/api/routes/credential-vaults.ts` |
 | GET | `/v1/credential-vaults/{id}/credentials/{credentialId}` | `src/api/routes/credential-vaults.ts` |
+| POST | `/v1/credential-vaults/{id}/credentials/{credentialId}` | `src/api/routes/credential-vaults.ts` |
 | POST | `/v1/credential-vaults/{id}/credentials/{credentialId}/archive` | `src/api/routes/credential-vaults.ts` |
 | GET | `/v1/credential-vaults/{id}/credentials/{credentialId}/audit` | `src/api/routes/credential-vaults.ts` |
 | POST | `/v1/credential-vaults/{id}/credentials/{credentialId}/mark-used` | `src/api/routes/credential-vaults.ts` |
@@ -78,6 +79,7 @@ every row is mounted, and every mounted route has a row.
 | POST | `/v1/vaults/{id}/credentials` | `src/api/routes/credential-vaults.ts` |
 | DELETE | `/v1/vaults/{id}/credentials/{credentialId}` | `src/api/routes/credential-vaults.ts` |
 | GET | `/v1/vaults/{id}/credentials/{credentialId}` | `src/api/routes/credential-vaults.ts` |
+| POST | `/v1/vaults/{id}/credentials/{credentialId}` | `src/api/routes/credential-vaults.ts` |
 | POST | `/v1/vaults/{id}/credentials/{credentialId}/archive` | `src/api/routes/credential-vaults.ts` |
 | GET | `/v1/vaults/{id}/credentials/{credentialId}/audit` | `src/api/routes/credential-vaults.ts` |
 | POST | `/v1/vaults/{id}/credentials/{credentialId}/mark-used` | `src/api/routes/credential-vaults.ts` |

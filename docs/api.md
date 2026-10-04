@@ -2188,6 +2188,7 @@ being advertised.
 | `GET` | `/v1/vaults/{vault_id}/credentials`, `/v1/credential-vaults/{vault_id}/credentials` | List credentials. |
 | `POST` | `/v1/vaults/{vault_id}/credentials`, `/v1/credential-vaults/{vault_id}/credentials` | Add a credential. |
 | `GET` | `/v1/vaults/{vault_id}/credentials/{credential_id}`, `/v1/credential-vaults/{vault_id}/credentials/{credential_id}` | Retrieve one credential. Secret material is never returned — the response carries `value_hint` only. |
+| `POST` | `/v1/vaults/{vault_id}/credentials/{credential_id}`, `/v1/credential-vaults/{vault_id}/credentials/{credential_id}` | Published credential update: `display_name`/`metadata` patch plus a type-discriminated `auth` partial update. `auth.type` is immutable and must match the stored credential; `token`/`access_token`/`secret_value` re-encrypt like rotation. |
 | `POST` | `/v1/vaults/{vault_id}/credentials/{credential_id}/rotate`, `/v1/credential-vaults/{vault_id}/credentials/{credential_id}/rotate` | Replace the encrypted secret value. |
 | `POST` | `/v1/vaults/{vault_id}/credentials/{credential_id}/mark-used`, `/v1/credential-vaults/{vault_id}/credentials/{credential_id}/mark-used` | Mark a credential as used and append an audit event. |
 | `GET` | `/v1/vaults/{vault_id}/credentials/{credential_id}/audit`, `/v1/credential-vaults/{vault_id}/credentials/{credential_id}/audit` | List credential audit events. |
