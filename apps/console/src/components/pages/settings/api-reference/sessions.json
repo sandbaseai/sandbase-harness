@@ -504,9 +504,32 @@
     "id": "session-resources-update",
     "group": "Sessions",
     "title": "Rotate a github authorization token",
+    "method": "POST",
+    "path": "/v1/sessions/{session_id}/resources/{resource_id}",
+    "summary": "Replace the authorization_token of a github_repository resource on a running session (published verb). Only that field is updatable; changing the repository, checkout, or mount path requires a new session.",
+    "parameters": [
+      {
+        "name": "authorization_token",
+        "type": "string",
+        "required": true,
+        "description": "The replacement token. Any other field is refused with invalid_request rather than ignored."
+      }
+    ],
+    "response": [
+      {
+        "name": "data",
+        "type": "SessionResourceInstance",
+        "description": "The updated instance. The token is never echoed."
+      }
+    ]
+  },
+  {
+    "id": "session-resources-update-patch",
+    "group": "Sessions",
+    "title": "Rotate a github authorization token (deprecated alias)",
     "method": "PATCH",
     "path": "/v1/sessions/{session_id}/resources/{resource_id}",
-    "summary": "Replace the authorization_token of a github_repository resource on a running session. Only that field is updatable; changing the repository, checkout, or mount path requires a new session.",
+    "summary": "Deprecated alias of the POST update above, kept for existing callers. Same handler, same refusal rules.",
     "parameters": [
       {
         "name": "authorization_token",
@@ -529,12 +552,17 @@
     "title": "Remove a session resource",
     "method": "DELETE",
     "path": "/v1/sessions/{session_id}/resources/{resource_id}",
-    "summary": "Detach a file or github_repository resource from a session. A memory_store resource cannot be removed.",
+    "summary": "Detach a file or github_repository resource from a session. A memory_store resource cannot be removed. Answers the published tombstone, not the detached object.",
     "response": [
       {
-        "name": "status",
+        "name": "id",
         "type": "string",
-        "description": "deleted once the instance is detached."
+        "description": "The removed resource instance id."
+      },
+      {
+        "name": "type",
+        "type": "string",
+        "description": "Literal session_resource_deleted."
       }
     ]
   }

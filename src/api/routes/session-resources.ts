@@ -4,7 +4,8 @@
  * GET    /v1/sessions/:id/resources             - list resource instances
  * POST   /v1/sessions/:id/resources             - attach a resource
  * GET    /v1/sessions/:id/resources/:rid        - get one resource instance
- * PATCH  /v1/sessions/:id/resources/:rid        - rotate a GitHub token
+ * POST   /v1/sessions/:id/resources/:rid        - rotate a GitHub token (published verb)
+ * PATCH  /v1/sessions/:id/resources/:rid        - deprecated alias for POST
  * DELETE /v1/sessions/:id/resources/:rid        - detach a resource
  *
  * Two behaviours here are contract, not convenience:
@@ -19,7 +20,7 @@
  *   changes which code the agent trusts.
  */
 
-import { Hono } from 'hono';
+import { Hono, type Context } from 'hono';
 import type { ServerDeps } from '../server.js';
 import { cursorPageOf } from '../standard.js';
 import { rejectUnexpectedQueryParams } from './query-params.js';
@@ -61,7 +62,7 @@ const WIRE_ERROR_TYPE: Record<'invalid_request' | 'not_found' | 'conflict', stri
   conflict: 'conflict',
 };
 
-/** PATCH accepts exactly one mutating field. */
+/** The resource update accepts exactly one mutating field. */
 const GITHUB_ROTATION_FIELDS = ['authorization_token'] as const;
 
 export function sessionResourceRoutes(deps: ServerDeps) {
@@ -178,7 +179,13 @@ export function sessionResourceRoutes(deps: ServerDeps) {
     return c.json(toApiSessionResourceInstance(instance));
   });
 
-  app.patch('/:id/resources/:resourceId', async (c) => {
+  // The published update verb is POST; PATCH stays mounted as a deprecated
+  // alias running the same handler, matching the convention used for agent,
+  // environment, memory-store, and vault updates.
+  app.post('/:id/resources/:resourceId', updateSessionResource);
+  app.patch('/:id/resources/:resourceId', updateSessionResource);
+
+  async function updateSessionResource(c: Context) {
     const sessionId = c.req.param('id')!;
     const resourceId = c.req.param('resourceId')!;
     const session = requireSession(sessionId);
@@ -244,7 +251,7 @@ export function sessionResourceRoutes(deps: ServerDeps) {
       return c.json({ error: { type: WIRE_ERROR_TYPE[result.code], message: result.message } }, 400);
     }
     return c.json(toApiSessionResourceInstance(result.instance));
-  });
+  }
 
   app.delete('/:id/resources/:resourceId', (c) => {
     const sessionId = c.req.param('id')!;
@@ -256,7 +263,7 @@ export function sessionResourceRoutes(deps: ServerDeps) {
     if (!result.ok) {
       return c.json({ error: { type: WIRE_ERROR_TYPE[result.code], message: result.message } }, result.code === 'not_found' ? 404 : 400);
     }
-    return c.json(toApiSessionResourceInstance(result.instance));
+    return c.json({ id: resourceId, type: 'session_resource_deleted' });
   });
 
   return app;

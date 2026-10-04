@@ -1700,8 +1700,9 @@ from one session leaves it attached to every other session that holds it.
 | `GET` | `/v1/sessions/{session_id}/resources` | List the session's resource instances in position order. |
 | `POST` | `/v1/sessions/{session_id}/resources` | Attach a file or github_repository resource to a session. |
 | `GET` | `/v1/sessions/{session_id}/resources/{resource_id}` | Read one resource instance. |
-| `PATCH` | `/v1/sessions/{session_id}/resources/{resource_id}` | Rotate a github_repository authorization token. |
-| `DELETE` | `/v1/sessions/{session_id}/resources/{resource_id}` | Detach a resource from the session. |
+| `POST` | `/v1/sessions/{session_id}/resources/{resource_id}` | Rotate a github_repository authorization token (published verb). |
+| `PATCH` | `/v1/sessions/{session_id}/resources/{resource_id}` | Deprecated alias of the `POST` rotation. |
+| `DELETE` | `/v1/sessions/{session_id}/resources/{resource_id}` | Detach a resource; answers `{id, type: "session_resource_deleted"}`. |
 
 A resource passed in a session's `resources` at creation is recorded as an
 instance in the same call, so it appears in the list above immediately and can

@@ -162,7 +162,8 @@ every row is mounted, and every mounted route has a row.
 | POST | `/v1/sessions/{id}/resources` | `src/api/routes/session-resources.ts` |
 | DELETE | `/v1/sessions/{id}/resources/{resourceId}` | `src/api/routes/session-resources.ts` |
 | GET | `/v1/sessions/{id}/resources/{resourceId}` | `src/api/routes/session-resources.ts` |
-| PATCH | `/v1/sessions/{id}/resources/{resourceId}` | `src/api/routes/session-resources.ts` |
+| POST | `/v1/sessions/{id}/resources/{resourceId}` | `src/api/routes/session-resources.ts` |
+| PATCH | `/v1/sessions/{id}/resources/{resourceId}` | `src/api/routes/session-resources.ts` (deprecated alias) |
 | POST | `/v1/sessions/{id}/stop` | `src/api/routes/sessions.ts` — deprecated local `user.interrupt` alias; removed next version |
 | GET | `/v1/skills` | `src/api/routes/skills.ts` |
 | POST | `/v1/skills` | `src/api/routes/skills.ts` |
