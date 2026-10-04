@@ -285,7 +285,7 @@ export function memoryStoreRoutes(deps: ServerDeps) {
     const precondition = evaluateContentPrecondition(body.value.precondition, existing.content);
     if (!precondition.ok) {
       if (precondition.code === 'invalid_precondition') {
-        return invalid(c, precondition.message!, precondition.code);
+        return conflict(c, precondition.message!, precondition.code);
       }
       if (path === existing.path && content === existing.content) {
         return c.json(toMemory(existing, deps, view.view));

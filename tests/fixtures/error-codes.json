@@ -22,6 +22,7 @@
     "loop_engine_invalid",
     "loop_engine_not_supported",
     "memory_too_large",
+    "memory_version_is_head",
     "missing_env",
     "model_auth_failed",
     "model_config_invalid",
