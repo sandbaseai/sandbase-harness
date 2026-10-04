@@ -25,7 +25,9 @@ function displayStatus(status: CapabilityStatus): string {
 }
 
 function cell(text: string): string {
-  return text.replace(/\|/g, '\\|').replace(/\s+/g, ' ').trim();
+  // Escape backslashes first: a `\|` written by a later replacement would
+  // otherwise be re-read as an escaped pipe when the table is re-parsed.
+  return text.replace(/\\/g, '\\\\').replace(/\|/g, '\\|').replace(/\s+/g, ' ').trim();
 }
 
 function note(entry: CapabilityEntry): string {
