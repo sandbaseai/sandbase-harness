@@ -26,19 +26,16 @@
     "jsxImportSource": "react",
     "types": ["node", "vitest/globals", "react", "react-dom"]
   },
-  "include": ["tests/**/*", "src/**/*", "playwright.config.ts"],
+  "include": ["tests/**/*", "src/**/*", "scripts/**/*.ts", "playwright.config.ts"],
   "exclude": [
     "node_modules",
     "dist",
     // Tests that import Console components pull `apps/console/src` into the
-    // program, which carries its own pre-existing type errors: stale fixtures
-    // and renamed props in the files below. Measured with the JSX options above
-    // and every exclusion removed, the suite reports ten errors across four of
-    // these files and none in the runtime suite; checking them needs the
-    // Console's own cleanup first, tracked in BACKLOG.md under Dashboard.
-    // Excluded so the runtime suite can be enforced now rather than waiting on
-    // unrelated work — a Console test written after that cleanup, like the Setup
-    // panel's, is checked here.
+    // program. The Console itself typechecks clean, but these files carry stale
+    // fixtures — agents without `multiagent`, sessions without `budget`, and
+    // other drifted literals — that predate the type-checked suite. Repairing
+    // the fixtures is its own change; until then they run under vitest, which
+    // transpiles without checking, while the runtime suite stays enforced.
     "tests/unit/agent-modals.test.tsx",
     "tests/unit/console-pages.test.ts",
     "tests/unit/console-tool-confirmation.test.ts",
@@ -48,12 +45,7 @@
     "tests/unit/session-modals.test.tsx",
     "tests/unit/ui-primitives.test.tsx",
     "tests/unit/api-reference-docs.test.tsx",
-    // Imports Console components, so it needs the Console's own type cleanup
-    // before it can join the runtime program; vitest still runs it.
     "tests/unit/agent-version-diff.test.tsx",
-    // Same reason as the file above: it renders Console components, so it runs
-    // under vitest while the runtime program stays free of the Console's
-    // pre-existing type errors.
     "tests/unit/console-agent-capabilities.test.tsx",
     "tests/unit/docs-api.test.ts",
     "tests/integration/console-api-e2e.test.ts"

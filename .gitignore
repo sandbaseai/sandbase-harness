@@ -21,3 +21,5 @@ test-results/
 .kiro/
 # Local reference material (cloned OSS projects) — not shipped
 references/
+# Operator's local working notes — private to this checkout
+/local-notes/

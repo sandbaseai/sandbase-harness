@@ -96,8 +96,8 @@ pinned official SDK's `resources/beta/**/*.js`. Messages, models, and
 organization administration are excluded from this managed-agent inventory.
 Unrecognized SDK request syntax fails rather than silently losing routes.
 
-Verified on October 2, 2026 with SDK `0.129.0`: 110 distinct method/path pairs,
-59 existing resource mounts, 29 explicit refusals, and 22 exact deferred mounts.
+Verified on October 5, 2026 with SDK `0.129.0`: 110 distinct method/path pairs,
+76 existing resource mounts, 29 explicit refusals, and 5 exact deferred mounts.
 The deferrals (including multi-agent threads) are tracked in
 [issue #706](https://github.com/sandbaseai/sandbase-harness/issues/706) and in
 `PENDING_OFFICIAL_ROUTES`. Each entry has a reason and follow-up; stale,

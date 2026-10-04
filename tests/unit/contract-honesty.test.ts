@@ -24,6 +24,11 @@ import {
   type CapabilityEntry,
 } from '@/core/capabilities/matrix.js';
 import {
+  COMPAT_TABLE_END,
+  COMPAT_TABLE_START,
+  renderCompatibilityTable,
+} from '@/core/capabilities/compat-table.js';
+import {
   PRODUCTION_WIRING,
   checkContractHonesty,
   parseDocumentedRoutes,
@@ -187,6 +192,19 @@ describe('contract honesty', () => {
       expect([...declared.keys()].sort(), `${document.name} status block`).toEqual(
         cited.map((candidate) => candidate.id).sort(),
       );
+    }
+  });
+
+  it('keeps the README compatibility tables identical to the rendered matrix', () => {
+    for (const name of ['README.md', 'README.zh-CN.md']) {
+      const readme = readRepoFile(name) ?? '';
+      const start = readme.indexOf(COMPAT_TABLE_START);
+      const end = readme.indexOf(COMPAT_TABLE_END);
+      expect(start, `${name} compat-table start marker`).toBeGreaterThanOrEqual(0);
+      expect(end, `${name} compat-table end marker`).toBeGreaterThan(start);
+      const published = readme.slice(start + COMPAT_TABLE_START.length, end).trim();
+      // Drift is fixed by `npm run docs:compat`, never by editing the table.
+      expect(published, name).toBe(renderCompatibilityTable(CMA_CAPABILITY_MATRIX));
     }
   });
 

@@ -18,8 +18,6 @@ project-owned features only.
 
 ## Runtime
 
-- Add tool confirmation flow for sensitive actions.
-- Add client-side custom tool support.
 - Add optional workspace snapshots for file-system recovery.
 - Add optional long-term memory provider support.
 - Expand context-window metadata and compaction controls.
@@ -63,22 +61,11 @@ project-owned features only.
 
 ## Dashboard
 
-- Bring `apps/console` under type checking and repair what that surfaces.
-  `npm run typecheck` covers `src` and the runtime test suite; the Console is a
-  third program that has never been checked, and it currently reports ~90
-  errors. Some are missing type members, but several are references to names
-  that are never imported (`useEffect`, `formatDateShort`, `putJson`, and
-  several icon components), which throw when the containing component renders.
-- Decide which Console composition root is canonical. `main.tsx` renders
-  `App.tsx`, which imports `components/pages/MemoryStorePages` and
-  `components/modals/*`; `components/ConsoleRoutes.tsx` is a parallel router
-  that nothing renders, and it imports a different lineage
-  (`components/pages/MemoryPages`). The Console tests exercise the lineage that
-  does not ship, so page-level coverage does not protect what users load. This
-  looks like an unfinished module split rather than an intentional split.
+- Repair the stale fixtures in the Console-touching test files listed under
+  `exclude` in `tsconfig.tests.json` (agents without `multiagent`, sessions
+  without `budget`, and similar drifted literals) so they rejoin the
+  type-checked program.
 - Add clearer error and reconnect states.
-- Add session delete and stop actions.
-- Add event filtering in the trajectory view.
 - Add model, skill, and MCP status panels.
 - Add read-only configuration inspection.
 

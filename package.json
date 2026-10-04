@@ -71,6 +71,7 @@
     "test:official-routes": "vitest run tests/conformance/official-route-coverage.test.ts tests/unit/official-routes.test.ts",
     "test:e2e": "playwright test",
     "test:docs-examples:update-snapshots": "node --import tsx tests/conformance/docs-examples/update-snapshots.ts",
+    "docs:compat": "node --import tsx scripts/render-compat-table.ts",
     "lint": "npm run typecheck",
     "typecheck": "npm run typecheck:src && npm run typecheck:tests && npm run typecheck:console",
     "typecheck:src": "tsc --noEmit",
