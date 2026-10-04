@@ -17,7 +17,7 @@ export class InMemoryEventLog implements EventLogWriter {
   append(sessionId: string, event: Parameters<EventLogWriter['append']>[1]): SessionEvent {
     const seq = this.events.length + 1;
     const full: SessionEvent = {
-      id: `mem_${nanoid(12)}`,
+      id: event.id ?? `mem_${nanoid(12)}`,
       sessionId,
       seq,
       type: event.type,

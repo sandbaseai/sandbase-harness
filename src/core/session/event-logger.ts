@@ -35,9 +35,16 @@ export class EventLogger {
       speed?: 'standard' | 'fast';
       delegationDepth?: number;
       metadata?: Record<string, unknown>;
+      /**
+       * Pre-generated id for events that were previewed on `event_deltas[]`
+       * connections: the previewed id must equal the buffered event's id, so
+       * the producer mints the id before streaming and hands it back here.
+       * Omitted everywhere else.
+       */
+      id?: string;
     },
   ): SessionEvent {
-    const id = `sevt_${nanoid(16)}`;
+    const id = event.id ?? `sevt_${nanoid(16)}`;
     const seq = this.getLatestSeq(sessionId) + 1;
     const now = new Date();
 

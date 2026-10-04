@@ -155,6 +155,12 @@ export interface EventLogWriter {
     speed?: 'standard' | 'fast';
     delegationDepth?: number;
     metadata?: Record<string, unknown>;
+    /**
+     * Pre-generated id for events previewed on `event_deltas[]` connections:
+     * the previewed id must equal the buffered event's id, so the producer
+     * mints it before streaming and hands it back here. Omitted elsewhere.
+     */
+    id?: string;
   }): SessionEvent;
   getLatestSeq(sessionId: string): number;
   /**

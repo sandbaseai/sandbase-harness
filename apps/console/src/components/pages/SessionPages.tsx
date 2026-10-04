@@ -189,7 +189,9 @@ export function SessionDetail({
   // A ref closes the small gap before React commits the state update. This
   // makes Allow/Deny one-shot even when a user double-clicks the button.
   const confirmingToolIdsRef = useRef(new Set<string>());
-  const [streamingText, setStreamingText] = useState<Record<string, string>>({});
+  // Previewed events keyed by the durable event id announced in `event_start`;
+  // each value is per-content-block text so `delta.index` stays meaningful.
+  const [streamingText, setStreamingText] = useState<Record<string, Record<number, string>>>({});
   const [streamConnection, setStreamConnection] = useState<'connecting' | 'connected' | 'reconnecting'>('connecting');
   // Only the durable tail stream owns this cursor. Transient chunks are never
   // used for Last-Event-ID because their seq is 0 and they are not replayable.
@@ -241,38 +243,71 @@ export function SessionDetail({
     void loadEvents();
   }, [session.id]);
 
+  const applyPreviewFrame = (frameType: 'event_start' | 'event_delta', data: unknown) => {
+    const frame = data && typeof data === 'object' ? data as Record<string, unknown> : null;
+    if (!frame) return;
+    if (frameType === 'event_start') {
+      const previewed = frame.event && typeof frame.event === 'object'
+        ? frame.event as { type?: string; id?: string }
+        : null;
+      if (previewed?.type === 'agent.message' && previewed.id) {
+        setStreamingText((current) => current[previewed.id!] ? current : { ...current, [previewed.id!]: {} });
+      }
+      return;
+    }
+    const eventId = typeof frame.event_id === 'string' ? frame.event_id : null;
+    const delta = frame.delta && typeof frame.delta === 'object' ? frame.delta as Record<string, unknown> : null;
+    const content = delta?.content && typeof delta.content === 'object' ? delta.content as Record<string, unknown> : null;
+    const text = content?.type === 'text' && typeof content.text === 'string' ? content.text : null;
+    // Deltas may be dropped or reordered; a delta for an id that never saw an
+    // `event_start` on this connection is ignored rather than materialising a
+    // preview out of order.
+    if (!eventId || delta?.type !== 'content_delta' || !text) return;
+    const index = typeof delta.index === 'number' && Number.isInteger(delta.index) && delta.index >= 0
+      ? delta.index
+      : 0;
+    setStreamingText((current) => {
+      if (!(eventId in current)) return current;
+      const blocks = { ...current[eventId] };
+      blocks[index] = `${blocks[index] ?? ''}${text}`;
+      return { ...current, [eventId]: blocks };
+    });
+  };
+
   const applyStreamEvent = (streamEvent: { event: string; data: unknown; id?: string }) => {
     // Keepalives are not events: the stream sends `ping`, and older servers sent
     // `heartbeat`. Neither may reach the projection below.
     if (streamEvent.event === 'ping' || streamEvent.event === 'heartbeat') return;
+    // `event_deltas[]` preview frames: `event_start` announces the durable
+    // event id it previews, `event_delta` extends one content block. Neither is
+    // an event itself and neither touches the durable merge below.
+    if (streamEvent.event === 'event_start' || streamEvent.event === 'event_delta') {
+      applyPreviewFrame(streamEvent.event, streamEvent.data);
+      return;
+    }
     const payload = streamEvent.data && typeof streamEvent.data === 'object'
-      ? streamEvent.data as Partial<SessionEvent> & { message_id?: string; delta?: string }
+      ? streamEvent.data as Partial<SessionEvent>
       : null;
     if (!payload) return;
 
-    // seq 0 is live-only text rendering. The durable agent.message appended at
-    // step completion is the canonical transcript record and tail replay source.
-    if (streamEvent.event === 'agent.message_stream_start' && payload.message_id) {
-      setStreamingText((current) => ({ ...current, [payload.message_id as string]: '' }));
-      return;
-    }
-    if (streamEvent.event === 'agent.message_chunk' && payload.message_id) {
-      setStreamingText((current) => ({
-        ...current,
-        [payload.message_id as string]: `${current[payload.message_id as string] ?? ''}${payload.delta ?? ''}`,
-      }));
-      return;
-    }
-    if (streamEvent.event === 'agent.message_stream_end' && payload.message_id) {
-      setStreamingText((current) => {
-        const next = { ...current };
-        delete next[payload.message_id as string];
-        return next;
-      });
-      return;
-    }
-
     if (!payload.id || !payload.type || typeof payload.seq !== 'number' || payload.seq <= 0) return;
+
+    // The buffered event closes its own preview: a preview is only a prefix,
+    // so the persisted record replaces it rather than merging with it. A
+    // lifecycle event that ends generation sweeps any preview whose buffered
+    // event will never land (a whitespace-only turn, a mid-stream abort).
+    const endsGeneration = payload.type === 'session.status_idle'
+      || payload.type === 'session.status_terminated'
+      || payload.type === 'session.deleted'
+      || payload.type === 'session.error';
+    setStreamingText((current) => {
+      if (endsGeneration) return {};
+      if (!payload.id || !(payload.id in current)) return current;
+      const next = { ...current };
+      delete next[payload.id];
+      return next;
+    });
+
     const merged = mergeOrderedSessionEvents(eventsRef.current, [payload as SessionEvent]);
     eventsRef.current = merged;
     lastDurableSequence.current = contiguousSessionSequence(merged);
@@ -301,7 +336,7 @@ export function SessionDetail({
           // between the read and the subscribe — would miss it. Resuming from 0
           // replays the log, which the projection below already merges by seq.
           await readEventStream(
-            `/v1/sessions/${encodeURIComponent(session.id)}/events/stream`,
+            `/v1/sessions/${encodeURIComponent(session.id)}/events/stream?event_deltas%5B%5D=agent.message`,
             applyStreamEvent,
             { signal: controller.signal, lastEventId: String(lastDurableSequence.current) },
           );
@@ -656,12 +691,19 @@ export function SessionDetail({
                     {entry.role === 'error' ? <ModelErrorHint event={entry.event} /> : null}
                   </article>
                 ))}
-                {Object.entries(streamingText).map(([messageId, text]) => (
-                  <article key={messageId} className="conversationMessage agent streamingMessage">
-                    <div className="conversationMessageMeta"><span>{agent?.name ?? 'Agent'}</span><span>Generating…</span></div>
-                    <div className="conversationBubble">{text || <span className="typingIndicator" aria-label="Generating"><i /><i /><i /></span>}</div>
-                  </article>
-                ))}
+                {Object.entries(streamingText).map(([eventId, blocks]) => {
+                  const text = Object.keys(blocks)
+                    .map(Number)
+                    .sort((a, b) => a - b)
+                    .map((index) => blocks[index])
+                    .join('');
+                  return (
+                    <article key={eventId} className="conversationMessage agent streamingMessage">
+                      <div className="conversationMessageMeta"><span>{agent?.name ?? 'Agent'}</span><span>Generating…</span></div>
+                      <div className="conversationBubble">{text || <span className="typingIndicator" aria-label="Generating"><i /><i /><i /></span>}</div>
+                    </article>
+                  );
+                })}
                 {conversationMessages(events).length === 0 && Object.keys(streamingText).length === 0 ? (
                   <EmptyState icon={<MessageSquare size={22} />} title="Start the conversation" />
                 ) : null}

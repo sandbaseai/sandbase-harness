@@ -242,6 +242,23 @@ export class DefaultStrategy implements AgentStrategy {
         })
       : undefined;
     const requestSpeed = anthropicOptions?.anthropic.speed;
+    // Durable `agent.message` ids are minted per step in `prepareStep` —
+    // before the step's request is issued, so before any of its deltas can
+    // reach the consumer loop. Both the preview carrier broadcasts (which run
+    // when the consumer pulls `text-delta` parts) and the buffered append in
+    // `onStepFinish` (which runs stream-transform-side, possibly ahead of the
+    // consumer) read the same slot: the index is the step number on both
+    // sides, so no cross-side ordering is required.
+    const mintedMessageIds: string[] = [];
+    // Durable events appended in `onStepFinish` are broadcast from the
+    // consumer loop once the step's `finish-step` part surfaces: the SDK may
+    // run the stream transform ahead of the consumer, and broadcasting inside
+    // `onStepFinish` would deliver the buffered `agent.message` ahead of the
+    // `event_deltas[]` previews that announce it. Entries are tagged with
+    // their step so a transform that races a whole step ahead cannot release
+    // the next step's events early. Queuing keeps wire order identical to
+    // append order.
+    const pendingStepBroadcasts: Array<{ step: number; event: SessionEvent }> = [];
     const closeRequestSpan = (isError: boolean): void => {
       // Clear before appending: a failed append must not invite a second end.
       const start = inFlightRequestStart;
@@ -340,6 +357,7 @@ export class DefaultStrategy implements AgentStrategy {
             modelUsed,
           });
           broadcast(inFlightRequestStart);
+          mintedMessageIds.push(`sevt_${nanoid(16)}`);
         },
         onError: () => {
           closeRequestSpan(true);
@@ -375,7 +393,7 @@ export class DefaultStrategy implements AgentStrategy {
             isError: false,
             ...(requestSpeed ? { speed: requestSpeed } : {}),
           });
-          broadcast(spanEvent);
+          pendingStepBroadcasts.push({ step: totalSteps - 1, event: spanEvent });
           // Persist the aggregate once per model request. The same usage is
           // intentionally copied to projected message/tool events for local
           // attribution, so metrics must not sum those projections.
@@ -397,20 +415,24 @@ export class DefaultStrategy implements AgentStrategy {
               stopReason,
               metadata: { signal: 'reasoning' },
             });
-            broadcast(thinkingEvent);
+            pendingStepBroadcasts.push({ step: totalSteps - 1, event: thinkingEvent });
             // The canonical preview for `agent.thinking` is `event_start` only:
             // the buffered event carries no reasoning text, so a delta would
             // have to invent content. The carrier is keyed to the persisted
             // event's id so a projector can reconcile the two.
-            broadcast(transientEvent(session.id, 'agent.thinking_stream_start', {
+            pendingStepBroadcasts.push({ step: totalSteps - 1, event: transientEvent(session.id, 'agent.thinking_stream_start', {
               message_id: thinkingEvent.id,
               signal: 'reasoning',
-            }));
+            }) });
           }
 
           // Emit agent.message for this step's text (OMA pattern: per-step, not end-of-loop)
           if (step.text && step.text.trim()) {
             const agentMsgEvent = eventLog.append(session.id, {
+              // The id was minted in prepareStep so the `event_deltas[]`
+              // previews — broadcast from the consumer loop — and this buffered
+              // event name the same id, letting accumulators reconcile the two.
+              id: mintedMessageIds[totalSteps - 1],
               type: 'agent.message',
               content: [{ type: 'text', text: step.text }] as ContentBlock[],
               tokensIn,
@@ -419,7 +441,7 @@ export class DefaultStrategy implements AgentStrategy {
               stopReason,
               durationMs: Date.now() - startTime,
             });
-            broadcast(agentMsgEvent);
+            pendingStepBroadcasts.push({ step: totalSteps - 1, event: agentMsgEvent });
           }
 
           // Emit events for tool calls (MCP tools get the mcp_* event type)
@@ -473,7 +495,7 @@ export class DefaultStrategy implements AgentStrategy {
                 stopReason,
                 ...(mcpServerName ? { metadata: { mcp_server_name: mcpServerName } } : {}),
               });
-              broadcast(toolUseEvent);
+              pendingStepBroadcasts.push({ step: totalSteps - 1, event: toolUseEvent });
             }
           }
 
@@ -512,7 +534,7 @@ export class DefaultStrategy implements AgentStrategy {
                   } }
                   : mcpServerName ? { metadata: { mcp_server_name: mcpServerName } } : {}),
               });
-              broadcast(toolResultEvent);
+              pendingStepBroadcasts.push({ step: totalSteps - 1, event: toolResultEvent });
             }
           }
 
@@ -536,13 +558,32 @@ export class DefaultStrategy implements AgentStrategy {
       // onStepFinish callbacks to completion.
       let streaming = false;
       let messageId = '';
+      // `mintedMessageIds` is indexed by step: `prepareStep` pushes before the
+      // request, the `start-step` stream part names the same step here, and
+      // `onStepFinish` appends under `mintedMessageIds[totalSteps - 1]`.
+      let consumedStepIndex = -1;
+      // `step` limits the flush to one step's entries; omitted, it drains the
+      // queue — for the run-ending `finish` part and the abort path.
+      const flushStepBroadcasts = (step?: number) => {
+        for (let i = pendingStepBroadcasts.length - 1; i >= 0; i--) {
+          if (step !== undefined && pendingStepBroadcasts[i].step !== step) continue;
+          broadcast(pendingStepBroadcasts[i].event);
+          pendingStepBroadcasts.splice(i, 1);
+        }
+      };
       let streamError: unknown;
       for await (const part of result.fullStream) {
         guard.push(part);
-        if (part.type === 'text-delta') {
+        if (part.type === 'start-step') {
+          consumedStepIndex++;
+          messageId = mintedMessageIds[consumedStepIndex] ?? '';
+        } else if (part.type === 'text-delta') {
           if (!streaming) {
             streaming = true;
-            messageId = `msg_${Date.now()}_${totalSteps}`;
+            // The durable `agent.message` id was minted in prepareStep so that
+            // `event_deltas[]` previews announce the id the buffered event
+            // lands under; the fallback covers streams that omit start-step.
+            if (!messageId) messageId = `sevt_${nanoid(16)}`;
             broadcast(transientEvent(session.id, 'agent.message_stream_start', { message_id: messageId }));
           }
           broadcast(
@@ -552,6 +593,12 @@ export class DefaultStrategy implements AgentStrategy {
             }),
           );
         } else if (part.type === 'finish-step' || part.type === 'finish') {
+          // onStepFinish may already have run stream-transform-side; this
+          // step's durable events are released only now, after its preview
+          // deltas, so the buffered `agent.message` never precedes the
+          // `event_deltas[]` frames that announce it. The run-ending `finish`
+          // part drains anything left.
+          flushStepBroadcasts(part.type === 'finish' ? undefined : consumedStepIndex);
           if (streaming) {
             broadcast(transientEvent(session.id, 'agent.message_stream_end', { message_id: messageId }));
             streaming = false;
@@ -566,6 +613,11 @@ export class DefaultStrategy implements AgentStrategy {
       if (streaming) {
         broadcast(transientEvent(session.id, 'agent.message_stream_end', { message_id: messageId }));
       }
+      // A step whose durable events were queued but whose `finish-step` part
+      // never surfaced (stream aborted mid-step) still releases them here:
+      // they are already in the append-only log and must reach live
+      // subscribers rather than waiting for a reconnect.
+      flushStepBroadcasts();
       if (streamError) {
         // Preserve the provider's diagnostic detail (status/url/cause/body)
         // instead of collapsing to an empty message.
