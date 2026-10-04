@@ -5,8 +5,10 @@
  *   ANTHROPIC_API_KEY=sk-ant-... node --import tsx scripts/docs-examples-live.mjs
  *
  * Optional: `DOCS_EXAMPLES_LIVE_MODEL` overrides the default model id
- * (claude-sonnet-4-6). The key comes from the operator's environment and is
- * never printed or written to the evidence file.
+ * (claude-sonnet-4-6), and `DOCS_EXAMPLES_LIVE_BASE_URL` points the provider
+ * at an Anthropic-compatible endpoint (relay, gateway, proxy). The key comes
+ * from the operator's environment and is never printed or written to the
+ * evidence file; a custom base URL is recorded in it.
  *
  * The example code is identical to what `npm run test:docs-examples` executes
  * — the only difference is the provider: this script starts the runtime with
@@ -31,6 +33,10 @@ import { startRuntimeHarness } from '../tests/conformance/support/runtime-server
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const MODEL = process.env.DOCS_EXAMPLES_LIVE_MODEL ?? 'claude-sonnet-4-6';
+// Optional Anthropic-compatible endpoint override (relay, gateway, proxy).
+// Recorded in the evidence file so a run against a non-default endpoint is
+// identifiable as such rather than implied to be api.anthropic.com.
+const BASE_URL = process.env.DOCS_EXAMPLES_LIVE_BASE_URL;
 const SCRIPT_TIMEOUT_MS = 120_000;
 
 const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -100,6 +106,7 @@ async function runPage(page) {
     provider: 'anthropic',
     apiKey,
     model: MODEL,
+    ...(BASE_URL ? { modelBaseUrl: BASE_URL } : {}),
   });
   const startedAt = Date.now();
   try {
@@ -162,6 +169,7 @@ const lines = [
   `# Live docs-example validation — ${date}`,
   '',
   `Environment: Node ${process.version}, @anthropic-ai/sdk ${sdkVersion()}, runtime commit ${commitSha()}, model \`${MODEL}\`.`,
+  `Model endpoint: ${BASE_URL ? `\`${BASE_URL}\` (custom \`DOCS_EXAMPLES_LIVE_BASE_URL\`)` : 'the provider default (api.anthropic.com)'}.`,
   '',
   'Each enabled docs-example page ran unchanged against a locally started runtime',
   'configured with the operator\'s `ANTHROPIC_API_KEY` and the real Anthropic',

@@ -79,7 +79,11 @@ export ANTHROPIC_API_KEY=sk-ant-...
 node --import tsx scripts/docs-examples-live.mjs
 ```
 
-`DOCS_EXAMPLES_LIVE_MODEL` overrides the default model (`claude-sonnet-4-6`).
+`DOCS_EXAMPLES_LIVE_MODEL` overrides the default model (`claude-sonnet-4-6`),
+and `DOCS_EXAMPLES_LIVE_BASE_URL` points the provider at an
+Anthropic-compatible endpoint (relay, gateway, or proxy). A custom endpoint is
+recorded in the evidence file's environment line so the run cannot be mistaken
+for api.anthropic.com.
 Each page still gets its own temporary runtime and workspace, and the script
 writes a summary table to `docs/test-evidence/live-docs-examples-<date>.md` —
 one row per page with the exit code, duration, the session's usage buckets

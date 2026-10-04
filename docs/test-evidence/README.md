@@ -8,4 +8,6 @@ never API keys, request bodies, or model reply text.
   `node --import tsx scripts/docs-examples-live.mjs` (see
   `tests/conformance/docs-examples/README.md#live-model-validation`). The
   operator supplies `ANTHROPIC_API_KEY` locally; the run proves the enabled
-  documentation examples work against a real Anthropic model.
+  documentation examples work against a real model over the Anthropic
+  Messages protocol. `DOCS_EXAMPLES_LIVE_BASE_URL` selects a custom
+  Anthropic-compatible endpoint, which the evidence file then names.
