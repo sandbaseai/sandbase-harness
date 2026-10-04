@@ -31,8 +31,19 @@ import { fileURLToPath } from 'node:url';
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..', '..');
 
 export interface RuntimeHarnessOptions {
-  /** Provider base URL the workspace config points at, e.g. the stub model server's. */
-  modelBaseUrl: string;
+  /**
+   * Provider vendor for the workspace model record. Defaults to `openai`,
+   * which pairs with `modelBaseUrl`; `anthropic` targets the real Anthropic
+   * provider and may omit `base_url` to use its default endpoint.
+   */
+  provider?: string;
+  /**
+   * Provider API key written into the workspace config. Defaults to the
+   * stub-suite placeholder; a live run supplies the operator's key.
+   */
+  apiKey?: string;
+  /** Provider base URL the workspace config points at, e.g. the stub model server's. Omit for a provider's default endpoint. */
+  modelBaseUrl?: string;
   /** Agent name to write into `agents/<name>.yaml`. */
   agentName?: string;
   /** Model id the agent asks for; the provider's own id matters only to the provider. */
@@ -81,9 +92,9 @@ export async function startRuntimeHarness(options: RuntimeHarnessOptions): Promi
     [
       '# Written by tests/conformance/support/runtime-server.ts.',
       'model:',
-      '  provider: openai',
-      `  base_url: ${options.modelBaseUrl}`,
-      '  api_key: conformance-stub-key',
+      `  provider: ${options.provider ?? 'openai'}`,
+      ...(options.modelBaseUrl ? [`  base_url: ${options.modelBaseUrl}`] : []),
+      `  api_key: ${options.apiKey ?? 'conformance-stub-key'}`,
       '',
       'storage:',
       '  metadata:',

@@ -67,6 +67,27 @@ Model ids in the selected snippets are unchanged. The initial three pages use
 `claude-opus-5`, registered against the stub endpoint. A passing creation example
 does not prove tool execution, an approval lifecycle, or real model behavior.
 
+## Live-model validation
+
+`scripts/docs-examples-live.mjs` reuses this suite but swaps the stub model
+server for the real Anthropic provider, so the same enabled snippets prove
+actual model behavior rather than provider-shape compatibility. It needs the
+operator's own key and is never run in CI:
+
+```sh
+export ANTHROPIC_API_KEY=sk-ant-...
+node --import tsx scripts/docs-examples-live.mjs
+```
+
+`DOCS_EXAMPLES_LIVE_MODEL` overrides the default model (`claude-sonnet-4-6`).
+Each page still gets its own temporary runtime and workspace, and the script
+writes a summary table to `docs/test-evidence/live-docs-examples-<date>.md` —
+one row per page with the exit code, duration, the session's usage buckets
+(including cache reads and writes, which is where a cache hit would show),
+final status, and stop_reason, plus the Node/SDK versions and runtime commit.
+The key, request bodies, and model reply text are never recorded, so the
+evidence file is safe to commit.
+
 Verification date: 2026-10-02. The broader release gate is
 `npm run release:check`; the documentation execution tests require the explicit
 local-documents setting described above.
