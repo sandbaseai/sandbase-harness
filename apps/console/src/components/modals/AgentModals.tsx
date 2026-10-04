@@ -5,6 +5,7 @@ import { postJson, putJson } from '../../api';
 import { sendsModelConfig } from '../../lib/agentModelConfig';
 import { validateAgentDraft } from '../../lib/agentVersionDiff';
 import { CodeEditor } from '../CodeEditor';
+import { EquivalentRequestPanel } from '../EquivalentRequestPanel';
 import { Modal } from '../Modal';
 import type { Agent, AgentToolset, ConsoleData, SkillRef, Template } from '../../types';
 
@@ -22,6 +23,13 @@ export function AgentModal({ template, data, onClose, onSaved }: { template?: Te
     setSelected(next);
     setConfigText(formatAgentDefinition(next.agent, format));
   };
+
+  // The panel previews exactly what submit will send, so it reads the same
+  // parser the submit path does — an invalid draft yields no request.
+  const createRequest = useMemo(() => {
+    const parsed = parseAgentConfigSafely(configText, format);
+    return parsed.ok ? { method: 'POST' as const, path: '/v1/agents', body: parsed.value as Record<string, unknown> } : null;
+  }, [configText, format]);
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -69,6 +77,8 @@ export function AgentModal({ template, data, onClose, onSaved }: { template?: Te
             minRows={18}
           />
         </section>
+
+        <EquivalentRequestPanel request={createRequest} />
 
         <div className="modalActions stickyActions">
           <button className="darkButton" type="submit" disabled={saving}>Create agent</button>

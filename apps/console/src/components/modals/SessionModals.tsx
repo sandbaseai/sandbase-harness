@@ -1,7 +1,8 @@
 import { ChevronDown, Database, ExternalLink, FileText, Plus, Shield, Trash2 } from 'lucide-react';
-import { type Dispatch, type FormEvent, type SetStateAction, useState } from 'react';
+import { type Dispatch, type FormEvent, type SetStateAction, useMemo, useState } from 'react';
 import { postJson } from '../../api';
 import { EmptyState, RequiredMark } from '../Common';
+import { EquivalentRequestPanel } from '../EquivalentRequestPanel';
 import { Modal } from '../Modal';
 import { MultiResourcePicker, ResourcePicker } from '../ResourcePicker';
 import { environmentKind } from '../pages/EnvironmentPageModel';
@@ -30,18 +31,26 @@ export function SessionModal({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  // One body object feeds both the submit below and the equivalent-request
+  // panel — the panel is only honest if it cannot drift from what is sent.
+  const createBody = useMemo(() => ({
+    agent,
+    environment_id: environment,
+    title: title || undefined,
+    resources: resources.map(toSessionResourcePayload),
+    vault_ids: Array.from(vaultIds),
+  }), [agent, environment, title, resources, vaultIds]);
+  const createRequest = useMemo(
+    () => ({ method: 'POST' as const, path: '/v1/sessions', body: createBody }),
+    [createBody],
+  );
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setSaving(true);
     setError('');
     try {
-      await postJson('/v1/sessions', {
-        agent,
-        environment_id: environment,
-        title: title || undefined,
-        resources: resources.map(toSessionResourcePayload),
-        vault_ids: Array.from(vaultIds),
-      });
+      await postJson('/v1/sessions', createBody);
       onSaved();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -147,6 +156,8 @@ export function SessionModal({
               </div>
             </section>
         </div>
+
+        <EquivalentRequestPanel request={createRequest} />
 
         <div className="modalActions stickyActions">
           <button className="darkButton" type="submit" disabled={saving || !agent || !environment}>{saving ? 'Creating…' : 'Create session'}</button>

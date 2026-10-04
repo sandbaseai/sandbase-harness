@@ -3197,6 +3197,44 @@ label.searchBox input {
   overflow-wrap: normal;
 }
 
+.equivalentRequest .snippetHeader {
+  border-radius: 10px 10px 0 0;
+  border: 1px solid var(--border-subtle);
+}
+
+.equivalentRequest .apiSnippet {
+  border: 1px solid var(--border-subtle);
+  border-top: none;
+  border-radius: 0 0 10px 10px;
+  margin: 0;
+}
+
+.equivalentRequestTabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.equivalentRequestTab {
+  border: 1px solid transparent;
+  background: none;
+  border-radius: 7px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.equivalentRequestTab:hover {
+  color: var(--text);
+}
+
+.equivalentRequestTab.selected {
+  color: var(--text);
+  border-color: var(--border-subtle);
+  background: var(--surface-raised, var(--surface));
+}
+
 .skillReferenceGrid {
   display: grid;
   grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);

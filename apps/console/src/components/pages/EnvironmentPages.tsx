@@ -1,9 +1,9 @@
-import { Archive, FileText, Globe, MoreVertical, Pencil, Plus, Server, Trash2 } from 'lucide-react';
+import { Archive, Copy, FileText, Globe, MoreVertical, Pencil, Plus, Server, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { deleteJson, postJson, putJson } from '../../api';
 import { EmptyState, FilterSelect, StatusPill, Toolbar } from '../Common';
 import { Modal } from '../Modal';
-import { formatDateShort, shortId } from '../../lib/format';
+import { copyText, formatDateShort, shortId } from '../../lib/format';
 import type { ConsoleData, Environment, EnvironmentDraft, MetadataDraft } from '../../types';
 import { CloudEnvironment, ReadonlyTable, SelfHostedEnvironment } from './EnvironmentDetailViews';
 import {
@@ -158,6 +158,7 @@ export function EnvironmentDetail({ environment, data, onBack, onRefresh }: { en
             <h1>{environment.name}</h1>
             <span className="softChip inlineChip">{environmentKind(environment)}</span>
             <Globe size={19} className="mutedIcon" />
+            <button className="iconButton" type="button" title="Copy environment id" aria-label="Copy environment id" onClick={() => void copyText(environment.id)}><Copy size={16} /></button>
           </div>
           <p className="mutedLine"><span className="monoText">{shortId(environment.id)}</span> · Last updated {formatDateShort(environment.updated_at)}</p>
           <p className="agentDescription">{environment.description || 'No description.'}</p>

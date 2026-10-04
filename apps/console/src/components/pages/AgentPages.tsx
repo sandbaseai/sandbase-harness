@@ -2,7 +2,7 @@ import { Box, Check, ChevronDown, Copy, FlaskConical, Lock, MessageSquare, Monit
 import { useState } from 'react';
 import { postJson } from '../../api';
 import { EmptyState, FilterSelect, MetricCard, StatusPill, Toolbar } from '../Common';
-import { formatDate, formatDateShort, formatUsage, shortId } from '../../lib/format';
+import { copyText, formatDate, formatDateShort, formatUsage, shortId } from '../../lib/format';
 import { diffAgentVersions, type AgentFieldDiff } from '../../lib/agentVersionDiff';
 import { useAgentVersions } from '../../useAgentVersions';
 import {
@@ -149,6 +149,7 @@ export function AgentDetail({
           <div className="titleLine">
             <h1>{agent.name}</h1>
             <StatusPill status={agent.status} />
+            <button className="iconButton" type="button" title="Copy agent id" aria-label="Copy agent id" onClick={() => void copyText(agent.id)}><Copy size={16} /></button>
           </div>
           <p className="mutedLine"><span className="monoText">{agent.id}</span> · Last updated {formatDate(agent.updated_at)}</p>
           <p className="agentDescription">{agent.description || 'No description.'}</p>
