@@ -1,13 +1,27 @@
 import { Archive, ChevronDown, Clock, Cloud, Copy, Download, Info, Keyboard, MessageSquare, Monitor, Plus, Search, Send, Settings, Square, Trash2, X } from 'lucide-react';
-import { type Dispatch, type FormEvent, type ReactNode, type SetStateAction, useEffect, useRef, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { type Dispatch, type FormEvent, type SetStateAction, useEffect, useRef, useState } from 'react';
 import { deleteJson, getPage, postJson, readEventStream } from '../../api';
 import { EmptyState, FilterSelect, LoadingState, ResourceBadge, StatusPill, Toolbar } from '../Common';
 import { Modal } from '../Modal';
 import { SessionSettingsModal } from '../modals/SessionModals';
-import { downloadJson, formatDateShort, formatDuration, formatUsage, relativeDate, shortId, titleCase, truncateMiddle } from '../../lib/format';
-import { safeMarkdownUrl } from '../../lib/markdown';
+import {
+  MarkdownMessage,
+  eventKind,
+  eventText,
+  eventTitle,
+  formatToolValue,
+  isToolResultEvent,
+  isToolUseEvent,
+  renderEventBody,
+  toolOperation,
+  toolResultDetails,
+  toolResultFailed,
+  toolResultId,
+  toolResultText,
+  toolUseDetails,
+  toolUseIdFromEvent,
+} from '../session/eventRenderers';
+import { downloadJson, formatDateShort, formatDuration, formatUsage, relativeDate, shortId, truncateMiddle } from '../../lib/format';
 import { modelErrorHint, sessionErrorCode } from '../../lib/modelErrorHints';
 import { contiguousSessionSequence, mergeOrderedSessionEvents } from '../../lib/ordered-session-events';
 import type { Agent, ConsoleData, Session, SessionEvent, ToolPermission } from '../../types';
@@ -16,69 +30,7 @@ const SESSION_EVENT_KINDS = ['user', 'agent', 'tool', 'error', 'system'] as cons
 type SessionEventKind = (typeof SESSION_EVENT_KINDS)[number];
 type SessionDisplayStatus = 'idle' | 'awaiting_action' | 'running' | 'rescheduling' | 'terminated' | 'archived';
 
-/**
- * Markdown renderer used for assistant messages.  Keep code blocks as a
- * first-class, copyable surface while leaving inline code inline.  The
- * renderer intentionally relies on react-markdown's safe AST pipeline rather
- * than injecting HTML into the conversation.
- */
-function MarkdownCode(props: { children?: ReactNode; className?: string }) {
-  return <code className={props.className}>{props.children}</code>;
-}
-
-function MarkdownPre(props: { children?: ReactNode }) {
-  const preRef = useRef<HTMLPreElement>(null);
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    const text = preRef.current?.textContent ?? '';
-    if (!text) return;
-    try {
-      await navigator.clipboard?.writeText(text);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1400);
-    } catch {
-      setCopied(false);
-    }
-  };
-  return (
-    <div className="markdownCodeBlock">
-      <div className="markdownCodeHeader">
-        <span>Code</span>
-        <button type="button" onClick={() => void copy()} aria-label="Copy code">
-          {copied ? 'Copied' : 'Copy'}
-        </button>
-      </div>
-      <pre ref={preRef}>{props.children}</pre>
-    </div>
-  );
-}
-
-function MarkdownLink(props: { href?: string; children?: ReactNode }) {
-  const external = Boolean(props.href && /^https?:\/\//i.test(props.href));
-  return (
-    <a
-      href={props.href}
-      target={external ? '_blank' : undefined}
-      rel={external ? 'noreferrer' : undefined}
-    >
-      {props.children}
-    </a>
-  );
-}
-
-function MarkdownMessage({ text }: { text: string }) {
-  const normalizedText = normalizeMarkdownText(text);
-  return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm]}
-      skipHtml
-      urlTransform={safeMarkdownUrl}
-      components={{ code: MarkdownCode, pre: MarkdownPre, a: MarkdownLink }}
-    >
-      {normalizedText || 'No message content.'}
-    </ReactMarkdown>
-  );
-}
+export { toolResultId, toolUseDetails };
 
 export function Sessions({ data, onNewSession, onOpenSession }: { data: ConsoleData; onNewSession: () => void; onOpenSession: (session: Session) => void }) {
   const [query, setQuery] = useState('');
@@ -803,62 +755,7 @@ export function SessionDetail({
 }
 
 function DebugEventContent({ event }: { event: SessionEvent }) {
-  const text = eventText(event);
-  const kind = eventKind(event);
-  const isMarkdown = event.type === 'agent.message' || event.type === 'agent.thinking';
-  const facts = eventFacts(event);
-
-  if (isMarkdown) {
-    return <div className="conversationBubble debugConversationBubble"><MarkdownMessage text={text} /></div>;
-  }
-
-  if (kind === 'tool' && event.content?.length) {
-    return (
-      <div className="renderedEvent debugEventBody">
-        <p>{eventSummary(event)}</p>
-        <pre>{formatToolValue(event.content)}</pre>
-      </div>
-    );
-  }
-
-  return (
-    <div className="renderedEvent debugEventSummary">
-      <p>{text || eventSummary(event)}</p>
-      {facts.length ? (
-        <dl className="debugEventFacts">
-          {facts.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
-        </dl>
-      ) : null}
-    </div>
-  );
-}
-
-function eventFacts(event: SessionEvent): Array<[string, string]> {
-  const facts: Array<[string, string]> = [];
-  if (event.model_used) facts.push(['Model', event.model_used]);
-  if (event.duration_ms !== undefined) facts.push(['Duration', formatMilliseconds(event.duration_ms)]);
-  if (event.tokens_in !== undefined || event.tokens_out !== undefined) {
-    facts.push(['Tokens', `${event.tokens_in ?? 0} in · ${event.tokens_out ?? 0} out`]);
-  }
-  // A model-derived stop reason is a string; a session.status_idle one is the
-  // object the session contract publishes — only its `type` reads sensibly.
-  if (event.stop_reason) facts.push(['Stop reason', typeof event.stop_reason === 'string' ? event.stop_reason : event.stop_reason.type]);
-  if (event.parent_event_id) facts.push(['Parent event', shortId(event.parent_event_id)]);
-  return facts;
-}
-
-function formatMilliseconds(value: number): string {
-  if (value < 1000) return `${Math.round(value)} ms`;
-  return `${(value / 1000).toFixed(value >= 10000 ? 0 : 1)} s`;
-}
-
-function eventSummary(event: SessionEvent): string {
-  if (event.type === 'span.model_request_start') return 'Model request started and is being processed.';
-  if (event.type === 'span.model_request_end') return 'Model request completed.';
-  if (event.type.startsWith('session.status_')) return `Session lifecycle update: ${titleCase(event.type.replace('session.status_', ''))}.`;
-  if (event.type === 'agent.thinking') return 'Agent reasoning trace.';
-  if (event.type === 'user.tool_confirmation') return 'Tool confirmation decision recorded.';
-  return `Event recorded as ${titleCase(event.type.replaceAll('.', ' ').replaceAll('_', ' '))}.`;
+  return <>{renderEventBody(event)}</>;
 }
 
 
@@ -871,50 +768,10 @@ function toggleSet<T>(value: T, checked: boolean, setter: Dispatch<SetStateActio
   });
 }
 
-function eventKind(event: SessionEvent): 'user' | 'agent' | 'tool' | 'error' | 'system' {
-  if (event.type.startsWith('user.')) return 'user';
-  if (event.type.startsWith('agent.')) return event.type.includes('tool') ? 'tool' : 'agent';
-  if (event.type.includes('tool') || event.type.includes('mcp')) return 'tool';
-  if (event.type.includes('error') || event.type.includes('failed')) return 'error';
-  return 'system';
-}
-
 function eventLabel(event: SessionEvent, mode: 'transcript' | 'debug') {
   if (mode === 'debug') return truncateMiddle(event.type, 22);
   const kind = eventKind(event);
   return kind[0].toUpperCase() + kind.slice(1);
-}
-
-function eventTitle(event: SessionEvent) {
-  const text = eventText(event);
-  if (event.type === 'user.message') return text || 'User message';
-  if (event.type === 'agent.message') return 'Agent message';
-  if (event.type === 'user.interrupt') return 'Interrupted';
-  if (event.type === 'session.error') return text || 'Session error';
-  if (event.type.includes('model') && event.type.endsWith('start')) return 'Model request start';
-  if (event.type.includes('model') && event.type.endsWith('end')) return text ? `Model request stop (${text})` : 'Model request stop';
-  return titleCase(event.type.replaceAll('.', ' ').replaceAll('_', ' '));
-}
-
-function eventText(event: SessionEvent) {
-  if (event.delta) return event.delta;
-  const content = normalizeEventContent(event.content);
-  if (content.length === 0) return '';
-  return content.map((part) => {
-    if (part && typeof part === 'object') {
-      const record = part as Record<string, unknown>;
-      if (typeof record.text === 'string') return record.text;
-      if (typeof record.message === 'string') return record.message;
-      if (typeof record.error === 'string') return record.error;
-    }
-    return typeof part === 'string' ? part : JSON.stringify(part);
-  }).join('\n');
-}
-
-function normalizeEventContent(content: SessionEvent['content']): unknown[] {
-  if (Array.isArray(content)) return content;
-  if (content === null || content === undefined) return [];
-  return [content];
 }
 
 type ConversationMessage = {
@@ -923,6 +780,12 @@ type ConversationMessage = {
   text: string;
   event: SessionEvent;
 };
+
+/** Transcript text: a `session.error` bubble prefers the projected message. */
+function sessionEventText(event: SessionEvent): string {
+  if (event.type === 'session.error') return event.error?.message || eventText(event);
+  return eventText(event);
+}
 
 /**
  * Tool card for the conversation transcript.
@@ -1104,30 +967,9 @@ function conversationMessages(events: SessionEvent[]): ConversationMessage[] {
     .map((event) => ({
       id: event.id,
       role: event.type === 'user.message' ? 'user' : event.type === 'session.error' ? 'error' : 'agent',
-      text: event.type === 'user.interrupt' ? 'Run interrupted by the user.' : eventText(event),
+      text: event.type === 'user.interrupt' ? 'Run interrupted by the user.' : sessionEventText(event),
       event,
     }));
-}
-
-function normalizeMarkdownText(value: string): string {
-  const normalized = value.replace(/\r\n?/g, '\n').trim();
-  if (!normalized) return '';
-  const lines = normalized.split('\n');
-  const output: string[] = [];
-  let inFence = false;
-  let pendingBlank = false;
-  for (const line of lines) {
-    const isFence = /^\s*(```|~~~)/.test(line);
-    if (!inFence && line.trim() === '') {
-      pendingBlank = output.length > 0;
-      continue;
-    }
-    if (pendingBlank && output.length > 0 && output.at(-1) !== '') output.push('');
-    pendingBlank = false;
-    output.push(line);
-    if (isFence) inFence = !inFence;
-  }
-  return output.join('\n').trim();
 }
 
 export function conversationEntries(events: SessionEvent[]): ConversationEntry[] {
@@ -1149,9 +991,15 @@ export function conversationEntries(events: SessionEvent[]): ConversationEntry[]
     });
   }
   const toolUseIds = new Set(events.map(toolUseIdFromEvent).filter((id): id is string => Boolean(id)));
+  // A `custom_tool_use_id` names the use *event* id per the published
+  // contract; the runtime also accepts the block id. Index both so either
+  // spelling pairs.
+  for (const event of events) {
+    if (isToolUseEvent(event)) toolUseIds.add(event.id);
+  }
   const entries: ConversationEntry[] = [];
   for (const event of events) {
-    if (event.type.includes('tool_result')) {
+    if (isToolResultEvent(event)) {
       const resultId = toolResultId(event);
       // A paired result is rendered with its tool_use row. Preserve an
       // orphaned result in its original position so a partial stream remains
@@ -1176,15 +1024,15 @@ export function conversationEntries(events: SessionEvent[]): ConversationEntry[]
       entries.push({
         id: event.id,
         role: event.type === 'user.message' ? 'user' : event.type === 'session.error' ? 'error' : 'agent',
-        text: event.type === 'user.interrupt' ? 'Run interrupted by the user.' : eventText(event),
+        text: event.type === 'user.interrupt' ? 'Run interrupted by the user.' : sessionEventText(event),
         event,
       });
       continue;
     }
-    if (eventKind(event) !== 'tool') continue;
+    if (!isToolUseEvent(event)) continue;
     const details = toolUseDetails(event);
     const toolUseId = details.toolUseId;
-    const result = toolUseId ? resultByToolId.get(toolUseId) : undefined;
+    const result = (toolUseId ? resultByToolId.get(toolUseId) : undefined) ?? resultByToolId.get(event.id);
     // Tool Runtime is the authority. A result-less tool use is actionable only
     // when the event carries explicit confirmation metadata and no
     // confirmation has been recorded yet. This also works when the API maps
@@ -1253,129 +1101,6 @@ export function beginToolConfirmation(inFlight: Set<string>, toolUseId: string):
   return true;
 }
 
-export function toolUseDetails(event: SessionEvent): {
-  toolName: string;
-  toolUseId?: string;
-  input?: unknown;
-  requiresConfirmation?: boolean;
-  permission?: ToolPermission;
-} {
-  const block = findToolBlock(event, ['tool_use', 'mcp_tool_use']);
-  const record = block as Record<string, unknown> | undefined;
-  const toolName = typeof record?.name === 'string'
-    ? record.name
-    : typeof record?.tool_name === 'string' ? record.tool_name : eventTitle(event);
-  const toolUseId = typeof record?.id === 'string'
-    ? record.id
-    : typeof record?.tool_use_id === 'string'
-      ? record.tool_use_id
-      : typeof record?.mcp_tool_use_id === 'string' ? record.mcp_tool_use_id : toolUseIdFromEvent(event);
-  const metadata = event.metadata;
-  const requiresConfirmation = firstBoolean(
-    record?.requires_confirmation,
-    record?.requiresConfirmation,
-    event.requires_confirmation,
-    metadata?.requires_confirmation,
-    metadata?.requiresConfirmation,
-  );
-  const permission = firstPermission(
-    record?.permission,
-    event.permission,
-    metadata?.permission,
-  );
-  return {
-    toolName,
-    toolUseId,
-    input: record?.input ?? record?.arguments ?? record?.args,
-    ...(requiresConfirmation !== undefined ? { requiresConfirmation } : {}),
-    ...(permission ? { permission } : {}),
-  };
-}
-
-function toolResultDetails(event: SessionEvent): { toolName: string } {
-  const block = findToolBlock(event, ['tool_result', 'mcp_tool_result']) as Record<string, unknown> | undefined;
-  return { toolName: typeof block?.name === 'string' ? block.name : 'tool' };
-}
-
-function findToolBlock(event: SessionEvent, types: string[]): unknown {
-  return normalizeEventContent(event.content).find((part) => part && typeof part === 'object' && types.includes(String((part as Record<string, unknown>).type)));
-}
-
-function toolResultText(event: SessionEvent): string {
-  const block = findToolBlock(event, ['tool_result', 'mcp_tool_result']) as Record<string, unknown> | undefined;
-  return formatToolText(block?.content ?? block?.output ?? block?.result ?? eventText(event));
-}
-
-function toolResultFailed(event: SessionEvent): boolean {
-  const block = findToolBlock(event, ['tool_result', 'mcp_tool_result']) as Record<string, unknown> | undefined;
-  return block?.is_error === true || block?.isError === true || event.is_error === true || event.isError === true
-    || event.metadata?.is_error === true
-    || event.type.includes('error') || event.type.includes('failed');
-}
-
-function formatToolText(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (Array.isArray(value)) return value.map((part) => formatToolText(part)).filter(Boolean).join('\n');
-  if (value && typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-    if (typeof record.text === 'string') return record.text;
-    if (typeof record.message === 'string') return record.message;
-    if (typeof record.error === 'string') return record.error;
-    return formatToolValue(value);
-  }
-  return value == null ? '' : String(value);
-}
-
-function formatToolValue(value: unknown): string {
-  if (value === undefined) return 'No parameters.';
-  if (typeof value === 'string') return value;
-  try {
-    return JSON.stringify(value, null, 2) ?? String(value);
-  } catch {
-    return String(value);
-  }
-}
-
-function toolOperation(toolName: string): string {
-  const key = toolName.toLowerCase();
-  if (key.includes('bash') || key.includes('shell') || key.includes('terminal') || key === 'exec') return 'bash';
-  if (key.includes('read') || key.includes('view') || key.includes('cat')) return 'read';
-  if (key.includes('replace') || key.includes('patch') || key.includes('edit') || key.includes('write') || key.includes('create')) return 'replace';
-  if (key.includes('glob') || key.includes('list') || key.includes('ls')) return 'list';
-  if (key.includes('grep') || key.includes('search')) return 'search';
-  return toolName || 'tool';
-}
-
-function toolUseIdFromEvent(event: SessionEvent): string | undefined {
-  const block = event.content?.find((part) => part && typeof part === 'object' && ['tool_use', 'mcp_tool_use'].includes(String((part as Record<string, unknown>).type))) as Record<string, unknown> | undefined;
-  return typeof block?.id === 'string' ? block.id : event.tool_use_id ?? event.mcp_tool_use_id;
-}
-
-function firstBoolean(...values: unknown[]): boolean | undefined {
-  const value = values.find((candidate) => typeof candidate === 'boolean');
-  return typeof value === 'boolean' ? value : undefined;
-}
-
-function firstPermission(...values: unknown[]): ToolPermission | undefined {
-  for (const candidate of values) {
-    if (candidate === 'always_allow' || candidate === 'always_ask' || candidate === 'never_allow') return candidate;
-    if (candidate && typeof candidate === 'object' && 'type' in candidate) {
-      const type = (candidate as { type?: unknown }).type;
-      if (type === 'always_allow' || type === 'always_ask' || type === 'never_allow') return type;
-    }
-  }
-  return undefined;
-}
-
-export function toolResultId(event: SessionEvent): string | undefined {
-  if (!event.type.includes('tool_result')) return undefined;
-  const block = event.content?.find((part) => part && typeof part === 'object' && ['tool_result', 'mcp_tool_result'].includes(String((part as Record<string, unknown>).type))) as Record<string, unknown> | undefined;
-  if (typeof block?.tool_use_id === 'string') return block.tool_use_id;
-  if (typeof block?.mcp_tool_use_id === 'string') return block.mcp_tool_use_id;
-  if (typeof block?.toolUseId === 'string') return block.toolUseId;
-  if (typeof block?.mcpToolUseId === 'string') return block.mcpToolUseId;
-  return event.tool_use_id ?? event.mcp_tool_use_id ?? event.custom_tool_use_id;
-}
 
 export function sessionDisplayStatus(session: Session, events: SessionEvent[]): SessionDisplayStatus {
   // `archived_at` is its own axis — an archived session displays as archived

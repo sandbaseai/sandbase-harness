@@ -123,6 +123,42 @@ export type SessionEvent = {
   tokens_out?: number;
   stop_reason?: string | { type: string; event_ids?: string[] };
   duration_ms?: number;
+  /** `session.error`: the classified error payload. */
+  error?: {
+    type?: string;
+    message?: string;
+    retry_status?: { type?: 'retrying' | 'exhausted' | 'terminal' };
+    code?: string;
+  };
+  /** `session.usage`: the published usage snapshot. */
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_read_input_tokens?: number;
+    cache_creation?: {
+      ephemeral_5m_input_tokens?: number;
+      ephemeral_1h_input_tokens?: number;
+    };
+    active_seconds?: number;
+    list_cost?: { amount: string; currency: string };
+    budget?: unknown;
+    server_tool_use?: { web_search_requests?: number; web_fetch_requests?: number };
+  };
+  /** `span.model_request_end`: the paired start's event id. */
+  model_request_start_id?: string | null;
+  /** `span.model_request_end`: the single request's usage buckets. */
+  model_usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens: number;
+    cache_read_input_tokens: number;
+    speed?: 'standard' | 'fast' | null;
+  };
+  /** `user.define_outcome` payload. */
+  outcome_id?: string;
+  description?: string;
+  rubric?: unknown;
+  max_iterations?: number | null;
   created_at: string | null;
   processed_at: string | null;
   parent_event_id: string | null;
