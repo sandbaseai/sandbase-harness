@@ -206,6 +206,13 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
     contract: 'contracts/anthropic-cma/events.md',
   },
   {
+    area: 'events',
+    id: 'model-request-span-pair',
+    status: 'supported',
+    reason: 'Every model request brackets itself with a span.model_request_start / _end pair: the builtin strategy opens the start when the SDK prepares the step and closes the end on completion or failure, the Pi translator emits its own, and one prepareStep-to-onStepFinish cycle is one request, so middleware retries produce exactly one pair. The end carries model_request_start_id, is_error (null on rows persisted before the events.is_error column), and model_usage projected from the row\'s usage columns so input_tokens is the uncached share; the local extension fields (model_used, tokens_in/out, stop_reason, duration_ms, parent_event_id) project beside it, and model_usage.speed stays absent until a fast-mode option exists.',
+    contract: 'contracts/anthropic-cma/events.md',
+  },
+  {
     area: 'streaming',
     id: 'resumable-sse',
     status: 'supported',

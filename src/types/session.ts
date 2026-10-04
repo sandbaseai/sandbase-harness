@@ -116,6 +116,8 @@ export interface SessionEvent {
   stopReason?: string;
   durationMs?: number;
   parentEventId?: string;
+  /** `span.model_request_end` only: whether the request ended in an error. */
+  isError?: boolean;
   delegationDepth?: number;
   /** Immutable event-specific data that does not belong in content blocks. */
   metadata?: Record<string, unknown>;

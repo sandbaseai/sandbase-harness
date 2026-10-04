@@ -509,6 +509,44 @@ describe('Database migrations', () => {
     upgraded.close();
   });
 
+  it('adds the is_error column to events (056)', () => {
+    // Fresh: the column exists and reads back through the event logger.
+    const fresh = new Database(dbPath);
+    fresh.runMigrations();
+    expect(columnsOf(fresh, 'events')).toEqual(expect.arrayContaining(['is_error']));
+    expect(fresh.prepare('SELECT name FROM _migrations WHERE version = 56').get()).toEqual({
+      name: '056_model_request_is_error',
+    });
+    fresh.close();
+
+    // Existing: a workspace that stopped at 055 with a paired span already in
+    // the log. The upgrade adds the column and the row reads as NULL — the
+    // "outcome unknown" value the projection reports, not a guessed false.
+    const upgradedPath = join(tmpDir, 'upgraded-is-error.db');
+    const upgraded = new Database(upgradedPath);
+    upgraded.runMigrations();
+    expect(columnsOf(upgraded, 'events')).toContain('is_error');
+    upgraded.close();
+
+    const legacyPath = join(tmpDir, 'legacy-is-error.db');
+    const legacy = new Database(legacyPath);
+    legacy.runMigrations(MIGRATIONS.filter((migration) => migration.version <= 55));
+    expect(columnsOf(legacy, 'events')).not.toContain('is_error');
+    legacy.exec(`
+      INSERT INTO environments (id, name, config) VALUES ('env_b', 'local', '{}');
+      INSERT INTO agents (id, name, definition) VALUES ('agent_b', 'b', '{}');
+      INSERT INTO sessions (id, agent_id, agent_name, environment_id)
+      VALUES ('sess_old', 'agent_b', 'b', 'env_b');
+      INSERT INTO events (id, session_id, seq, type, model_used, tokens_in, tokens_out)
+      VALUES ('sevt_old', 'sess_old', 1, 'span.model_request_end', 'm', 1000, 4)
+    `);
+    legacy.runMigrations();
+    expect(
+      legacy.prepare('SELECT tokens_in, is_error FROM events WHERE id = ?').get('sevt_old'),
+    ).toEqual({ tokens_in: 1000, is_error: null });
+    legacy.close();
+  });
+
   it('transaction rolls back on error', () => {
     const db = new Database(dbPath);
     db.runMigrations();

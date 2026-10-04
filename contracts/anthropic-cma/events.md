@@ -11,6 +11,7 @@ append-only-event-log: supported
 processed-at-lifecycle: supported
 session-error-structure: supported
 error-enum-completeness: supported
+model-request-span-pair: supported
 -->
 
 ---
@@ -58,6 +59,19 @@ The append path and the row shape are `src/core/session/session-manager.ts` and
   why the two ids must not be conflated.
 - `session.usage` is emitted before the session goes idle, so a client reading
   the stream observes usage before the terminal status.
+- Every model request is bracketed by a `span.model_request_start` /
+  `span.model_request_end` pair. The builtin strategy opens the start when the
+  SDK prepares the step's request and the Pi translator opens its own; the end
+  is appended on completion and on failure, and carries the published fields
+  `model_request_start_id` (stored in the `parent_event_id` pairing column),
+  `is_error` (the `events.is_error` column — `true`/`false`, or `null` on rows
+  persisted before the column existed), and `model_usage`, projected from the
+  row's own usage columns so the `input_tokens` value is the uncached share,
+  matching `session.usage`. One `prepareStep`→`onStepFinish` cycle is one
+  request: a request the model middleware retries produces exactly one pair.
+  The local extension fields (`model_used`, `tokens_in`, `tokens_out`,
+  `stop_reason`, `duration_ms`, `parent_event_id`) still project beside the
+  published ones.
 - `session.status_idle` carries the session-level `stop_reason` **object at the
   top level**, which is where the published client reads
   `stop_reason.type` to choose between answering a blocking call and stopping. Its
@@ -130,10 +144,11 @@ lifecycle, structured `session.error`, and usage-before-idle ordering.
 | Difference | Detail |
 | --- | --- |
 | Error `code` extension | `error.type` is always one of the eight official values. The runtime's own code travels under `error.code`, a local extension the published shape does not define: a self-hosted runtime's failures (Pi transport, work queue, parked wait) are finer-grained than the official vocabulary, and dropping the code would lose the distinction. `billing_error` is part of the enumeration but has no local producer — this runtime has no billing boundary. |
-| Event metadata storage | SandBase stores event payloads in a metadata column rather than per-field columns. This is a storage choice with no wire effect. |
+| Event metadata storage | SandBase stores most event payloads in a metadata column rather than per-field columns; fields the published shape makes first-class or the runtime queries directly (`parent_event_id`, the usage columns, `is_error`) get their own column. This is a storage choice with no wire effect. |
 | Local event types | SandBase emits extension event types under `/v1/x` that are not part of the canonical domain set. |
 | `session.updated` fields | `session.updated` is emitted when `POST /v1/sessions/{id}` changes the agent snapshot, metadata, title, or budget; the event carries only the changed fields, and a no-op update appends nothing. |
 | Outcome span vocabulary | `span.outcome_evaluation_*` is the local spelling for the outcome evaluation spans. The three-event shape and the verdict vocabulary are a SandBase profile: they are recorded here rather than presented as a verified upstream enumeration. |
+| Model-request span extension fields | `span.model_request_end` additionally projects the local `model_used`, `tokens_in`, `tokens_out`, `stop_reason`, `duration_ms`, and `parent_event_id` fields the published shape does not define, and `span.model_request_start` projects `model_used`. Rows persisted before the pair existed report `model_request_start_id: null` and `is_error: null`, and rows persisted before the cache-bucket columns existed report zeroed `model_usage` cache fields — the read values the published `boolean | null` shape allows rather than invented ones. `model_usage.speed` stays absent until a fast-mode option exists. |
 | Outcome progression | The grader's own reasoning is not published while an evaluation runs. `span.outcome_evaluation_ongoing` marks that the evaluation is in flight and carries no content, because a partial verdict derived from nothing would be a claim about the deliverable that the runtime cannot support. |
 
 ## 5. Reason for the difference
@@ -194,6 +209,11 @@ lifecycle, structured `session.error`, and usage-before-idle ordering.
   the status a stop leaves behind, the ceiling ending an outcome before its next
   grading pass or turn, and the admission refusal that keeps a declared outcome off
   a runtime with no grader.
+- `tests/integration/model-request-spans.test.ts` — the model-request span
+  pair: a two-step turn appends two ordered start/end pairs, each end names its
+  own start in `model_request_start_id` and reports `is_error: false` with the
+  request's `model_usage`, and a request that dies before finishing closes its
+  start with an `is_error: true` end carrying zeroed usage.
 - `tests/integration/tool-event-fields.test.ts` — the tool-event projection: the
   lifted `name` / `input` / `tool_use_id` / `custom_tool_use_id` fields, the
   top-level `id` remaining the event id, `content` unchanged, and no field

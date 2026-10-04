@@ -139,6 +139,8 @@ export interface EventLogWriter {
     stopReason?: string;
     durationMs?: number;
     parentEventId?: string;
+    /** `span.model_request_end` only: whether the request ended in an error. */
+    isError?: boolean;
     delegationDepth?: number;
     metadata?: Record<string, unknown>;
   }): SessionEvent;

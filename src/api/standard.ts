@@ -380,6 +380,29 @@ export interface ApiEvent {
   agent?: ApiAgent | { id: string; type: 'agent'; name: string };
   budget?: SessionBudget | null;
   title?: string | null;
+  /**
+   * `span.model_request_end` pair id — the `span.model_request_start` this end
+   * closes. `null` on rows persisted before the pair existed.
+   */
+  model_request_start_id?: string | null;
+  /**
+   * `span.model_request_end`: whether the request ended in an error. `null` is
+   * the published "outcome unknown" value, which is what rows persisted before
+   * the flag existed report.
+   */
+  is_error?: boolean | null;
+  /**
+   * `span.model_request_end`: the single request's usage buckets, in the same
+   * split `session.usage` reports — `input_tokens` counts the uncached share
+   * only. `speed` is absent until a fast-mode option exists.
+   */
+  model_usage?: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_creation_input_tokens: number;
+    cache_read_input_tokens: number;
+    speed?: 'standard' | 'fast' | null;
+  };
   model_used?: string;
   tokens_in?: number;
   tokens_out?: number;
@@ -640,6 +663,25 @@ export function toApiEvent(event: SessionEvent): ApiEvent {
         version: sessionUpdate.agent_version as number | undefined,
       })
     : undefined;
+  // `span.model_request_end` publishes the paired-span shape: the start's id,
+  // the outcome flag, and the request's own usage buckets. All three derive
+  // from columns the row already carries — `parent_event_id` is the pairing
+  // the writers have always recorded — so pre-pairing rows degrade to the
+  // nulls the published `boolean | null` field allows rather than inventing
+  // values. The local extension fields (`tokens_in`, `model_used`, …) keep
+  // projecting through their own keys below.
+  const modelRequestEnd = event.type === 'span.model_request_end'
+    ? {
+        model_request_start_id: event.parentEventId ?? null,
+        is_error: event.isError ?? null,
+        model_usage: {
+          input_tokens: event.tokensIn ?? 0,
+          output_tokens: event.tokensOut ?? 0,
+          cache_creation_input_tokens: event.cacheWriteTokens ?? 0,
+          cache_read_input_tokens: event.cacheReadTokens ?? 0,
+        },
+      }
+    : undefined;
   return {
     id: event.id,
     seq: event.seq,
@@ -665,6 +707,7 @@ export function toApiEvent(event: SessionEvent): ApiEvent {
     ...(toolUseId ? { tool_use_id: toolUseId } : {}),
     ...(customToolUseId ? { custom_tool_use_id: customToolUseId } : {}),
     ...(toolUse ?? {}),
+    ...(modelRequestEnd ?? {}),
     ...(event.modelUsed !== undefined ? { model_used: event.modelUsed } : {}),
     ...(event.tokensIn !== undefined ? { tokens_in: event.tokensIn } : {}),
     ...(event.tokensOut !== undefined ? { tokens_out: event.tokensOut } : {}),

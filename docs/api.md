@@ -927,6 +927,17 @@ Model-derived events may include `model_used`, `tokens_in`, `tokens_out`,
 local attribution only; session usage is recorded once per model request and
 is the source for aggregate token totals.
 
+Every model request is bracketed by a span pair: `span.model_request_start` is
+appended when the request is prepared and `span.model_request_end` when it
+completes or fails. The end event carries the published fields
+`model_request_start_id` (the paired start's id), `is_error` (`true` when the
+request failed, `false` when it completed, `null` on events persisted before
+the flag existed), and `model_usage`
+(`{input_tokens, output_tokens, cache_creation_input_tokens, cache_read_input_tokens}`
+— `input_tokens` counts the uncached share only, matching `session.usage`). A
+single request that is retried by the model middleware still produces exactly
+one pair.
+
 Approval-gated `tool_use` blocks include `requires_confirmation: true` and a
 `confirmation_group_id`. The corresponding `user.tool_confirmation` event
 stores its target and decision in event metadata. The session stays in
@@ -1032,6 +1043,7 @@ client can read a call without unpacking the block:
 | `agent.mcp_tool_result` | `mcp_tool_use_id` |
 | `user.custom_tool_result` | `custom_tool_use_id` |
 | `user.tool_confirmation` | `tool_use_id` |
+| `span.model_request_end` | `model_request_start_id`, `is_error`, `model_usage` |
 
 A field the persisted block does not carry is omitted rather than sent as
 `null`. The top-level `id` on a tool event is the event's own id, not the

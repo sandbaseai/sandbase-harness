@@ -480,13 +480,17 @@ export interface SpanModelRequestStartEvent extends EventBase {
 
 export interface SpanModelRequestEndEvent extends EventBase {
   type: 'span.model_request_end';
-  model_request_start_id?: string;
-  is_error?: boolean;
+  /** Id of the paired `span.model_request_start`; `null` on rows written before pairing existed. */
+  model_request_start_id?: string | null;
+  /** `false` on a completed request, `true` on a failed one, `null` when unknown. */
+  is_error?: boolean | null;
+  /** The single request's usage buckets. `input_tokens` counts the uncached share only. */
   model_usage?: {
     input_tokens: number;
     output_tokens: number;
     cache_read_input_tokens?: number;
     cache_creation_input_tokens?: number;
+    speed?: 'standard' | 'fast' | null;
   };
 }
 

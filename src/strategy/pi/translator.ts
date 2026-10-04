@@ -18,6 +18,7 @@ type DurableEvent = {
   stopReason?: string;
   durationMs?: number;
   parentEventId?: string;
+  isError?: boolean;
 };
 
 export interface PiTranslatorOptions {
@@ -146,7 +147,7 @@ export class PiTranslator {
     if (remaining) this.appendTransientText(remaining);
     this.endTransientMessage();
     if (this.currentThinking) this.appendThinking();
-    if (this.requestStart) this.finishRequest(undefined);
+    if (this.requestStart) this.finishRequest(undefined, undefined);
     if (!this.summary.sawFinalAssistantMessage && this.currentTurnText) {
       this.appendFinalMessage(this.currentTurnText);
     }
@@ -281,9 +282,9 @@ export class PiTranslator {
           || this.summary.lastTurnError
           || 'Pi ended the turn with an error';
       }
-      this.finishRequest(stopReason);
+      this.finishRequest(stopReason, stopReason === 'error' ? true : false);
     } else {
-      this.finishRequest(undefined);
+      this.finishRequest(undefined, undefined);
     }
     if (this.currentThinking) this.appendThinking();
     this.endTransientMessage();
@@ -299,7 +300,7 @@ export class PiTranslator {
     });
   }
 
-  private finishRequest(stopReason: string | undefined): void {
+  private finishRequest(stopReason: string | undefined, isError: boolean | undefined): void {
     if (!this.requestStart) return;
     this.appendDurable({
       type: 'span.model_request_end',
@@ -311,6 +312,7 @@ export class PiTranslator {
       stopReason,
       durationMs: Math.max(0, Date.now() - this.requestStartedAt),
       parentEventId: this.requestStart.id,
+      isError,
     });
     this.requestStart = undefined;
     this.requestInputTokens = 0;

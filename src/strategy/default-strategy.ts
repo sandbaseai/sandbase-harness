@@ -219,6 +219,26 @@ export class DefaultStrategy implements AgentStrategy {
     // Declared MCP server names, used to attribute `agent.mcp_*` events back to
     // the server that produced them when several servers expose the same tool.
     const mcpServerNames = (session.agentDefinition?.mcp_servers ?? []).map((server) => server.name);
+    // The `span.model_request_start` for the step currently in flight. One
+    // `prepareStep`→`onStepFinish` cycle is one model request: the registry's
+    // retry middleware lives below the SDK step, so a retried request keeps a
+    // single pair instead of gaining a span per HTTP attempt. A failed request
+    // reaches `onError` with this id still set and closes `is_error: true`.
+    let inFlightRequestStart: SessionEvent | undefined;
+    const closeRequestSpan = (isError: boolean): void => {
+      // Clear before appending: a failed append must not invite a second end.
+      const start = inFlightRequestStart;
+      inFlightRequestStart = undefined;
+      if (!start) return;
+      const spanEvent = eventLog.append(session.id, {
+        type: 'span.model_request_end',
+        modelUsed,
+        parentEventId: start.id,
+        isError,
+        durationMs: Date.now() - startTime,
+      });
+      broadcast(spanEvent);
+    };
 
     try {
       // Build Vercel AI SDK tool definitions from our CoreTool map
@@ -275,6 +295,23 @@ export class DefaultStrategy implements AgentStrategy {
         temperature: config.temperature,
         maxOutputTokens: config.maxTokens,
         abortSignal,
+        // The span opens when the SDK prepares the step's request, not when the
+        // answer lands, so a request that never completes still has a start to
+        // pair with — `onError` below closes it `is_error: true`.
+        prepareStep: () => {
+          // A start left over at this point means the previous step errored
+          // without tripping `onError`; close it rather than leaking a start
+          // with no end.
+          closeRequestSpan(true);
+          inFlightRequestStart = eventLog.append(session.id, {
+            type: 'span.model_request_start',
+            modelUsed,
+          });
+          broadcast(inFlightRequestStart);
+        },
+        onError: () => {
+          closeRequestSpan(true);
+        },
         onStepFinish: async (step) => {
           totalSteps++;
 
@@ -288,6 +325,11 @@ export class DefaultStrategy implements AgentStrategy {
           totalTokensOut += tokensOut;
 
           // Emit a span for this model request's token usage (A3 observability).
+          // `isError: false` and the parent id travel with it: the projection
+          // turns the pair into the published `model_request_start_id` /
+          // `is_error` / `model_usage` shape.
+          const startId = inFlightRequestStart?.id;
+          inFlightRequestStart = undefined;
           const spanEvent = eventLog.append(session.id, {
             type: 'span.model_request_end',
             tokensIn,
@@ -297,6 +339,8 @@ export class DefaultStrategy implements AgentStrategy {
             modelUsed,
             stopReason,
             durationMs: Date.now() - startTime,
+            parentEventId: startId,
+            isError: false,
           });
           broadcast(spanEvent);
           // Persist the aggregate once per model request. The same usage is
@@ -588,6 +632,9 @@ export class DefaultStrategy implements AgentStrategy {
         });
       }
     } catch (error) {
+      // A request that died without tripping the stream's `onError` still has
+      // its start in flight; close the pair before the turn unwinds.
+      closeRequestSpan(true);
       // Enrich provider errors with diagnostic detail before they propagate,
       // so the persisted session.error is informative rather than blank.
       const described = describeModelError(error);

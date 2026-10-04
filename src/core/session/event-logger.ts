@@ -29,6 +29,8 @@ export class EventLogger {
       stopReason?: string;
       durationMs?: number;
       parentEventId?: string;
+      /** Only meaningful on `span.model_request_end`; NULL on every other row. */
+      isError?: boolean;
       delegationDepth?: number;
       metadata?: Record<string, unknown>;
     },
@@ -38,8 +40,8 @@ export class EventLogger {
     const now = new Date();
 
     const stmt = this.db.prepare(`
-      INSERT INTO events (id, session_id, seq, type, content, model_used, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, stop_reason, duration_ms, parent_event_id, delegation_depth, metadata, processed_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO events (id, session_id, seq, type, content, model_used, tokens_in, tokens_out, cache_read_tokens, cache_write_tokens, stop_reason, duration_ms, parent_event_id, is_error, delegation_depth, metadata, processed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -56,6 +58,7 @@ export class EventLogger {
       event.stopReason ?? null,
       event.durationMs ?? null,
       event.parentEventId ?? null,
+      event.isError === undefined ? null : event.isError ? 1 : 0,
       event.delegationDepth ?? 0,
       JSON.stringify(event.metadata ?? {}),
       now.toISOString(),
@@ -75,6 +78,7 @@ export class EventLogger {
       stopReason: event.stopReason,
       durationMs: event.durationMs,
       parentEventId: event.parentEventId,
+      isError: event.isError,
       delegationDepth: event.delegationDepth,
       metadata: event.metadata,
       createdAt: now,
@@ -225,6 +229,7 @@ interface EventRow {
   stop_reason: string | null;
   duration_ms: number | null;
   parent_event_id: string | null;
+  is_error: number | null;
   delegation_depth: number;
   metadata: string | null;
   created_at: string;
@@ -258,6 +263,7 @@ function rowToEvent(row: EventRow): SessionEvent {
     stopReason: row.stop_reason ?? undefined,
     durationMs: row.duration_ms ?? undefined,
     parentEventId: row.parent_event_id ?? undefined,
+    isError: row.is_error === null ? undefined : row.is_error === 1,
     delegationDepth: row.delegation_depth,
     metadata: parseMetadata(row.metadata),
     createdAt: new Date(row.created_at),
