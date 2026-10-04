@@ -1,9 +1,11 @@
-import { Archive, ChevronDown, Clock, Cloud, Copy, Download, Info, Keyboard, MessageSquare, Monitor, Plus, Search, Send, Square, X } from 'lucide-react';
+import { Archive, ChevronDown, Clock, Cloud, Copy, Download, Info, Keyboard, MessageSquare, Monitor, Plus, Search, Send, Settings, Square, Trash2, X } from 'lucide-react';
 import { type Dispatch, type FormEvent, type ReactNode, type SetStateAction, useEffect, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { deleteJson, getPage, postJson, readEventStream } from '../../api';
 import { EmptyState, FilterSelect, LoadingState, ResourceBadge, StatusPill, Toolbar } from '../Common';
+import { Modal } from '../Modal';
+import { SessionSettingsModal } from '../modals/SessionModals';
 import { downloadJson, formatDateShort, formatDuration, formatUsage, relativeDate, shortId, titleCase, truncateMiddle } from '../../lib/format';
 import { safeMarkdownUrl } from '../../lib/markdown';
 import { modelErrorHint, sessionErrorCode } from '../../lib/modelErrorHints';
@@ -12,7 +14,7 @@ import type { Agent, ConsoleData, Session, SessionEvent, ToolPermission } from '
 
 const SESSION_EVENT_KINDS = ['user', 'agent', 'tool', 'error', 'system'] as const;
 type SessionEventKind = (typeof SESSION_EVENT_KINDS)[number];
-type SessionDisplayStatus = Session['status'] | 'queued' | 'completed' | 'requires_action' | 'failed';
+type SessionDisplayStatus = 'idle' | 'awaiting_action' | 'running' | 'rescheduling' | 'terminated' | 'archived';
 
 /**
  * Markdown renderer used for assistant messages.  Keep code blocks as a
@@ -81,11 +83,13 @@ function MarkdownMessage({ text }: { text: string }) {
 export function Sessions({ data, onNewSession, onOpenSession }: { data: ConsoleData; onNewSession: () => void; onOpenSession: (session: Session) => void }) {
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('active');
+  const [showArchived, setShowArchived] = useState(false);
   const [agentId, setAgentId] = useState('all');
   const sessions = data.sessions.filter((session) => {
     const q = query.toLowerCase();
+    if (!showArchived && session.archived_at) return false;
     const matchesStatus = status === 'all' || (status === 'active'
-      ? !session.archived_at && session.status !== 'terminated'
+      ? session.status !== 'terminated'
       : session.status === status);
     const matchesAgent = agentId === 'all' || session.agent.id === agentId;
     const matchesQuery = session.id.toLowerCase().includes(q) || session.agent.name.toLowerCase().includes(q) || (session.title ?? '').toLowerCase().includes(q);
@@ -129,10 +133,18 @@ export function Sessions({ data, onNewSession, onOpenSession }: { data: ConsoleD
                 { value: 'all', label: 'All' },
                 { value: 'idle', label: 'Idle' },
                 { value: 'running', label: 'Running' },
-                { value: 'failed', label: 'Failed' },
+                { value: 'rescheduling', label: 'Rescheduling' },
                 { value: 'terminated', label: 'Terminated' },
               ]}
             />
+            <label className="checkboxLine toolbarCheck">
+              <input
+                type="checkbox"
+                checked={showArchived}
+                onChange={(event) => setShowArchived(event.target.checked)}
+              />
+              Show archived
+            </label>
           </>
         )}
       />
@@ -157,7 +169,7 @@ export function Sessions({ data, onNewSession, onOpenSession }: { data: ConsoleD
                   <strong className="monoText">{shortId(session.id)}</strong>
                 </td>
                 <td>{session.title || '-'}</td>
-                <td><StatusPill status={session.status} /></td>
+                <td><StatusPill status={session.archived_at ? 'archived' : session.status} /></td>
                 <td><ResourceBadge icon={<Monitor size={15} />} label={session.agent.name} /></td>
                 <td>{formatUsage(session.usage)}</td>
                 <td>{formatDateShort(session.created_at)}</td>
@@ -176,7 +188,7 @@ export function Sessions({ data, onNewSession, onOpenSession }: { data: ConsoleD
             </span>
             <span className="mobileAgentMeta">
               <span>{session.agent.name}</span>
-              <StatusPill status={session.status} />
+              <StatusPill status={session.archived_at ? 'archived' : session.status} />
             </span>
           </button>
         ))}
@@ -209,6 +221,9 @@ export function SessionDetail({
   const [detailMode, setDetailMode] = useState<'rendered' | 'raw'>('rendered');
   const [filterOpen, setFilterOpen] = useState(false);
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [actionError, setActionError] = useState('');
   const [selectedKinds, setSelectedKinds] = useState<Set<SessionEventKind>>(new Set(SESSION_EVENT_KINDS));
   const [query, setQuery] = useState('');
   const [messageDraft, setMessageDraft] = useState('');
@@ -356,7 +371,7 @@ export function SessionDetail({
   }, [session.id]);
 
   useEffect(() => {
-    if (!['queued', 'running', 'requires_action'].includes(displayStatus)) return undefined;
+    if (!['running', 'rescheduling', 'awaiting_action'].includes(displayStatus)) return undefined;
     const timer = window.setInterval(() => {
       void loadEvents({ silent: true });
       void onRefresh();
@@ -398,13 +413,15 @@ export function SessionDetail({
 
   const canSendMessage = messageDraft.trim().length > 0
     && !sendingMessage
-    && displayStatus !== 'terminated';
+    && displayStatus !== 'terminated'
+    && displayStatus !== 'archived';
 
-  useEffect(() => {
-    if (displayStatus !== 'failed') return;
-    const errorEvent = [...events].reverse().find((item) => eventKind(item) === 'error');
-    if (errorEvent) setMessageError(eventText(errorEvent) || eventTitle(errorEvent));
-  }, [displayStatus, events]);
+  // An idle session still tells the operator why it stopped: retry exhaustion
+  // and the budget ceiling both resolve through a message or a budget raise.
+  const lastIdleEvent = [...events].reverse().find((event) => event.type === 'session.status_idle');
+  const idleStopReason = lastIdleEvent && typeof lastIdleEvent.stop_reason === 'object'
+    ? lastIdleEvent.stop_reason?.type
+    : undefined;
 
   const sendMessage = async (event?: FormEvent) => {
     event?.preventDefault();
@@ -479,7 +496,7 @@ export function SessionDetail({
     onRefresh();
   };
 
-  const composer = displayStatus === 'terminated' ? (
+  const composer = displayStatus === 'terminated' || displayStatus === 'archived' ? (
     <div className="sessionComposerClosed" role="note">
       <span>
         This session is {displayStatus} and cannot receive new messages. Start a new session to continue.
@@ -490,9 +507,15 @@ export function SessionDetail({
     </div>
   ) : (
     <form className="sessionComposer" onSubmit={(event) => void sendMessage(event)}>
-      {displayStatus === 'failed' ? (
+      {displayStatus === 'idle' && idleStopReason === 'retries_exhausted' ? (
         <div className="sessionComposerHint" role="note">
-          The last turn failed. Send a message to retry — the conversation is kept.
+          Retries were exhausted for the last turn. The conversation is kept — send a message to continue.
+        </div>
+      ) : null}
+      {displayStatus === 'idle' && idleStopReason === 'budget_reached' ? (
+        <div className="sessionComposerHint" role="note">
+          This session stopped at its budget ceiling.
+          <button className="textButton" type="button" onClick={() => setSettingsOpen(true)}>Adjust budget</button>
         </div>
       ) : null}
       <textarea
@@ -517,10 +540,27 @@ export function SessionDetail({
   );
 
   const archive = async () => {
-    await deleteJson(`/v1/sessions/${session.id}`);
-    setActionsOpen(false);
-    onBack();
-    onRefresh();
+    try {
+      await postJson(`/v1/sessions/${encodeURIComponent(session.id)}/archive`, {});
+      setActionsOpen(false);
+      await loadEvents({ silent: true });
+      onRefresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const deleteSession = async () => {
+    try {
+      await deleteJson(`/v1/sessions/${encodeURIComponent(session.id)}`);
+      setDeleteConfirmOpen(false);
+      setActionsOpen(false);
+      onBack();
+      onRefresh();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+      setDeleteConfirmOpen(false);
+    }
   };
 
   return (
@@ -553,8 +593,12 @@ export function SessionDetail({
             </button>
             {actionsOpen ? (
               <div className="agentMenu sessionActionsMenu">
+                <button type="button" onClick={() => { setActionsOpen(false); setSettingsOpen(true); }}><Settings size={18} />Session settings</button>
                 <button type="button" onClick={() => void interrupt()}><Square size={18} />Send interrupt</button>
-                <button type="button" className="dangerMenuItem" onClick={() => void archive()}><Archive size={18} />Archive session</button>
+                {!session.archived_at ? (
+                  <button type="button" onClick={() => void archive()}><Archive size={18} />Archive session</button>
+                ) : null}
+                <button type="button" className="dangerMenuItem" onClick={() => { setActionsOpen(false); setDeleteConfirmOpen(true); }}><Trash2 size={18} />Delete session</button>
               </div>
             ) : null}
           </div>
@@ -721,6 +765,39 @@ export function SessionDetail({
           </>
         )}
       </div>
+
+      {actionError ? <div className="banner error inlineBanner">{actionError}</div> : null}
+
+      {settingsOpen ? (
+        <SessionSettingsModal
+          session={session}
+          idle={displayStatus === 'idle'}
+          onClose={() => setSettingsOpen(false)}
+          onSaved={async () => {
+            setSettingsOpen(false);
+            await loadEvents({ silent: true });
+            onRefresh();
+          }}
+        />
+      ) : null}
+
+      {deleteConfirmOpen ? (
+        <Modal
+          title="Delete session"
+          subtitle={`${session.title || session.id} (${shortId(session.id)})`}
+          onClose={() => setDeleteConfirmOpen(false)}
+        >
+          <p className="modalBody">
+            This permanently deletes the session, its event history, and files
+            the session generated. The agent, environment, skills, vaults, and
+            uploaded files are not affected.
+          </p>
+          <div className="modalActions">
+            <button className="secondaryButton" type="button" onClick={() => setDeleteConfirmOpen(false)}>Cancel</button>
+            <button className="dangerButton" type="button" onClick={() => void deleteSession()}>Delete session</button>
+          </div>
+        </Modal>
+      ) : null}
     </section>
   );
 }
@@ -1300,20 +1377,21 @@ export function toolResultId(event: SessionEvent): string | undefined {
   return event.tool_use_id ?? event.mcp_tool_use_id ?? event.custom_tool_use_id;
 }
 
-function sessionDisplayStatus(session: Session, events: SessionEvent[]): SessionDisplayStatus {
-  // Session status is an authoritative server-side state-machine field. The
-  // event log is used only to refine fresh lifecycle progress while a snapshot
-  // is pending; tool cards never decide whether a session requires action.
-  const status = session.status as SessionDisplayStatus;
-  if (status === 'requires_action') return 'requires_action';
-  if (status === 'terminated') return 'terminated';
-  if (status === 'failed') return 'failed';
-  if (status === 'running') return 'running';
-
+export function sessionDisplayStatus(session: Session, events: SessionEvent[]): SessionDisplayStatus {
+  // `archived_at` is its own axis — an archived session displays as archived
+  // regardless of the lifecycle status it keeps underneath.
+  if (session.archived_at) return 'archived';
+  if (session.status === 'terminated') return 'terminated';
+  if (session.status === 'rescheduling') return 'rescheduling';
+  // Session status is an authoritative server-side state-machine field; the
+  // event log only refines freshness while a snapshot is pending — a turn
+  // that just started reads running before the session row refreshes.
   const lastStatus = [...events].reverse().find((event) => event.type.startsWith('session.status_'));
-  if (!lastStatus) return session.status;
-  if (lastStatus.type === 'session.status_running') return 'running';
-  if (lastStatus.type === 'session.status_terminated') return 'terminated';
+  if (session.status === 'running' || lastStatus?.type === 'session.status_running') return 'running';
+  const stopReason = lastStatus?.type === 'session.status_idle' && typeof lastStatus.stop_reason === 'object'
+    ? lastStatus.stop_reason?.type
+    : undefined;
+  if (stopReason === 'requires_action') return 'awaiting_action';
   return 'idle';
 }
 

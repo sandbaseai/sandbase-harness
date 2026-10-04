@@ -1310,7 +1310,9 @@ tr[role="button"]:hover td,
   color: var(--info);
 }
 
-.status.requires_action {
+.status.requires_action,
+.status.awaiting_action,
+.status.rescheduling {
   background: var(--warning-soft, #fff7d6);
   color: var(--warning, #9a6700);
 }
@@ -2555,6 +2557,53 @@ label.searchBox input {
 .modalActions {
   justify-content: flex-end;
   padding-top: 4px;
+}
+
+.modalBody {
+  color: var(--text-soft);
+  font-size: var(--text-body-sm);
+  line-height: 1.5;
+  margin: 0 0 4px;
+}
+
+.dangerButton {
+  border: 1px solid var(--danger);
+  border-radius: var(--radius);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: var(--height-default);
+  padding: 0 11px;
+  font-size: var(--text-body-sm);
+  font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
+  background: var(--danger);
+  color: #fff;
+  box-shadow: var(--shadow-control);
+}
+
+.dangerButton:hover {
+  filter: brightness(0.95);
+}
+
+.toolbarCheck {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  grid-template-columns: none;
+  font-size: var(--text-body-sm);
+  font-weight: 560;
+  color: var(--muted);
+}
+
+.toolbarCheck input {
+  width: 16px;
+  height: 16px;
+  min-height: auto;
+  margin: 0;
+  padding: 0;
 }
 
 .darkButton {

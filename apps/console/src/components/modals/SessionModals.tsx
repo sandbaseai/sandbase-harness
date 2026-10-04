@@ -6,7 +6,7 @@ import { Modal } from '../Modal';
 import { MultiResourcePicker, ResourcePicker } from '../ResourcePicker';
 import { environmentKind } from '../pages/EnvironmentPageModel';
 import { formatDateShort } from '../../lib/format';
-import type { ConsoleData, SessionResourceDraft, ViewId } from '../../types';
+import type { ConsoleData, Session, SessionResourceDraft, ViewId } from '../../types';
 
 export function SessionModal({
   data,
@@ -323,4 +323,172 @@ function toggleSet<T>(value: T, checked: boolean, setter: Dispatch<SetStateActio
     else next.delete(value);
     return next;
   });
+}
+
+/**
+ * Settings editor for a live session: title, metadata, budget, and the
+ * agent's tools/MCP toolsets. The agent fields ride the update route's
+ * `agent` object — the only named fields it accepts beside `effort`'s
+ * refusal — and require an idle session, so they are disabled with the
+ * interrupt hint the API's `session_not_idle` answer would otherwise carry.
+ */
+export function SessionSettingsModal({
+  session,
+  idle,
+  onClose,
+  onSaved,
+}: {
+  session: Session;
+  idle: boolean;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [title, setTitle] = useState(session.title ?? '');
+  const [metadataText, setMetadataText] = useState(JSON.stringify(session.metadata ?? {}, null, 2));
+  const currentBudgetUsd = session.budget
+    ? (Number(session.budget.max_list_cost.amount) / 100).toFixed(2)
+    : '';
+  const [budgetUsd, setBudgetUsd] = useState(currentBudgetUsd);
+  const [toolsText, setToolsText] = useState('');
+  const [mcpText, setMcpText] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const parseJsonField = (text: string, label: string): { ok: true; value: unknown } | { ok: false } => {
+    const trimmed = text.trim();
+    if (!trimmed) return { ok: true, value: undefined };
+    try {
+      return { ok: true, value: JSON.parse(trimmed) };
+    } catch {
+      setError(`${label} is not valid JSON.`);
+      return { ok: false };
+    }
+  };
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setError('');
+
+    const body: Record<string, unknown> = {};
+    const nextTitle = title.trim();
+    if (nextTitle !== (session.title ?? '')) body.title = nextTitle || null;
+
+    const metadata = parseJsonField(metadataText, 'Metadata');
+    if (!metadata.ok) return;
+    if (metadata.value !== undefined) {
+      if (typeof metadata.value !== 'object' || metadata.value === null || Array.isArray(metadata.value)) {
+        setError('Metadata must be a JSON object.');
+        return;
+      }
+      const edited = metadata.value as Record<string, unknown>;
+      const patch: Record<string, unknown> = { ...edited };
+      for (const key of Object.keys(session.metadata ?? {})) {
+        if (!(key in edited)) patch[key] = null; // removed key → patch delete
+      }
+      const changed = Object.keys(patch).some(
+        (key) => patch[key] === null || !Object.is(session.metadata?.[key], edited[key]),
+      );
+      if (changed) body.metadata = patch;
+    }
+
+    if (budgetUsd.trim() !== currentBudgetUsd) {
+      if (!budgetUsd.trim()) {
+        body.budget = null;
+      } else {
+        const usd = Number(budgetUsd);
+        if (!Number.isFinite(usd) || usd < 0) {
+          setError('Budget must be a non-negative USD amount.');
+          return;
+        }
+        body.budget = {
+          type: 'limit',
+          max_list_cost: { amount: String(Math.round(usd * 100)), currency: 'USD' },
+        };
+      }
+    }
+
+    const agentPatch: Record<string, unknown> = {};
+    const tools = parseJsonField(toolsText, 'Tools');
+    if (!tools.ok) return;
+    if (tools.value !== undefined) agentPatch.tools = tools.value;
+    const mcp = parseJsonField(mcpText, 'MCP servers');
+    if (!mcp.ok) return;
+    if (mcp.value !== undefined) agentPatch.mcp_servers = mcp.value;
+    if (Object.keys(agentPatch).length > 0) body.agent = agentPatch;
+
+    if (Object.keys(body).length === 0) {
+      onClose();
+      return;
+    }
+    setSaving(true);
+    try {
+      await postJson(`/v1/sessions/${encodeURIComponent(session.id)}`, body);
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title="Session settings" subtitle={`${session.title || session.id}`} onClose={onClose} size="medium">
+      <form className="sessionForm" onSubmit={submit}>
+        {error ? <div className="banner error">{error}</div> : null}
+        <label className="sessionField">
+          <span>Title</span>
+          <input
+            value={title}
+            onChange={(event) => setTitle(event.target.value)}
+            placeholder="Name this session"
+          />
+        </label>
+        <label className="sessionField">
+          <span>Metadata <small className="optionalPill">JSON object; a removed key is deleted</small></span>
+          <textarea
+            value={metadataText}
+            onChange={(event) => setMetadataText(event.target.value)}
+            rows={Math.min(8, metadataText.split('\n').length + 1)}
+            spellCheck={false}
+          />
+        </label>
+        <label className="sessionField">
+          <span>Budget <small className="optionalPill">USD; empty removes the ceiling</small></span>
+          <input
+            value={budgetUsd}
+            onChange={(event) => setBudgetUsd(event.target.value)}
+            placeholder={session.budget ? currentBudgetUsd : 'No budget'}
+            inputMode="decimal"
+          />
+        </label>
+        {!idle ? (
+          <p className="banner">Tools and MCP servers can only change while the session is idle — send an interrupt and wait for it to settle first.</p>
+        ) : null}
+        <label className="sessionField">
+          <span>Tools override <small className="optionalPill">JSON array; empty keeps current, null clears</small></span>
+          <textarea
+            value={toolsText}
+            onChange={(event) => setToolsText(event.target.value)}
+            placeholder={'[{"type": "agent_toolset_20260401", "configs": []}]'}
+            disabled={!idle}
+            spellCheck={false}
+          />
+        </label>
+        <label className="sessionField">
+          <span>MCP servers override <small className="optionalPill">JSON array; empty keeps current, null clears</small></span>
+          <textarea
+            value={mcpText}
+            onChange={(event) => setMcpText(event.target.value)}
+            placeholder={'[{"type": "stdio", "name": "server", "command": "…"}]'}
+            disabled={!idle}
+            spellCheck={false}
+          />
+        </label>
+        <div className="modalActions">
+          <button className="secondaryButton" type="button" onClick={onClose}>Cancel</button>
+          <button className="primaryButton" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button>
+        </div>
+      </form>
+    </Modal>
+  );
 }

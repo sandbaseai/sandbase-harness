@@ -31,7 +31,7 @@ function emptyConsoleData(): ConsoleData {
 async function loadBuildDomain(): Promise<Pick<ConsoleData, 'agents' | 'sessions' | 'files' | 'skills' | 'templates'>> {
   const [agents, sessions, files, skills, templates] = await Promise.all([
     getCursorPage<Agent>('/v1/agents'),
-    getCursorPage<Session>('/v1/sessions?limit=100'),
+    getCursorPage<Session>('/v1/sessions?limit=100&include_archived=true'),
     getCursorPage<WorkspaceFile>('/v1/files'),
     getCursorPage<Skill>('/v1/skills'),
     getPage<Template>('/v1/x/templates'),

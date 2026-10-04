@@ -81,7 +81,9 @@ export function LoadingState({ label }: { label?: string } = {}) {
 }
 
 export function StatusPill({ status }: { status: string }) {
-  const label = status === 'requires_action' ? 'Needs approval' : status;
+  const label = status === 'requires_action' || status === 'awaiting_action'
+    ? 'Needs approval'
+    : status === 'rescheduling' ? 'Retrying' : status;
   return <span className={`status ${status}`}>{label}</span>;
 }
 

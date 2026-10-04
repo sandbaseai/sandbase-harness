@@ -357,7 +357,7 @@ function AgentSessionsTab({ sessions, onOpenSession }: { sessions: Session[]; on
                 { value: 'all', label: 'All' },
                 { value: 'idle', label: 'Idle' },
                 { value: 'running', label: 'Running' },
-                { value: 'failed', label: 'Failed' },
+                { value: 'rescheduling', label: 'Rescheduling' },
                 { value: 'terminated', label: 'Terminated' },
               ]}
             />
@@ -388,8 +388,9 @@ function AgentSessionsTab({ sessions, onOpenSession }: { sessions: Session[]; on
 }
 
 function AgentObservability({ sessions, tokenIn, tokenOut }: { sessions: Session[]; tokenIn: number; tokenOut: number }) {
-  const failed = sessions.filter((session) => String(session.status) === 'failed').length;
-  const errorRate = sessions.length ? Math.round((failed / sessions.length) * 100) : 0;
+  // Internal failures project to `terminated`; that is the error rate's axis.
+  const terminated = sessions.filter((session) => session.status === 'terminated').length;
+  const errorRate = sessions.length ? Math.round((terminated / sessions.length) * 100) : 0;
   return (
     <div className="detailStack">
       <div className="metricGrid">
