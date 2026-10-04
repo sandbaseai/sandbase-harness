@@ -1,25 +1,13 @@
-import { Activity, CalendarClock, CheckCircle2, Play, Plus, RadioTower, Send } from 'lucide-react';
+import { Activity, CalendarClock, CheckCircle2, ChevronDown, ChevronRight, Play, Plus, RadioTower, Send } from 'lucide-react';
 import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
-import { postJson } from '../../api';
-import type { ConsoleData, Outcome, ScheduledDeployment, Session, Webhook } from '../../types';
+import { getJson, postJson } from '../../api';
+import type { ConsoleData, DeploymentRun, Outcome, ScheduledDeployment, Session, Webhook, WebhookDelivery } from '../../types';
 import { EmptyState, RequiredMark, ResourceBadge, StatusPill, SummaryStrip } from '../Common';
 import { Modal } from '../Modal';
 import { formatDateShort, truncateMiddle } from '../../lib/format';
+import { WEBHOOK_EVENT_GROUPS } from '../../lib/webhook-events';
 
-type WebhookDelivery = {
-  id: string;
-  event: string;
-  status: string;
-  status_code: number | null;
-  signature: string;
-};
-
-type ScheduledDeploymentRun = {
-  id: string;
-  deployment_id: string;
-  session_id: string | null;
-  error: { type: string; message: string } | null;
-};
+type ScheduledDeploymentRun = DeploymentRun;
 
 type SessionOutcome = {
   id: string;
@@ -39,6 +27,7 @@ export function WebhooksPage({ data, onRefresh }: OperationsPageProps) {
   const [testingId, setTestingId] = useState<string | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [deliveriesId, setDeliveriesId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
 
   const testWebhook = async (webhook: Webhook) => {
@@ -46,7 +35,7 @@ export function WebhooksPage({ data, onRefresh }: OperationsPageProps) {
     setMessage('');
     try {
       const delivery = await postJson<WebhookDelivery>(`/v1/webhooks/${webhook.id}/test`, {
-        event: webhook.events[0] ?? 'turn_complete',
+        event: webhook.events[0] ?? 'session.created',
         payload: { source: 'console', dry_run: true },
       });
       setMessage(`Test delivery ${truncateMiddle(delivery.id, 18)} recorded with ${delivery.status_code ?? 'no'} status.`);
@@ -104,19 +93,14 @@ export function WebhooksPage({ data, onRefresh }: OperationsPageProps) {
           <thead><tr><th>ID</th><th>Name</th><th>URL</th><th>Events</th><th>Status</th><th>Updated</th><th>Action</th></tr></thead>
           <tbody>
             {data.webhooks.map((webhook) => (
-              <tr key={webhook.id}>
-                <td><code>{truncateMiddle(webhook.id, 18)}</code></td>
-                <td><strong>{webhook.name}</strong></td>
-                <td><span className="monoValue">{truncateMiddle(webhook.url, 42)}</span></td>
-                <td><ResourceBadge>{webhook.events.length} events</ResourceBadge></td>
-                <td><StatusPill status={webhook.status} /></td>
-                <td>{formatDateShort(webhook.updated_at)}</td>
-                <td>
-                  <button className="ghostButton compactButton" type="button" onClick={() => testWebhook(webhook)} disabled={testingId === webhook.id || webhook.status !== 'active'}>
-                    <Send size={14} /> {testingId === webhook.id ? 'Testing...' : 'Test'}
-                  </button>
-                </td>
-              </tr>
+              <WebhookRow
+                key={webhook.id}
+                webhook={webhook}
+                testingId={testingId}
+                expanded={deliveriesId === webhook.id}
+                onToggleDeliveries={() => setDeliveriesId((current) => current === webhook.id ? null : webhook.id)}
+                onTest={testWebhook}
+              />
             ))}
           </tbody>
         </table>
@@ -172,6 +156,7 @@ export function ScheduledDeploymentsPage({ data, onRefresh }: OperationsPageProp
   const [runningId, setRunningId] = useState<string | null>(null);
   const [runningDue, setRunningDue] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [runsId, setRunsId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
 
   const runSchedule = async (schedule: ScheduledDeployment) => {
@@ -238,20 +223,14 @@ export function ScheduledDeploymentsPage({ data, onRefresh }: OperationsPageProp
           <thead><tr><th>ID</th><th>Name</th><th>Agent</th><th>Environment</th><th>Cron</th><th>Status</th><th>Next run</th><th>Action</th></tr></thead>
           <tbody>
             {data.scheduledDeployments.map((schedule) => (
-              <tr key={schedule.id}>
-                <td><code>{truncateMiddle(schedule.id, 18)}</code></td>
-                <td><strong>{schedule.name}</strong></td>
-                <td><code>{truncateMiddle(schedule.agent.id, 20)}</code></td>
-                <td>{schedule.environment_id ? <code>{truncateMiddle(schedule.environment_id, 18)}</code> : <span className="mutedValue">default</span>}</td>
-                <td><span className="monoValue">{schedule.schedule?.expression ?? 'manual'}</span></td>
-                <td><StatusPill status={schedule.status} /></td>
-                <td>{schedule.schedule?.upcoming_runs_at?.[0] ? formatDateShort(schedule.schedule.upcoming_runs_at[0]) : '-'}</td>
-                <td>
-                  <button className="ghostButton compactButton" type="button" onClick={() => runSchedule(schedule)} disabled={runningId === schedule.id || schedule.status !== 'active'}>
-                    <Play size={14} /> {runningId === schedule.id ? 'Running...' : 'Run now'}
-                  </button>
-                </td>
-              </tr>
+              <ScheduleRow
+                key={schedule.id}
+                schedule={schedule}
+                runningId={runningId}
+                expanded={runsId === schedule.id}
+                onToggleRuns={() => setRunsId((current) => current === schedule.id ? null : schedule.id)}
+                onRun={runSchedule}
+              />
             ))}
           </tbody>
         </table>
@@ -430,13 +409,227 @@ export function OutcomesPage({ data, onRefresh }: OperationsPageProps) {
   );
 }
 
+function ScheduleRow({
+  schedule,
+  runningId,
+  expanded,
+  onToggleRuns,
+  onRun,
+}: {
+  schedule: ScheduledDeployment;
+  runningId: string | null;
+  expanded: boolean;
+  onToggleRuns: () => void;
+  onRun: (schedule: ScheduledDeployment) => void;
+}) {
+  return (
+    <>
+      <tr>
+        <td><code>{truncateMiddle(schedule.id, 18)}</code></td>
+        <td><strong>{schedule.name}</strong></td>
+        <td><code>{truncateMiddle(schedule.agent.id, 20)}</code></td>
+        <td>{schedule.environment_id ? <code>{truncateMiddle(schedule.environment_id, 18)}</code> : <span className="mutedValue">default</span>}</td>
+        <td><span className="monoValue">{schedule.schedule?.expression ?? 'manual'}</span></td>
+        <td><StatusPill status={schedule.status} /></td>
+        <td>{schedule.schedule?.upcoming_runs_at?.[0] ? formatDateShort(schedule.schedule.upcoming_runs_at[0]) : '-'}</td>
+        <td>
+          <div className="rowActionGroup">
+            <button className="ghostButton compactButton" type="button" onClick={onToggleRuns} aria-expanded={expanded}>
+              {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />} Runs
+            </button>
+            <button className="ghostButton compactButton" type="button" onClick={() => onRun(schedule)} disabled={runningId === schedule.id || schedule.status !== 'active'}>
+              <Play size={14} /> {runningId === schedule.id ? 'Running...' : 'Run now'}
+            </button>
+          </div>
+        </td>
+      </tr>
+      {expanded ? (
+        <tr className="expansionRow">
+          <td colSpan={8}><DeploymentRuns schedule={schedule} /></td>
+        </tr>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * One deployment's runs plus the full upcoming-run projection. Each run is
+ * the published `deployment_run` object: `trigger_context` reports how the
+ * run fired (`schedule` carries the matched `scheduled_at`), and a failed
+ * run's `error.type` is the classified vocabulary the scheduler wrote.
+ */
+function DeploymentRuns({ schedule }: { schedule: ScheduledDeployment }) {
+  const [runs, setRuns] = useState<DeploymentRun[] | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    getJson<{ data: DeploymentRun[] } | DeploymentRun[]>(`/v1/deployment_runs?deployment_id=${encodeURIComponent(schedule.id)}`)
+      .then((page) => {
+        if (!active) return;
+        setRuns(Array.isArray(page) ? page : page.data ?? []);
+      })
+      .catch((err: any) => {
+        if (active) setError(err?.message ?? 'Could not load runs');
+      });
+    return () => { active = false; };
+  }, [schedule.id]);
+
+  const upcoming = schedule.schedule?.upcoming_runs_at ?? [];
+
+  return (
+    <div className="deploymentRunsPanel">
+      {upcoming.length > 0 ? (
+        <p className="mutedValue">
+          Upcoming runs: {upcoming.map((at) => formatDateShort(at)).join(' · ')}
+          {schedule.schedule?.timezone ? ` (${schedule.schedule.timezone})` : ''}
+        </p>
+      ) : null}
+      {error ? <div className="banner error inlineBanner" role="alert">{error}</div> : null}
+      {!error && runs === null ? <p className="mutedValue">Loading runs…</p> : null}
+      {runs && runs.length === 0 ? <p className="mutedValue">No runs recorded.</p> : null}
+      {runs && runs.length > 0 ? (
+        <table className="deliveriesTable">
+          <thead>
+            <tr><th>Run</th><th>Trigger</th><th>Session</th><th>Error</th><th>Started</th></tr>
+          </thead>
+          <tbody>
+            {runs.map((run) => (
+              <tr key={run.id}>
+                <td><code>{truncateMiddle(run.id, 18)}</code></td>
+                <td>
+                  <code>{run.trigger_context?.type ?? '-'}</code>
+                  {run.trigger_context?.scheduled_at ? <small className="mutedValue"> due {formatDateShort(run.trigger_context.scheduled_at)}</small> : null}
+                </td>
+                <td>{run.session_id ? <code>{truncateMiddle(run.session_id, 18)}</code> : <span className="mutedValue">-</span>}</td>
+                <td>{run.error ? <span className="fieldError"><code>{run.error.type}</code> {run.error.message}</span> : <span className="mutedValue">-</span>}</td>
+                <td>{formatDateShort(run.created_at)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : null}
+    </div>
+  );
+}
+
+function WebhookRow({
+  webhook,
+  testingId,
+  expanded,
+  onToggleDeliveries,
+  onTest,
+}: {
+  webhook: Webhook;
+  testingId: string | null;
+  expanded: boolean;
+  onToggleDeliveries: () => void;
+  onTest: (webhook: Webhook) => void;
+}) {
+  return (
+    <>
+      <tr>
+        <td><code>{truncateMiddle(webhook.id, 18)}</code></td>
+        <td><strong>{webhook.name}</strong></td>
+        <td><span className="monoValue">{truncateMiddle(webhook.url, 42)}</span></td>
+        <td><ResourceBadge>{webhook.events.length} events</ResourceBadge></td>
+        <td><StatusPill status={webhook.status} /></td>
+        <td>{formatDateShort(webhook.updated_at)}</td>
+        <td>
+          <div className="rowActionGroup">
+            <button className="ghostButton compactButton" type="button" onClick={onToggleDeliveries} aria-expanded={expanded}>
+              {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />} Deliveries
+            </button>
+            <button className="ghostButton compactButton" type="button" onClick={() => onTest(webhook)} disabled={testingId === webhook.id || webhook.status !== 'active'}>
+              <Send size={14} /> {testingId === webhook.id ? 'Testing...' : 'Test'}
+            </button>
+          </div>
+        </td>
+      </tr>
+      {expanded ? (
+        <tr className="expansionRow">
+          <td colSpan={7}><WebhookDeliveries webhookId={webhook.id} /></td>
+        </tr>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * One webhook's delivery records, fetched on expand. Each delivery carries
+ * the published envelope `{ type: "event", id, created_at, data: { type, id,
+ * vault_id? } }` — the resource row the event refers to lives in `data`.
+ */
+function WebhookDeliveries({ webhookId }: { webhookId: string }) {
+  const [deliveries, setDeliveries] = useState<WebhookDelivery[] | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let active = true;
+    getJson<{ data: WebhookDelivery[] } | WebhookDelivery[]>(`/v1/webhooks/${webhookId}/deliveries`)
+      .then((page) => {
+        if (!active) return;
+        setDeliveries(Array.isArray(page) ? page : page.data ?? []);
+      })
+      .catch((err: any) => {
+        if (active) setError(err?.message ?? 'Could not load deliveries');
+      });
+    return () => { active = false; };
+  }, [webhookId]);
+
+  if (error) return <div className="banner error inlineBanner" role="alert">{error}</div>;
+  if (!deliveries) return <p className="mutedValue">Loading deliveries…</p>;
+  if (deliveries.length === 0) return <p className="mutedValue">No deliveries recorded.</p>;
+
+  return (
+    <table className="deliveriesTable">
+      <thead>
+        <tr><th>Event</th><th>Subject</th><th>Status</th><th>Attempts</th><th>Created</th><th>Delivered</th></tr>
+      </thead>
+      <tbody>
+        {deliveries.map((delivery) => {
+          const envelope = delivery.payload ?? {};
+          const subject = envelope.data;
+          return (
+            <tr key={delivery.id}>
+              <td><code>{delivery.event}</code></td>
+              <td>
+                {subject?.type ? <code>{subject.type}</code> : <span className="mutedValue">-</span>}
+                {subject?.id ? <code>{truncateMiddle(subject.id, 18)}</code> : null}
+                {subject?.vault_id ? <code>{truncateMiddle(String(subject.vault_id), 14)}</code> : null}
+              </td>
+              <td>
+                <StatusPill status={delivery.status} />
+                {delivery.status_code !== null ? <small className="mutedValue"> {delivery.status_code}</small> : null}
+                {delivery.error ? <small className="fieldError"> {delivery.error}</small> : null}
+              </td>
+              <td>{delivery.attempt_count}</td>
+              <td>{envelope.created_at ? formatDateShort(envelope.created_at) : formatDateShort(delivery.created_at)}</td>
+              <td>{delivery.delivered_at ? formatDateShort(delivery.delivered_at) : '-'}</td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
+  );
+}
+
 function WebhookCreateModal({ onClose, onSaved }: { onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
-  const [events, setEvents] = useState('turn_complete');
+  const [selectedEvents, setSelectedEvents] = useState<ReadonlySet<string>>(new Set());
   const [description, setDescription] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  const toggleEvent = (eventName: string) => {
+    setSelectedEvents((current) => {
+      const next = new Set(current);
+      if (next.has(eventName)) next.delete(eventName);
+      else next.add(eventName);
+      return next;
+    });
+  };
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -447,7 +640,9 @@ function WebhookCreateModal({ onClose, onSaved }: { onClose: () => void; onSaved
         name: name || undefined,
         url,
         description,
-        events: splitLines(events),
+        // Selection order is catalog order, not click order, so a subscription
+        // reads the same regardless of how the operator picked the events.
+        events: WEBHOOK_EVENT_GROUPS.flatMap((group) => group.events.filter((name) => selectedEvents.has(name))),
       });
       onSaved();
     } catch (err: any) {
@@ -458,29 +653,46 @@ function WebhookCreateModal({ onClose, onSaved }: { onClose: () => void; onSaved
   };
 
   return (
-    <Modal title="Create webhook" onClose={onClose}>
+    <Modal title="Create webhook" onClose={onClose} size="medium">
       <form className="modalForm operationCreateForm" onSubmit={submit}>
         {error ? <div className="banner error">{error}</div> : null}
         <label>
           <span>Endpoint URL <RequiredMark /></span>
           <input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://example.com/managed-agents/webhook" required />
+          <small>HTTPS endpoints, or http://localhost for a local receiver.</small>
         </label>
         <label>
           <span>Name</span>
           <input value={name} onChange={(event) => setName(event.target.value)} placeholder="Production callback" />
         </label>
-        <label>
-          <span>Events <RequiredMark /></span>
-          <textarea value={events} onChange={(event) => setEvents(event.target.value)} rows={4} required />
-          <small>One event per line, such as turn_complete or session.failed.</small>
-        </label>
+        <fieldset className="webhookEventPicker">
+          <legend>Events <RequiredMark /></legend>
+          {WEBHOOK_EVENT_GROUPS.map((group) => (
+            <div className="webhookEventGroup" key={group.category}>
+              <strong>{group.category}</strong>
+              <div className="webhookEventOptions">
+                {group.events.map((eventName) => (
+                  <label className="checkboxLine" key={eventName}>
+                    <input
+                      type="checkbox"
+                      checked={selectedEvents.has(eventName)}
+                      onChange={() => toggleEvent(eventName)}
+                    />
+                    <code>{eventName}</code>
+                  </label>
+                ))}
+              </div>
+            </div>
+          ))}
+          {selectedEvents.size === 0 ? <p className="fieldHint">Select at least one event. Wildcards are not part of the published catalog.</p> : null}
+        </fieldset>
         <label>
           <span>Description</span>
           <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} />
         </label>
         <div className="modalActions">
           <button className="secondaryButton" type="button" onClick={onClose}>Cancel</button>
-          <button className="primaryButton" type="submit" disabled={saving || !url.trim() || splitLines(events).length === 0}>{saving ? 'Creating...' : 'Create webhook'}</button>
+          <button className="primaryButton" type="submit" disabled={saving || !url.trim() || selectedEvents.size === 0}>{saving ? 'Creating...' : 'Create webhook'}</button>
         </div>
       </form>
     </Modal>
@@ -491,7 +703,8 @@ function ScheduledDeploymentCreateModal({ data, onClose, onSaved }: { data: Cons
   const [name, setName] = useState('');
   const [agentId, setAgentId] = useState(data.agents[0]?.id ?? '');
   const [environmentId, setEnvironmentId] = useState(data.environments[0]?.id ?? 'env_default');
-  const [cron, setCron] = useState('0 9 * * *');
+  const [expression, setExpression] = useState('0 9 * * *');
+  const [timezone, setTimezone] = useState(() => Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC');
   const [prompt, setPrompt] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -501,11 +714,14 @@ function ScheduledDeploymentCreateModal({ data, onClose, onSaved }: { data: Cons
     setSaving(true);
     setError('');
     try {
+      // The published create shape: `schedule` is a cron object and
+      // `initial_events` carries at least one `user.message` text event —
+      // the flat `cron` field this form used to send is the legacy alias.
       await postJson<ScheduledDeployment>('/v1/scheduled-deployments', {
         name,
         agent_id: agentId,
         environment_id: environmentId || 'env_default',
-        cron,
+        schedule: { type: 'cron', expression: expression.trim(), timezone: timezone.trim() || 'UTC' },
         initial_events: [{ type: 'user.message', content: [{ type: 'text', text: prompt }] }],
       });
       onSaved();
@@ -539,8 +755,13 @@ function ScheduledDeploymentCreateModal({ data, onClose, onSaved }: { data: Cons
           </select>
         </label>
         <label>
-          <span>Cron <RequiredMark /></span>
-          <input value={cron} onChange={(event) => setCron(event.target.value)} placeholder="0 9 * * *" required />
+          <span>Cron expression <RequiredMark /></span>
+          <input value={expression} onChange={(event) => setExpression(event.target.value)} placeholder="0 9 * * *" required />
+        </label>
+        <label>
+          <span>Timezone <RequiredMark /></span>
+          <input value={timezone} onChange={(event) => setTimezone(event.target.value)} placeholder="UTC" required />
+          <small>An IANA zone name such as America/Los_Angeles; the schedule fires in this zone.</small>
         </label>
         <label>
           <span>Prompt <RequiredMark /></span>
@@ -548,7 +769,7 @@ function ScheduledDeploymentCreateModal({ data, onClose, onSaved }: { data: Cons
         </label>
         <div className="modalActions">
           <button className="secondaryButton" type="button" onClick={onClose}>Cancel</button>
-          <button className="primaryButton" type="submit" disabled={saving || !name.trim() || !agentId || !cron.trim() || !prompt.trim()}>{saving ? 'Creating...' : 'Create schedule'}</button>
+          <button className="primaryButton" type="submit" disabled={saving || !name.trim() || !agentId || !expression.trim() || !timezone.trim() || !prompt.trim()}>{saving ? 'Creating...' : 'Create schedule'}</button>
         </div>
       </form>
     </Modal>

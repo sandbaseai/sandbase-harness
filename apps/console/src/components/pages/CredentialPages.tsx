@@ -1,4 +1,4 @@
-import { Archive, FileText, Info, KeyRound, Lock, MoreVertical, Plus, RefreshCw, Search, Shield, Trash2 } from 'lucide-react';
+import { Archive, FileText, Info, KeyRound, Lock, MoreVertical, Pencil, Plus, RefreshCw, Search, Shield, Trash2 } from 'lucide-react';
 import { FormEvent, useState } from 'react';
 import { deleteJson, postJson } from '../../api';
 import { EmptyState, FilterSelect, KeyValuePanel, RequiredMark, StatusPill, SummaryStrip, Toolbar } from '../Common';
@@ -139,6 +139,9 @@ export function CredentialVaultDetail({
   const [menuOpen, setMenuOpen] = useState(false);
   const [credentialMenuId, setCredentialMenuId] = useState<string | null>(null);
   const [rotatingCredential, setRotatingCredential] = useState<VaultCredential | null>(null);
+  const [editingCredential, setEditingCredential] = useState<VaultCredential | null>(null);
+  const [editVaultOpen, setEditVaultOpen] = useState(false);
+  const [deleteVaultOpen, setDeleteVaultOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [status, setStatus] = useState('all');
   const credentials = vault.credentials.filter((credential) => {
@@ -199,7 +202,26 @@ export function CredentialVaultDetail({
             </button>
             {menuOpen ? (
               <div className="agentMenu">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setEditVaultOpen(true);
+                  }}
+                >
+                  <Pencil size={18} />Edit
+                </button>
                 <button type="button" className="dangerMenuItem" onClick={() => void archiveVault()}><Archive size={18} />Archive</button>
+                <button
+                  type="button"
+                  className="dangerMenuItem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setDeleteVaultOpen(true);
+                  }}
+                >
+                  <Trash2 size={18} />Delete
+                </button>
               </div>
             ) : null}
           </div>
@@ -262,6 +284,15 @@ export function CredentialVaultDetail({
                       </button>
                       {credentialMenuId === credential.id ? (
                         <div className="agentMenu rowMenu">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingCredential(credential);
+                              setCredentialMenuId(null);
+                            }}
+                          >
+                            <Pencil size={18} />Edit
+                          </button>
                           {credential.auth_type !== 'mcp_oauth' ? (
                             <button
                               type="button"
@@ -311,6 +342,15 @@ export function CredentialVaultDetail({
               </span>
               {credentialMenuId === credential.id ? (
                 <div className="mobileActionMenu">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingCredential(credential);
+                      setCredentialMenuId(null);
+                    }}
+                  >
+                    <Pencil size={16} />Edit
+                  </button>
                   {credential.auth_type !== 'mcp_oauth' ? (
                     <button
                       type="button"
@@ -349,7 +389,193 @@ export function CredentialVaultDetail({
           }}
         />
       ) : null}
+      {editingCredential ? (
+        <EditCredentialModal
+          vaultId={vault.id}
+          credential={editingCredential}
+          onClose={() => setEditingCredential(null)}
+          onSaved={() => {
+            setEditingCredential(null);
+            onRefresh();
+          }}
+        />
+      ) : null}
+      {editVaultOpen ? (
+        <VaultEditModal
+          vault={vault}
+          onClose={() => setEditVaultOpen(false)}
+          onSaved={() => {
+            setEditVaultOpen(false);
+            onRefresh();
+          }}
+        />
+      ) : null}
+      {deleteVaultOpen ? (
+        <VaultDeleteModal
+          vault={vault}
+          onClose={() => setDeleteVaultOpen(false)}
+          onDeleted={() => {
+            setDeleteVaultOpen(false);
+            onBack();
+            onRefresh();
+          }}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function VaultEditModal({ vault, onClose, onSaved }: { vault: Vault; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(vault.name);
+  const [description, setDescription] = useState(vault.description);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      // `display_name` is the published field; the update is a patch, so
+      // fields the operator did not touch keep their stored values.
+      await postJson(`/v1/credential-vaults/${vault.id}`, { display_name: name, description });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title="Edit vault" onClose={onClose}>
+      <form className="modalForm" onSubmit={submit}>
+        {error ? <div className="banner error inlineBanner" role="alert">{error}</div> : null}
+        <label className="editField">
+          Name
+          <input value={name} onChange={(event) => setName(event.target.value)} required />
+          <small>1-255 characters.</small>
+        </label>
+        <label className="editField">
+          Description
+          <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
+        </label>
+        <div className="modalActions">
+          <button className="secondaryButton" type="button" onClick={onClose}>Cancel</button>
+          <button className="darkButton largeAction" type="submit" disabled={saving || !name.trim()}>{saving ? 'Saving…' : 'Save changes'}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function VaultDeleteModal({ vault, onClose, onDeleted }: { vault: Vault; onClose: () => void; onDeleted: () => void }) {
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState('');
+
+  const remove = async () => {
+    setDeleting(true);
+    setError('');
+    try {
+      await deleteJson(`/v1/credential-vaults/${vault.id}`);
+      onDeleted();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <Modal title="Delete vault" onClose={onClose}>
+      <div className="modalForm">
+        {error ? <div className="banner error inlineBanner" role="alert">{error}</div> : null}
+        <div className="warningNotice">
+          <Info size={18} />
+          <span>Deleting removes the vault and every credential it holds. A vault referenced by an active session is refused.</span>
+        </div>
+        <p>Permanently delete <strong>{vault.name}</strong> and its {vault.credentials.length} {vault.credentials.length === 1 ? 'credential' : 'credentials'}?</p>
+        <div className="modalActions">
+          <button className="secondaryButton" type="button" onClick={onClose}>Cancel</button>
+          <button className="dangerButton" type="button" onClick={() => void remove()} disabled={deleting}>
+            {deleting ? 'Deleting…' : 'Delete vault'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * Edit one credential. The published patch takes `display_name` plus an
+ * `auth` object in the credential's existing `auth.type` — the type itself is
+ * immutable — and the write-only secret field differs per type: `token` for
+ * bearer, `access_token` for MCP OAuth, `secret_value` for environment
+ * variables. Structural fields (`mcp_server_url`, `secret_name`) are locked
+ * after creation, so the form shows them read-only.
+ */
+function EditCredentialModal({ vaultId, credential, onClose, onSaved }: { vaultId: string; credential: VaultCredential; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(credential.name);
+  const [secret, setSecret] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const publishedType = credential.auth_type === 'bearer_token' ? 'static_bearer' : credential.auth_type;
+  const secretField = credential.auth_type === 'environment_variable' ? 'secret_value' : credential.auth_type === 'mcp_oauth' ? 'access_token' : 'token';
+  const secretLabel = credential.auth_type === 'environment_variable' ? 'New value' : credential.auth_type === 'mcp_oauth' ? 'New access token' : 'New token';
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      await postJson(`/v1/credential-vaults/${vaultId}/credentials/${credential.id}`, {
+        display_name: name,
+        auth: {
+          type: publishedType,
+          // The secret field is write-only: leaving it blank keeps the stored
+          // secret; a non-empty value rotates it in place.
+          ...(secret.trim() ? { [secretField]: secret } : {}),
+        },
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title="Edit credential" subtitle={`${credentialAuthLabel(credential.auth_type)} credential`} onClose={onClose}>
+      <form className="modalForm" onSubmit={submit}>
+        {error ? <div className="banner error inlineBanner" role="alert">{error}</div> : null}
+        <label className="editField">
+          Name
+          <input value={name} onChange={(event) => setName(event.target.value)} />
+        </label>
+        {credential.auth_type === 'mcp_oauth' ? (
+          <label className="editField">
+            MCP server URL
+            <input value={credential.mcp_server_url} disabled />
+            <small>Server URL is locked after creation; archive and recreate the credential to change it.</small>
+          </label>
+        ) : null}
+        {credential.auth_type === 'environment_variable' ? (
+          <label className="editField">
+            Variable name
+            <input value={credential.variable_name} disabled />
+            <small>Variable name is locked after creation; archive and recreate the credential to change it.</small>
+          </label>
+        ) : null}
+        <label className="editField">
+          {secretLabel}
+          <input type="password" autoComplete="new-password" value={secret} onChange={(event) => setSecret(event.target.value)} placeholder={credential.value_hint || 'Leave blank to keep the stored secret'} />
+          <small>Write-only: the stored value is never shown. Leave blank to keep it.</small>
+        </label>
+        <div className="modalActions">
+          <button className="secondaryButton" type="button" onClick={onClose}>Cancel</button>
+          <button className="darkButton largeAction" type="submit" disabled={saving}>{saving ? 'Saving…' : 'Save changes'}</button>
+        </div>
+      </form>
+    </Modal>
   );
 }
 

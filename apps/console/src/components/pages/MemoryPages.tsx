@@ -1,9 +1,10 @@
-import { Check, ChevronDown, Database, FileText, Pencil, Plus, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
-import { postJson } from '../../api';
+import { Archive, Check, ChevronDown, Database, FileText, History, MoreVertical, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { deleteJson, getJson, postJson } from '../../api';
 import { EmptyState, FilterSelect, StatusPill, SummaryStrip, Toolbar } from '../Common';
+import { Modal } from '../Modal';
 import { formatBytes, formatDateShort, shortId, truncateMiddle } from '../../lib/format';
-import type { ConsoleData, MemoryRecord, MemoryStore } from '../../types';
+import type { ConsoleData, MemoryRecord, MemoryStore, MemoryVersion } from '../../types';
 
 export function MemoryStores({ data, onNew, onOpenMemoryStore }: { data: ConsoleData; onNew: () => void; onOpenMemoryStore: (store: MemoryStore) => void }) {
   const [query, setQuery] = useState('');
@@ -126,6 +127,10 @@ export function MemoryStoreDetail({
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
+  const [versionsFor, setVersionsFor] = useState<string | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [editStoreOpen, setEditStoreOpen] = useState(false);
+  const [deleteStoreOpen, setDeleteStoreOpen] = useState(false);
   const selected = selectedId ? store.memories.find((memory) => memory.id === selectedId) ?? null : null;
   const [content, setContent] = useState(selected?.content ?? '');
   const totalBytes = store.memories.reduce((sum, memory) => sum + memory.content_size_bytes, 0);
@@ -138,12 +143,20 @@ export function MemoryStoreDetail({
   useEffect(() => {
     setContent(selected?.content ?? '');
     setEditing(false);
+    setVersionsFor(null);
   }, [selected?.id]);
 
   const save = async () => {
     if (!selected) return;
     await postJson(`/v1/memory_stores/${store.id}/memories/${selected.id}`, { content });
     setEditing(false);
+    onRefresh();
+  };
+
+  const archiveStore = async () => {
+    await postJson(`/v1/memory_stores/${store.id}/archive`, {});
+    setMenuOpen(false);
+    onBack();
     onRefresh();
   };
 
@@ -163,10 +176,36 @@ export function MemoryStoreDetail({
           <p className="mutedLine"><span className="monoText">{shortId(store.id)}</span> · Created {formatDateShort(store.created_at)}</p>
           {store.description ? <p className="agentDescription">{store.description}</p> : null}
         </div>
-        <button className="primaryButton largeAction" type="button" onClick={onNewMemory}>
-          <Plus size={18} />
-          Add memory
-        </button>
+        <div className="agentHeroActions">
+          <button className="primaryButton largeAction" type="button" onClick={onNewMemory}>
+            <Plus size={18} />
+            Add memory
+          </button>
+          <button className="secondaryButton largeAction" type="button" onClick={() => setEditStoreOpen(true)}>
+            <Pencil size={18} />
+            Edit
+          </button>
+          <div className="menuWrap">
+            <button className="iconButton" type="button" onClick={() => setMenuOpen((open) => !open)} title="Store actions">
+              <MoreVertical size={18} />
+            </button>
+            {menuOpen ? (
+              <div className="agentMenu">
+                <button type="button" onClick={() => void archiveStore()}><Archive size={18} />Archive</button>
+                <button
+                  type="button"
+                  className="dangerMenuItem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setDeleteStoreOpen(true);
+                  }}
+                >
+                  <Trash2 size={18} />Delete
+                </button>
+              </div>
+            ) : null}
+          </div>
+        </div>
       </div>
       <SummaryStrip items={[
         { label: 'Memories', value: store.memories.length, icon: <FileText size={18} /> },
@@ -195,15 +234,32 @@ export function MemoryStoreDetail({
                     {' '}· Updated {formatDateShort(selected.updated_at)}
                   </p>
                 </div>
-                {editing ? (
-                  <div className="toolbarActions">
-                    <button className="secondaryButton" type="button" onClick={() => { setEditing(false); setContent(selected.content ?? ''); }}><X size={16} />Cancel</button>
-                    <button className="primaryButton" type="button" onClick={() => void save()}><Check size={16} />Save</button>
-                  </div>
-                ) : (
-                  <button className="secondaryButton" type="button" onClick={() => setEditing(true)}><Pencil size={18} />Edit</button>
-                )}
+                <div className="toolbarActions">
+                  <button
+                    className="secondaryButton"
+                    type="button"
+                    onClick={() => setVersionsFor((current) => current === selected.id ? null : selected.id)}
+                    aria-expanded={versionsFor === selected.id}
+                  >
+                    <History size={16} />Versions
+                  </button>
+                  {editing ? (
+                    <>
+                      <button className="secondaryButton" type="button" onClick={() => { setEditing(false); setContent(selected.content ?? ''); }}><X size={16} />Cancel</button>
+                      <button className="primaryButton" type="button" onClick={() => void save()}><Check size={16} />Save</button>
+                    </>
+                  ) : (
+                    <button className="secondaryButton" type="button" onClick={() => setEditing(true)}><Pencil size={18} />Edit</button>
+                  )}
+                </div>
               </div>
+              {versionsFor === selected.id ? (
+                <MemoryVersionsPanel
+                  storeId={store.id}
+                  memory={selected}
+                  onRedacted={onRefresh}
+                />
+              ) : null}
               {editing ? (
                 <textarea className="memoryEditor" value={content} onChange={(event) => setContent(event.target.value)} />
               ) : (
@@ -222,7 +278,183 @@ export function MemoryStoreDetail({
           )}
         </div>
       </div>
+      {editStoreOpen ? (
+        <MemoryStoreEditModal
+          store={store}
+          onClose={() => setEditStoreOpen(false)}
+          onSaved={() => {
+            setEditStoreOpen(false);
+            onRefresh();
+          }}
+        />
+      ) : null}
+      {deleteStoreOpen ? (
+        <MemoryStoreDeleteModal
+          store={store}
+          onClose={() => setDeleteStoreOpen(false)}
+          onDeleted={() => {
+            setDeleteStoreOpen(false);
+            onBack();
+            onRefresh();
+          }}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function MemoryStoreEditModal({ store, onClose, onSaved }: { store: MemoryStore; onClose: () => void; onSaved: () => void }) {
+  const [name, setName] = useState(store.name);
+  const [description, setDescription] = useState(store.description);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      // The published update verb is POST with patch semantics: only the
+      // fields the operator changed are merged server-side.
+      await postJson(`/v1/memory_stores/${store.id}`, { name, description });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title="Edit memory store" onClose={onClose} size="medium">
+      <form className="modalForm" onSubmit={submit}>
+        {error ? <div className="banner error inlineBanner" role="alert">{error}</div> : null}
+        <label className="editField">
+          Name
+          <input value={name} onChange={(event) => setName(event.target.value)} required />
+          <small>1-255 characters.</small>
+        </label>
+        <label className="editField">
+          Description
+          <textarea value={description} onChange={(event) => setDescription(event.target.value)} />
+        </label>
+        <div className="modalActions">
+          <button className="secondaryButton" type="button" onClick={onClose}>Cancel</button>
+          <button className="darkButton largeAction" type="submit" disabled={saving || !name.trim()}>{saving ? 'Saving…' : 'Save changes'}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+function MemoryStoreDeleteModal({ store, onClose, onDeleted }: { store: MemoryStore; onClose: () => void; onDeleted: () => void }) {
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState('');
+
+  const remove = async () => {
+    setDeleting(true);
+    setError('');
+    try {
+      await deleteJson(`/v1/memory_stores/${store.id}`);
+      onDeleted();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <Modal title="Delete memory store" onClose={onClose}>
+      <div className="modalForm">
+        {error ? <div className="banner error inlineBanner" role="alert">{error}</div> : null}
+        <p>
+          Permanently delete <strong>{store.name}</strong> and its {store.memories.length} {store.memories.length === 1 ? 'memory' : 'memories'}?
+          A store mounted by an active session cannot be deleted.
+        </p>
+        <div className="modalActions">
+          <button className="secondaryButton" type="button" onClick={onClose}>Cancel</button>
+          <button className="dangerButton" type="button" onClick={() => void remove()} disabled={deleting}>
+            {deleting ? 'Deleting…' : 'Delete memory store'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+/**
+ * The version history of one memory. Every write records a version, so this
+ * panel is where the published redaction action lives: redacting clears the
+ * recorded payload while keeping the version listable — except the head
+ * version, whose redaction would orphan the memory's current content and is
+ * refused with `memory_version_is_head`.
+ */
+function MemoryVersionsPanel({ storeId, memory, onRedacted }: { storeId: string; memory: MemoryRecord; onRedacted: () => void }) {
+  const [versions, setVersions] = useState<MemoryVersion[] | null>(null);
+  const [error, setError] = useState('');
+  const [redactingId, setRedactingId] = useState<string | null>(null);
+
+  const load = () => {
+    getJson<{ data: MemoryVersion[] } | MemoryVersion[]>(
+      `/v1/memory_stores/${storeId}/memory_versions?memory_id=${encodeURIComponent(memory.id)}`,
+    )
+      .then((page) => setVersions(Array.isArray(page) ? page : page.data ?? []))
+      .catch((err: any) => setError(err?.message ?? 'Could not load versions'));
+  };
+
+  useEffect(load, [storeId, memory.id]);
+
+  const redact = async (version: MemoryVersion) => {
+    setRedactingId(version.id);
+    setError('');
+    try {
+      await postJson(`/v1/memory_stores/${storeId}/memory_versions/${version.id}/redact`, {});
+      load();
+      onRedacted();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setRedactingId(null);
+    }
+  };
+
+  if (error && !versions) return <div className="banner error inlineBanner" role="alert">{error}</div>;
+  if (!versions) return <p className="mutedValue">Loading versions…</p>;
+  if (versions.length === 0) return <p className="mutedValue">No versions recorded.</p>;
+
+  return (
+    <div className="memoryVersions">
+      {error ? <div className="banner error inlineBanner" role="alert">{error}</div> : null}
+      <table className="deliveriesTable">
+        <thead>
+          <tr><th>Version</th><th>Operation</th><th>Size</th><th>Created</th><th>Redacted</th><th>Action</th></tr>
+        </thead>
+        <tbody>
+          {versions.map((version) => {
+            const isHead = version.id === memory.memory_version_id;
+            return (
+              <tr key={version.id}>
+                <td><code>{truncateMiddle(version.id, 18)}</code>{isHead ? <small className="mutedValue"> (current)</small> : null}</td>
+                <td><code>{version.operation}</code></td>
+                <td>{version.content_size_bytes !== null ? `${version.content_size_bytes} B` : '-'}</td>
+                <td>{formatDateShort(version.created_at)}</td>
+                <td>{version.redacted_at ? formatDateShort(version.redacted_at) : '-'}</td>
+                <td>
+                  <button
+                    className="ghostButton compactButton"
+                    type="button"
+                    disabled={isHead || Boolean(version.redacted_at) || redactingId === version.id}
+                    title={isHead ? 'Cannot redact the current version' : version.redacted_at ? 'Already redacted' : 'Redact this version'}
+                    onClick={() => void redact(version)}
+                  >
+                    {redactingId === version.id ? 'Redacting…' : 'Redact'}
+                  </button>
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

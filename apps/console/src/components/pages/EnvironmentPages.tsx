@@ -1,16 +1,19 @@
 import { Archive, FileText, Globe, MoreVertical, Pencil, Plus, Server, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { postJson, putJson } from '../../api';
+import { deleteJson, postJson, putJson } from '../../api';
 import { EmptyState, FilterSelect, StatusPill, Toolbar } from '../Common';
+import { Modal } from '../Modal';
 import { formatDateShort, shortId } from '../../lib/format';
 import type { ConsoleData, Environment, EnvironmentDraft, MetadataDraft } from '../../types';
 import { CloudEnvironment, ReadonlyTable, SelfHostedEnvironment } from './EnvironmentDetailViews';
 import {
+  effectiveSandboxProvider,
   environmentDraftFromApi,
   environmentHostingType,
   environmentKind,
   environmentPayloadFromDraft,
   hostingLabel,
+  PACKAGE_MANAGERS,
 } from './EnvironmentPageModel';
 
 export function Environments({ data, onNew, onOpenEnvironment }: { data: ConsoleData; onNew: () => void; onOpenEnvironment: (environment: Environment) => void }) {
@@ -111,12 +114,14 @@ export function Environments({ data, onNew, onOpenEnvironment }: { data: Console
 export function EnvironmentDetail({ environment, data, onBack, onRefresh }: { environment: Environment; data: ConsoleData; onBack: () => void; onRefresh: () => void }) {
   const [editing, setEditing] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
   const environmentSessions = data.sessions.filter((session) => session.environment_id === environment.id);
   const isSelfHosted = environmentHostingType(environment) === 'self_hosted';
 
   useEffect(() => {
     setEditing(false);
     setMenuOpen(false);
+    setDeleteOpen(false);
   }, [environment.id]);
 
   const archive = async () => {
@@ -130,6 +135,7 @@ export function EnvironmentDetail({ environment, data, onBack, onRefresh }: { en
     return (
       <EnvironmentEditor
         environment={environment}
+        data={data}
         onCancel={() => setEditing(false)}
         onSaved={() => {
           setEditing(false);
@@ -167,7 +173,17 @@ export function EnvironmentDetail({ environment, data, onBack, onRefresh }: { en
             </button>
             {menuOpen ? (
               <div className="agentMenu">
-                <button type="button" className="dangerMenuItem" onClick={() => void archive()}><Archive size={18} />Archive</button>
+                <button type="button" onClick={() => void archive()}><Archive size={18} />Archive</button>
+                <button
+                  type="button"
+                  className="dangerMenuItem"
+                  onClick={() => {
+                    setMenuOpen(false);
+                    setDeleteOpen(true);
+                  }}
+                >
+                  <Trash2 size={18} />Delete
+                </button>
               </div>
             ) : null}
           </div>
@@ -175,11 +191,57 @@ export function EnvironmentDetail({ environment, data, onBack, onRefresh }: { en
       </div>
 
       {isSelfHosted ? <SelfHostedEnvironment environment={environment} sessions={environmentSessions} /> : <CloudEnvironment environment={environment} />}
+      {deleteOpen ? (
+        <EnvironmentDeleteModal
+          environment={environment}
+          onClose={() => setDeleteOpen(false)}
+          onDeleted={() => {
+            setDeleteOpen(false);
+            onBack();
+            onRefresh();
+          }}
+        />
+      ) : null}
     </section>
   );
 }
 
-function EnvironmentEditor({ environment, onCancel, onSaved }: { environment: Environment; onCancel: () => void; onSaved: () => void }) {
+function EnvironmentDeleteModal({ environment, onClose, onDeleted }: { environment: Environment; onClose: () => void; onDeleted: () => void }) {
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState('');
+
+  const remove = async () => {
+    setDeleting(true);
+    setError('');
+    try {
+      await deleteJson(`/v1/environments/${environment.id}`);
+      onDeleted();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <Modal title="Delete environment" onClose={onClose}>
+      <div className="modalForm">
+        {error ? <div className="banner error inlineBanner" role="alert">{error}</div> : null}
+        <p>
+          Permanently delete <strong>{environment.name}</strong>? Sessions that already ran keep their history,
+          but new sessions can no longer use this environment.
+        </p>
+        <div className="modalActions">
+          <button className="secondaryButton" type="button" onClick={onClose}>Cancel</button>
+          <button className="dangerButton" type="button" onClick={() => void remove()} disabled={deleting}>
+            {deleting ? 'Deleting…' : 'Delete environment'}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function EnvironmentEditor({ environment, data, onCancel, onSaved }: { environment: Environment; data: ConsoleData; onCancel: () => void; onSaved: () => void }) {
   const [draft, setDraft] = useState<EnvironmentDraft>(() => environmentDraftFromApi(environment));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -227,7 +289,8 @@ function EnvironmentEditor({ environment, onCancel, onSaved }: { environment: En
       </label>
 
       <div className="environmentBody">
-        <EnvironmentExecutionEditor draft={draft} onDraft={setDraft} />
+        <EnvironmentExecutionEditor draft={draft} onDraft={setDraft} workspaceDefaultProvider={workspaceDefaultProvider(data)} />
+        <EnvironmentPackagesEditor draft={draft} onDraft={setDraft} />
         <EnvironmentMetadataEditor draft={draft} onDraft={setDraft} />
         {draft.hostingType === 'self_hosted' ? <SelfHostedEnvironment environment={environment} sessions={[]} /> : null}
       </div>
@@ -235,21 +298,65 @@ function EnvironmentEditor({ environment, onCancel, onSaved }: { environment: En
   );
 }
 
-function EnvironmentExecutionEditor({ draft, onDraft }: { draft: EnvironmentDraft; onDraft: (draft: EnvironmentDraft) => void }) {
+/**
+ * The workspace default sandbox backend a `cloud` environment runs on — the
+ * same one the runtime's `env_default` serves, read from Settings V2.
+ */
+function workspaceDefaultProvider(data: ConsoleData): string {
+  return data.settings?.effective_config?.sandbox?.provider ?? 'local';
+}
+
+/**
+ * One input per package manager — the published `config.packages` object is a
+ * `{ type: "packages", apt: [...], ... }` map, so the editor edits each
+ * manager's list rather than a flat `{manager, package}` row array.
+ */
+export function EnvironmentPackagesEditor({ draft, onDraft }: { draft: EnvironmentDraft; onDraft: (draft: EnvironmentDraft) => void }) {
+  return (
+    <section className="environmentSection">
+      <div>
+        <h2>Packages</h2>
+        <p>Pre-installed packages per manager. Separate package names with commas or newlines.</p>
+      </div>
+      <div className="environmentNestedGrid">
+        {PACKAGE_MANAGERS.map(({ id, label }) => (
+          <label className="editField" key={id}>
+            {label}
+            <input
+              value={draft.packages[id]}
+              onChange={(event) => onDraft({ ...draft, packages: { ...draft.packages, [id]: event.target.value } })}
+              placeholder={id === 'npm' ? 'tsx, zod' : id === 'pip' ? 'requests' : ''}
+            />
+          </label>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function EnvironmentExecutionEditor({ draft, onDraft, workspaceDefaultProvider }: { draft: EnvironmentDraft; onDraft: (draft: EnvironmentDraft) => void; workspaceDefaultProvider: string }) {
   return (
     <section className="environmentSection environmentExecutionSection">
       <div>
         <h2>Execution</h2>
-        <p>Choose where sessions for this environment execute. Docker runs one isolated container per session.</p>
+        <p>Choose where sessions for this environment execute. Docker and Kubernetes isolate each session in a container.</p>
       </div>
       <label className="editField">
-        Sandbox provider
+        Hosting type
         <select value={draft.hostingType} onChange={(event) => onDraft({ ...draft, hostingType: event.target.value as EnvironmentDraft['hostingType'] })}>
+          <option value="cloud">Cloud — workspace default backend</option>
           <option value="local">Local process</option>
           <option value="docker">Docker container</option>
+          <option value="kubernetes">Kubernetes pod</option>
           <option value="self_hosted">Self-hosted worker</option>
         </select>
       </label>
+      {draft.hostingType === 'cloud' ? (
+        <div className="subtleNotice">Cloud environments run on the workspace default sandbox backend (currently <code>{workspaceDefaultProvider}</code>). Change the default in Settings.</div>
+      ) : null}
+      {draft.hostingType === 'local' ? (
+        <div className="warningNotice"><span>Not isolated: tools execute directly on the host machine. Use Docker or Kubernetes for untrusted agent code.</span></div>
+      ) : null}
       {draft.hostingType === 'docker' ? (
         <div className="environmentNestedGrid">
           <label className="editField">

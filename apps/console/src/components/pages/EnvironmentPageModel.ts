@@ -1,5 +1,22 @@
 import { titleCase } from '../../lib/format';
-import type { Environment, EnvironmentDraft, EnvironmentHostingType, EnvironmentNetworkType, EnvironmentPackageDraft } from '../../types';
+import type {
+  Environment,
+  EnvironmentDraft,
+  EnvironmentHostingType,
+  EnvironmentNetworkType,
+  EnvironmentPackageManager,
+  EnvironmentPackagesDraft,
+} from '../../types';
+
+/** The six package managers the published `config.packages` object names. */
+export const PACKAGE_MANAGERS: Array<{ id: EnvironmentPackageManager; label: string }> = [
+  { id: 'apt', label: 'apt' },
+  { id: 'cargo', label: 'Cargo' },
+  { id: 'gem', label: 'RubyGems' },
+  { id: 'go', label: 'Go modules' },
+  { id: 'npm', label: 'npm' },
+  { id: 'pip', label: 'pip' },
+];
 
 export function environmentKind(environment: Environment) {
   return hostingLabel(environmentHostingType(environment));
@@ -8,20 +25,52 @@ export function environmentKind(environment: Environment) {
 export function hostingLabel(type: EnvironmentHostingType) {
   if (type === 'self_hosted') return 'Self-hosted';
   if (type === 'docker') return 'Docker';
+  if (type === 'kubernetes') return 'Kubernetes';
   if (type === 'local') return 'Local';
   return 'Cloud';
 }
 
+/**
+ * The hosting type a session on this environment actually provisions — for a
+ * `cloud` declaration that is the workspace default backend, so the effective
+ * provider wins when the API reports it.
+ */
 export function environmentHostingType(environment: Environment): EnvironmentHostingType {
-  // The effective backend is what sessions actually provision — for a `cloud`
-  // declaration it is the workspace default; fall back to the declaration.
   const effective = environment.effective_sandbox_provider;
   const provider = typeof effective === 'string' && effective ? effective : environment.config.sandbox_provider;
   const hostingType = environment.config.hosting_type;
   if (provider === 'self_hosted' || hostingType === 'self_hosted') return 'self_hosted';
   if (provider === 'docker' || hostingType === 'docker') return 'docker';
+  if (provider === 'kubernetes' || hostingType === 'kubernetes') return 'kubernetes';
   if (provider === 'local' || hostingType === 'local') return 'local';
   return 'cloud';
+}
+
+/**
+ * The hosting type the stored config *declares*, independent of what it
+ * resolves to. An editor drafts from the declaration: a `cloud` environment
+ * whose effective backend is docker must still edit as `cloud`.
+ */
+export function declaredHostingType(environment: Environment): EnvironmentHostingType {
+  const declared = environment.config.hosting_type ?? environment.config.type;
+  if (declared === 'self_hosted' || declared === 'docker' || declared === 'kubernetes' || declared === 'cloud' || declared === 'local') {
+    return declared;
+  }
+  const provider = environment.config.sandbox_provider;
+  if (provider === 'self_hosted' || provider === 'docker' || provider === 'kubernetes' || provider === 'local') return provider;
+  return 'cloud';
+}
+
+/**
+ * The backend sessions on this environment provision on, as the API reports
+ * it — `effective_sandbox_provider` answers "where does this actually run"
+ * for a `cloud` declaration; the declared provider is the fallback.
+ */
+export function effectiveSandboxProvider(environment: Environment): string {
+  const effective = environment.effective_sandbox_provider;
+  if (typeof effective === 'string' && effective) return effective;
+  const provider = environment.config.sandbox_provider;
+  return typeof provider === 'string' && provider ? provider : 'local';
 }
 
 export function environmentNetwork(environment: Environment) {
@@ -40,25 +89,42 @@ export function environmentNetwork(environment: Environment) {
   };
 }
 
-export function environmentPackages(environment: Environment): EnvironmentPackageDraft[] {
+export function emptyPackagesDraft(): EnvironmentPackagesDraft {
+  return { apt: '', cargo: '', gem: '', go: '', npm: '', pip: '' };
+}
+
+/**
+ * Read the declared package set into one raw text value per manager.
+ *
+ * The published projection is `{ type: 'packages', npm: [...], ... }`; older
+ * rows store the local array spelling `[{ manager, package }]`. Both read
+ * into the same draft, and a package under a manager the published object
+ * does not name is preserved in place rather than dropped.
+ */
+export function environmentPackages(environment: Environment): EnvironmentPackagesDraft {
+  const draft = emptyPackagesDraft();
+  const add = (manager: string, packages: string[]) => {
+    if (!packages.length) return;
+    const key = (PACKAGE_MANAGERS.some(({ id }) => id === manager) ? manager : 'npm') as EnvironmentPackageManager;
+    draft[key] = [...splitCsv(draft[key]), ...packages].join(', ');
+  };
   const declared = environment.config.packages;
-  // Published projection: `{ type: 'packages', npm: [...], pip: [...], ... }`.
   if (declared && typeof declared === 'object' && !Array.isArray(declared)) {
-    return Object.entries(declared as Record<string, unknown>).flatMap(([manager, list]) => {
-      if (manager === 'type' || !Array.isArray(list)) return [];
-      return list.map((pkg, index) => ({ id: `pkg_${manager}_${index}`, manager, package: String(pkg) }));
-    });
+    for (const [manager, list] of Object.entries(declared as Record<string, unknown>)) {
+      if (manager === 'type' || !Array.isArray(list)) continue;
+      add(manager, arrayOfStrings(list));
+    }
+    return draft;
   }
-  // Older rows stored the local array spelling; tolerate it on read.
   const packages = Array.isArray(declared) ? declared : [];
-  return packages.flatMap((item, index) => {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+  for (const item of packages) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) continue;
     const record = item as Record<string, unknown>;
     const manager = typeof record.manager === 'string' ? record.manager : '';
     const packageName = typeof record.package === 'string' ? record.package : '';
-    if (!manager && !packageName) return [];
-    return [{ id: `pkg_${index}`, manager, package: packageName }];
-  });
+    if (packageName) add(manager, [packageName]);
+  }
+  return draft;
 }
 
 export function environmentMetadataEntries(environment: Environment): string[][] {
@@ -93,7 +159,7 @@ export function environmentDraftFromApi(environment: Environment): EnvironmentDr
   return {
     name: environment.name,
     description: environment.description ?? '',
-    hostingType: environmentHostingType(environment),
+    hostingType: declaredHostingType(environment),
     dockerImage: stringValue(environment.config.image) ?? 'node:22-slim',
     dockerMemory: stringValue(resources.memory) ?? '',
     dockerCpu: numberOrStringValue(resources.cpu) ?? '',
@@ -101,7 +167,7 @@ export function environmentDraftFromApi(environment: Environment): EnvironmentDr
     allowMcpServerNetworkAccess: network.allowMcp,
     allowPackageManagerNetworkAccess: network.allowPackageManager,
     allowedHosts: network.allowedHosts.join(', '),
-    packages: environmentPackages(environment).map((item) => ({ ...item, id: newDraftId() })),
+    packages: environmentPackages(environment),
     metadata: environmentMetadataEntries(environment)
       .filter(([key]) => key !== 'environment_keys')
       .map(([key, value]) => ({ id: newDraftId(), key, value })),
@@ -118,18 +184,25 @@ export function environmentPayloadFromDraft(draft: EnvironmentDraft) {
       .filter(([key]) => key),
   );
   const metadata = { ...draft.preservedMetadata, ...editableMetadata };
+  // `cloud` deliberately sends no `sandbox_provider`: it is the published
+  // "the platform decides" declaration and resolves to the workspace default
+  // backend server-side, not to a name the Console picks.
+  const provider = sandboxProviderForHostingType(draft.hostingType);
   const config: Record<string, unknown> = {
     hosting_type: draft.hostingType,
-    sandbox_provider: sandboxProviderForHostingType(draft.hostingType),
+    ...(provider ? { sandbox_provider: provider } : {}),
     network: {
       type: draft.networkType,
       allow_mcp_server_network_access: draft.allowMcpServerNetworkAccess,
       allow_package_manager_network_access: draft.allowPackageManagerNetworkAccess,
       allowed_hosts: splitCsv(draft.allowedHosts),
     },
-    packages: draft.packages
-      .map((item) => ({ manager: item.manager.trim(), package: item.package.trim() }))
-      .filter((item) => item.manager || item.package),
+    packages: {
+      type: 'packages',
+      ...Object.fromEntries(
+        PACKAGE_MANAGERS.map(({ id }) => [id, splitCsv(draft.packages[id])]),
+      ),
+    },
   };
   if (draft.hostingType === 'docker') {
     const image = draft.dockerImage.trim() || 'node:22-slim';
@@ -150,11 +223,17 @@ export function environmentPayloadFromDraft(draft: EnvironmentDraft) {
   };
 }
 
-export function sandboxProviderForHostingType(hostingType: EnvironmentHostingType) {
+/**
+ * The backend a hosting declaration names, or `undefined` for `cloud` —
+ * "the platform decides" carries no backend name and resolves to the
+ * workspace default at run time.
+ */
+export function sandboxProviderForHostingType(hostingType: EnvironmentHostingType): string | undefined {
   if (hostingType === 'self_hosted') return 'self_hosted';
   if (hostingType === 'docker') return 'docker';
+  if (hostingType === 'kubernetes') return 'kubernetes';
   if (hostingType === 'local') return 'local';
-  return 'cloud';
+  return undefined;
 }
 
 export function splitCsv(value: string): string[] {

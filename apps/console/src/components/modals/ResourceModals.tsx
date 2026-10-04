@@ -6,10 +6,10 @@ import { Modal } from '../Modal';
 import { sandboxProviderForHostingType, splitCsv } from '../pages/EnvironmentPageModel';
 import type { CredentialAuthType, EnvironmentHostingType } from '../../types';
 
-export function ResourceModal({ kind, onClose, onSaved }: { kind: 'environment' | 'credential_vault' | 'memory_store'; onClose: () => void; onSaved: () => void }) {
+export function ResourceModal({ kind, defaultSandboxProvider, onClose, onSaved }: { kind: 'environment' | 'credential_vault' | 'memory_store'; defaultSandboxProvider?: string; onClose: () => void; onSaved: () => void }) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [hostingType, setHostingType] = useState<EnvironmentHostingType>('local');
+  const [hostingType, setHostingType] = useState<EnvironmentHostingType>('cloud');
   const [dockerImage, setDockerImage] = useState('node:22-slim');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -18,6 +18,9 @@ export function ResourceModal({ kind, onClose, onSaved }: { kind: 'environment' 
     setSaving(true);
     setError('');
     const path = kind === 'environment' ? '/v1/environments' : kind === 'credential_vault' ? '/v1/credential-vaults' : '/v1/memory_stores';
+    // `cloud` sends no `sandbox_provider`: it is the published "the platform
+    // decides" declaration and resolves to the workspace default server-side.
+    const sandboxProvider = sandboxProviderForHostingType(hostingType);
     try {
       await postJson(path, {
         name,
@@ -25,7 +28,7 @@ export function ResourceModal({ kind, onClose, onSaved }: { kind: 'environment' 
         ...(kind === 'environment' ? {
           config: {
             hosting_type: hostingType,
-            sandbox_provider: sandboxProviderForHostingType(hostingType),
+            ...(sandboxProvider ? { sandbox_provider: sandboxProvider } : {}),
             ...(hostingType === 'docker' ? { image: dockerImage.trim() || 'node:22-slim', resources: {} } : {}),
             network: {
               type: 'limited',
@@ -33,7 +36,7 @@ export function ResourceModal({ kind, onClose, onSaved }: { kind: 'environment' 
               allow_package_manager_network_access: false,
               allowed_hosts: [],
             },
-            packages: [],
+            packages: { type: 'packages', apt: [], cargo: [], gem: [], go: [], npm: [], pip: [] },
           },
         } : {}),
       });
@@ -55,22 +58,36 @@ export function ResourceModal({ kind, onClose, onSaved }: { kind: 'environment' 
             <input value={name} onChange={(event) => setName(event.target.value.slice(0, 50))} placeholder="E.g. My Environment" required />
             <small>50 characters or fewer.</small>
           </label>
-          <label className="editField">
-            Hosting type
-            <select value={hostingType} onChange={(event) => setHostingType(event.target.value as EnvironmentHostingType)}>
-              <option value="local">Local</option>
-              <option value="docker">Docker</option>
-              <option value="self_hosted">Self-hosted</option>
-            </select>
-            <small>Cloud hosting is not offered: the runtime has no cloud execution backend and refuses it with `unsupported_hosting_type`.</small>
-          </label>
-          {hostingType === 'docker' ? (
+          <div className="hostingSummary">
+            <strong>Cloud</strong>
+            <p>Runs on the workspace default sandbox backend (currently <code>{defaultSandboxProvider ?? 'local'}</code>). Change the default in Settings.</p>
+          </div>
+          <details className="advancedSection">
+            <summary>Advanced: choose a specific hosting type</summary>
             <label className="editField">
-              Docker image
-              <input value={dockerImage} onChange={(event) => setDockerImage(event.target.value)} placeholder="node:22-slim" />
-              <small>One Docker container will be created per session.</small>
+              Hosting type
+              <select value={hostingType} onChange={(event) => setHostingType(event.target.value as EnvironmentHostingType)}>
+                <option value="cloud">Cloud — workspace default backend</option>
+                <option value="local">Local</option>
+                <option value="docker">Docker</option>
+                <option value="kubernetes">Kubernetes</option>
+                <option value="self_hosted">Self-hosted</option>
+              </select>
             </label>
-          ) : null}
+            {hostingType === 'docker' ? (
+              <label className="editField">
+                Docker image
+                <input value={dockerImage} onChange={(event) => setDockerImage(event.target.value)} placeholder="node:22-slim" />
+                <small>One Docker container will be created per session.</small>
+              </label>
+            ) : null}
+            {hostingType === 'local' ? (
+              <div className="warningNotice"><span>Not isolated: tools execute directly on the host machine. Use Docker or Kubernetes for untrusted agent code.</span></div>
+            ) : null}
+            {hostingType === 'self_hosted' ? (
+              <div className="subtleNotice">Self-hosted sessions are pulled by an external worker. Save this environment, then use the setup instructions on the detail page.</div>
+            ) : null}
+          </details>
           <label className="editField">
             Description
             <textarea value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Optional description for this environment" />

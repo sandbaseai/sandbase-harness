@@ -167,9 +167,15 @@ export type ApiKeyCreateResponse = ApiKey & {
   secret_key: string;
 };
 
-export type EnvironmentHostingType = 'cloud' | 'local' | 'docker' | 'self_hosted';
+export type EnvironmentHostingType = 'cloud' | 'local' | 'docker' | 'kubernetes' | 'self_hosted';
 export type EnvironmentNetworkType = 'limited' | 'unrestricted';
-export type EnvironmentPackageDraft = { id: string; manager: string; package: string };
+/**
+ * The published `config.packages` shape is one key per package manager
+ * (`{ type: "packages", apt: [...], ... }`), so the draft keeps one raw
+ * text field per manager rather than a row list.
+ */
+export type EnvironmentPackageManager = 'apt' | 'cargo' | 'gem' | 'go' | 'npm' | 'pip';
+export type EnvironmentPackagesDraft = Record<EnvironmentPackageManager, string>;
 export type MetadataDraft = { id: string; key: string; value: string };
 
 export type EnvironmentDraft = {
@@ -183,7 +189,7 @@ export type EnvironmentDraft = {
   allowMcpServerNetworkAccess: boolean;
   allowPackageManagerNetworkAccess: boolean;
   allowedHosts: string;
-  packages: EnvironmentPackageDraft[];
+  packages: EnvironmentPackagesDraft;
   metadata: MetadataDraft[];
   preservedMetadata: Record<string, unknown>;
 };
@@ -208,10 +214,12 @@ export type Vault = {
   id: string;
   type: 'credential_vault';
   name: string;
+  display_name: string;
   description: string;
   status: string;
   credential_count: number;
   credentials: VaultCredential[];
+  metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
   archived_at: string | null;
@@ -247,9 +255,26 @@ export type MemoryStore = {
   status: string;
   memory_count: number;
   memories: MemoryRecord[];
+  config: Record<string, unknown>;
+  metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
   archived_at: string | null;
+};
+
+export type MemoryVersion = {
+  id: string;
+  type: 'memory_version';
+  memory_id: string;
+  memory_store_id: string;
+  operation: string;
+  created_at: string;
+  content: string | null;
+  content_sha256: string | null;
+  content_size_bytes: number | null;
+  path: string | null;
+  created_by: { type: 'session_actor'; session_id: string } | null;
+  redacted_at: string | null;
 };
 
 export type MemoryRecord = {
@@ -336,6 +361,39 @@ export type ScheduledDeployment = {
   created_at: string;
   updated_at: string;
   archived_at: string | null;
+};
+
+export type DeploymentRun = {
+  type: 'deployment_run';
+  id: string;
+  deployment_id: string;
+  trigger_context: { type: string; scheduled_at?: string };
+  session_id: string | null;
+  error: { type: string; message: string } | null;
+  agent: { type: 'agent'; id: string; version: number | null } | null;
+  created_at: string;
+};
+
+export type WebhookDelivery = {
+  id: string;
+  type: 'webhook_delivery';
+  webhook_id: string;
+  event: string;
+  payload: {
+    type?: string;
+    id?: string;
+    created_at?: string;
+    data?: { type?: string; id?: string; vault_id?: string; [key: string]: unknown };
+    [key: string]: unknown;
+  };
+  status: string;
+  status_code: number | null;
+  error: string | null;
+  signature: string;
+  attempt_count: number;
+  next_retry_at: string | null;
+  created_at: string;
+  delivered_at: string | null;
 };
 
 export type Outcome = {

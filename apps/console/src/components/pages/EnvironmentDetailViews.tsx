@@ -3,6 +3,8 @@ import { MetricCard } from '../Common';
 import { formatDateShort, relativeDate, shortId } from '../../lib/format';
 import type { Environment, Session } from '../../types';
 import {
+  declaredHostingType,
+  effectiveSandboxProvider,
   environmentKeys,
   environmentHostingType,
   environmentMetadataEntries,
@@ -12,6 +14,7 @@ import {
 export function CloudEnvironment({ environment }: { environment: Environment }) {
   const metadata = environmentMetadataEntries(environment);
   const executionType = environmentHostingType(environment);
+  const effectiveProvider = effectiveSandboxProvider(environment);
   const resources = environment.config.resources && typeof environment.config.resources === 'object' && !Array.isArray(environment.config.resources)
     ? environment.config.resources as Record<string, unknown>
     : {};
@@ -20,8 +23,14 @@ export function CloudEnvironment({ environment }: { environment: Environment }) 
       <section className="environmentSection">
         <h2>Execution</h2>
         <p>Sessions created with this environment use this sandbox provider.</p>
+        {effectiveProvider === 'local' ? (
+          <div className="warningNotice" role="alert">
+            <span>Not isolated: tools execute directly on the host machine. Use a Docker, Kubernetes, or self-hosted backend for untrusted agent code.</span>
+          </div>
+        ) : null}
         <div className="readonlyFields">
-          <ReadonlyField label="Sandbox provider" value={hostingLabel(executionType)} />
+          <ReadonlyField label="Hosting type" value={hostingLabel(declaredHostingType(environment))} />
+          <ReadonlyField label="Effective backend" value={effectiveProvider} />
           {executionType === 'docker' ? <ReadonlyField label="Docker image" value={String(environment.config.image ?? 'node:22-slim')} /> : null}
           {executionType === 'docker' && resources.memory ? <ReadonlyField label="Memory limit" value={String(resources.memory)} /> : null}
           {executionType === 'docker' && resources.cpu ? <ReadonlyField label="CPU limit" value={String(resources.cpu)} /> : null}

@@ -12,10 +12,23 @@ describe('environment page model helpers', () => {
   it('maps hosting types to labels and sandbox providers', () => {
     expect(environmentKind(environment({ effective_sandbox_provider: 'self_hosted' }))).toBe('Self-hosted');
     expect(environmentKind(environment({ effective_sandbox_provider: 'docker', config: { sandbox_provider: 'docker' } }))).toBe('Docker');
+    expect(environmentKind(environment({ effective_sandbox_provider: 'kubernetes' }))).toBe('Kubernetes');
     expect(sandboxProviderForHostingType('self_hosted')).toBe('self_hosted');
     expect(sandboxProviderForHostingType('docker')).toBe('docker');
+    expect(sandboxProviderForHostingType('kubernetes')).toBe('kubernetes');
     expect(sandboxProviderForHostingType('local')).toBe('local');
-    expect(sandboxProviderForHostingType('cloud')).toBe('cloud');
+    // `cloud` names no backend — the workspace default resolves it.
+    expect(sandboxProviderForHostingType('cloud')).toBeUndefined();
+  });
+
+  it('drafts the declared hosting type, not the resolved one', () => {
+    // A cloud environment whose workspace default is docker still edits as
+    // `cloud` — the declaration is what the config stores.
+    const draft = environmentDraftFromApi(environment({
+      effective_sandbox_provider: 'docker',
+      config: { type: 'cloud' },
+    }));
+    expect(draft.hostingType).toBe('cloud');
   });
 
   it('builds an editor draft from API environment data', () => {
@@ -45,7 +58,7 @@ describe('environment page model helpers', () => {
     expect(draft.dockerMemory).toBe('1g');
     expect(draft.dockerCpu).toBe('2');
     expect(draft.allowedHosts).toBe('example.com');
-    expect(draft.packages).toMatchObject([{ manager: 'npm', package: 'typescript' }]);
+    expect(draft.packages).toMatchObject({ npm: 'typescript', pip: '', apt: '' });
     expect(draft.metadata).toMatchObject([{ key: 'owner', value: 'runtime' }]);
     expect(draft.preservedMetadata).toEqual({ environment_keys: '[{"id":"envkey_1","name":"host"}]' });
   });
@@ -62,7 +75,7 @@ describe('environment page model helpers', () => {
       allowMcpServerNetworkAccess: true,
       allowPackageManagerNetworkAccess: true,
       allowedHosts: 'example.com, api.example.com\ninternal.local',
-      packages: [{ id: 'p1', manager: ' npm ', package: ' typescript ' }],
+      packages: { apt: '', cargo: '', gem: '', go: '', npm: ' typescript , tsx ', pip: 'requests\nrich' },
       metadata: [{ id: 'm1', key: 'Owner', value: ' Team ' }],
       preservedMetadata: { environment_keys: '[]' },
     });
@@ -77,10 +90,47 @@ describe('environment page model helpers', () => {
         network: {
           allowed_hosts: ['example.com', 'api.example.com', 'internal.local'],
         },
-        packages: [{ manager: 'npm', package: 'typescript' }],
+        packages: {
+          type: 'packages',
+          apt: [],
+          cargo: [],
+          gem: [],
+          go: [],
+          npm: ['typescript', 'tsx'],
+          pip: ['requests', 'rich'],
+        },
       },
       metadata: { environment_keys: '[]', owner: 'Team' },
     });
+  });
+
+  it('omits sandbox_provider for cloud hosting so the workspace default resolves it', () => {
+    const payload = environmentPayloadFromDraft({
+      name: 'Cloud',
+      description: '',
+      hostingType: 'cloud',
+      dockerImage: '',
+      dockerMemory: '',
+      dockerCpu: '',
+      networkType: 'limited',
+      allowMcpServerNetworkAccess: false,
+      allowPackageManagerNetworkAccess: false,
+      allowedHosts: '',
+      packages: { apt: '', cargo: '', gem: '', go: '', npm: '', pip: '' },
+      metadata: [],
+      preservedMetadata: {},
+    });
+    expect(payload.config.hosting_type).toBe('cloud');
+    expect(payload.config.sandbox_provider).toBeUndefined();
+  });
+
+  it('reads the published packages object shape', () => {
+    const draft = environmentDraftFromApi(environment({
+      config: { packages: { type: 'packages', npm: ['zod'], pip: ['requests', 'rich'] } },
+    }));
+    expect(draft.packages.npm).toBe('zod');
+    expect(draft.packages.pip).toBe('requests, rich');
+    expect(draft.packages.apt).toBe('');
   });
 
   it('splits comma and newline separated host lists', () => {
