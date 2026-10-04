@@ -1,8 +1,8 @@
-import { createHash } from 'node:crypto';
 import { Hono } from 'hono';
 import { nanoid } from 'nanoid';
 import type { ServerDeps } from '../server.js';
 import { cursorPageOf, offsetCursorPage, ApiCursorPage } from '../standard.js';
+import { publishOperationEvent } from './operation-events.js';
 import {
   COLLECTION_LISTING_QUERY_PARAMS,
   INCLUDE_ARCHIVED_PARAM,
@@ -31,7 +31,6 @@ import {
   stringRecordField,
 } from './resource-utils.js';
 import { isTerminal } from '@/core/session/state-machine.js';
-import { publishOperationEvent } from './operation-events.js';
 import type { SessionStatus } from '@/types/session.js';
 
 type ResourceKind = 'memory_store';
@@ -184,7 +183,7 @@ export function memoryStoreRoutes(deps: ServerDeps) {
   }
 
   app.get('/memory_stores/:id/memories', (c) => {
-    const rejected = rejectUnexpectedQueryParams(c, ['path_prefix', 'depth']);
+    const rejected = rejectUnexpectedQueryParams(c, ['path_prefix', 'depth', 'view']);
     if (rejected) return rejected;
     const store = deps.db.prepare('SELECT id FROM memory_stores WHERE id = ? AND archived_at IS NULL').get(c.req.param('id'));
     if (!store) return notFound(c, 'Memory store not found');
@@ -195,11 +194,30 @@ export function memoryStoreRoutes(deps: ServerDeps) {
       c.req.query('depth') === undefined ? undefined : Number(c.req.query('depth')),
     );
     if (!scope.ok) return invalid(c, scope.message!);
-    const memories = applyMemoryListScope(listMemories(deps, c.req.param('id')), {
+    // The published default for a listing is `basic`: the page carries the hash
+    // and byte size of each memory but not its content.
+    const view = parseMemoryView(c, 'basic');
+    if (!view.ok) return view.response;
+    const memories = applyMemoryListScope(listMemories(deps, c.req.param('id'), view.view), {
       prefix: scope.prefix,
       depth: scope.depth,
     });
     return c.json(cursorPageOf(memories, {}));
+  });
+
+  app.get('/memory_stores/:id/memories/:memoryId', (c) => {
+    const rejected = rejectUnexpectedQueryParams(c, ['view']);
+    if (rejected) return rejected;
+    const store = deps.db.prepare('SELECT id FROM memory_stores WHERE id = ? AND archived_at IS NULL').get(c.req.param('id'));
+    if (!store) return notFound(c, 'Memory store not found');
+    const row = deps.db.prepare(
+      'SELECT * FROM memory_records WHERE id = ? AND store_id = ? AND archived_at IS NULL',
+    ).get(c.req.param('memoryId'), c.req.param('id')) as MemoryRecordRow | undefined;
+    if (!row) return notFound(c, 'Memory not found');
+    // A single-memory read is a retrieve: the published default is `full`.
+    const view = parseMemoryView(c, 'full');
+    if (!view.ok) return view.response;
+    return c.json(toMemory(row, deps, view.view));
   });
 
   app.post('/memory_stores/:id/memories', async (c) => {
@@ -220,6 +238,8 @@ export function memoryStoreRoutes(deps: ServerDeps) {
       (deps.db.prepare('SELECT COUNT(*) AS count FROM memory_records WHERE store_id = ? AND archived_at IS NULL').get(storeId) as { count: number }).count,
     );
     if (!capacity.ok) return conflict(c, capacity.message!, capacity.code);
+    const view = parseMemoryView(c, 'basic');
+    if (!view.ok) return view.response;
     const id = `mem_${nanoid(18)}`;
     const now = new Date().toISOString();
     try {
@@ -230,14 +250,19 @@ export function memoryStoreRoutes(deps: ServerDeps) {
       deps.db.prepare('UPDATE memory_stores SET updated_at = datetime(\'now\') WHERE id = ?').run(storeId);
       recordMemoryVersion(deps, storeId, id, path, content, 'created', now);
       const row = deps.db.prepare('SELECT * FROM memory_records WHERE id = ?').get(id) as unknown as MemoryRecordRow;
-      return c.json(toMemory(row), 201);
+      return c.json(toMemory(row, deps, view.view), 201);
     } catch (err: any) {
-      if (String(err.message).includes('UNIQUE')) return conflict(c, `Memory already exists at path: ${path}`);
+      if (String(err.message).includes('UNIQUE')) return memoryPathConflict(c, deps, storeId, path);
       return c.json({ error: { type: 'internal_error', message: err.message } }, 500);
     }
   });
 
-  app.put('/memory_stores/:id/memories/:memoryId', async (c) => {
+  // `POST` is the published update verb; `PUT` stays as the local alias — both
+  // run the same write semantics.
+  app.post('/memory_stores/:id/memories/:memoryId', updateMemory);
+  app.put('/memory_stores/:id/memories/:memoryId', updateMemory);
+
+  async function updateMemory(c: any) {
     const body = await readObjectBody(c);
     if (!body.ok) return body.response;
     const storeId = c.req.param('id');
@@ -251,21 +276,29 @@ export function memoryStoreRoutes(deps: ServerDeps) {
     const content = typeof body.value.content === 'string' ? body.value.content : existing.content;
     const size = checkMemorySize(content);
     if (!size.ok) return invalid(c, size.message!, size.code);
+    const view = parseMemoryView(c, 'basic');
+    if (!view.ok) return view.response;
     // A precondition refuses a write whose content moved underneath the caller.
     // The refusal reports the current hash so the caller can retry without a
-    // separate re-read.
+    // separate re-read — unless the stored state already matches the requested
+    // write exactly, which the published contract answers with the memory itself.
     const precondition = evaluateContentPrecondition(body.value.precondition, existing.content);
     if (!precondition.ok) {
+      if (precondition.code === 'invalid_precondition') {
+        return invalid(c, precondition.message!, precondition.code);
+      }
+      if (path === existing.path && content === existing.content) {
+        return c.json(toMemory(existing, deps, view.view));
+      }
       // The current hash is surfaced as its own field as well as inside the
       // message, so a caller can retry without parsing prose.
-      const currentHash = memoryContentHash(existing.content);
       return c.json(
         {
           error: {
-            type: 'conflict',
+            type: 'memory_precondition_failed_error',
             code: precondition.code,
             message: precondition.message,
-            current_content_sha256: currentHash,
+            current_content_sha256: memoryContentHash(existing.content),
           },
         },
         409,
@@ -284,28 +317,44 @@ export function memoryStoreRoutes(deps: ServerDeps) {
       deps.db.prepare('UPDATE memory_stores SET updated_at = datetime(\'now\') WHERE id = ?').run(storeId);
       recordMemoryVersion(deps, storeId, memoryId, path, content, 'updated', new Date().toISOString());
       const row = deps.db.prepare('SELECT * FROM memory_records WHERE id = ? AND store_id = ?').get(memoryId, storeId) as unknown as MemoryRecordRow;
-      return c.json(toMemory(row));
+      return c.json(toMemory(row, deps, view.view));
     } catch (err: any) {
-      if (String(err.message).includes('UNIQUE')) return conflict(c, `Memory already exists at path: ${path}`);
+      if (String(err.message).includes('UNIQUE')) return memoryPathConflict(c, deps, storeId, path, memoryId);
       return c.json({ error: { type: 'internal_error', message: err.message } }, 500);
     }
-  });
+  }
 
-  app.delete('/memory_stores/:id/memories/:memoryId', (c) => {
+  app.delete('/memory_stores/:id/memories/:memoryId', async (c) => {
+    const rejected = rejectUnexpectedQueryParams(c, ['expected_content_sha256']);
+    if (rejected) return rejected;
     const storeId = c.req.param('id');
     const memoryId = c.req.param('memoryId');
     const store = writableStore(c, deps, storeId);
     if (store instanceof Response) return store;
     const existing = deps.db.prepare('SELECT * FROM memory_records WHERE id = ? AND store_id = ? AND archived_at IS NULL').get(memoryId, storeId) as MemoryRecordRow | undefined;
     if (!existing) return notFound(c, 'Memory not found');
+    // `expected_content_sha256` is the delete-side precondition: a caller that
+    // read the memory earlier cannot delete a memory that has since changed.
+    const expected = c.req.query('expected_content_sha256');
+    if (expected !== undefined && expected !== memoryContentHash(existing.content)) {
+      return c.json(
+        {
+          error: {
+            type: 'memory_precondition_failed_error',
+            code: 'precondition_failed',
+            message: 'expected_content_sha256 does not match the memory\'s current content hash',
+            current_content_sha256: memoryContentHash(existing.content),
+          },
+        },
+        409,
+      );
+    }
     deps.db.prepare('UPDATE memory_records SET archived_at = datetime(\'now\'), updated_at = datetime(\'now\') WHERE id = ? AND store_id = ?').run(memoryId, storeId);
     deps.db.prepare('UPDATE memory_stores SET updated_at = datetime(\'now\') WHERE id = ?').run(storeId);
     recordMemoryVersion(deps, storeId, memoryId, existing.path, existing.content, 'deleted', new Date().toISOString());
-    return c.json({ deleted: true, id: memoryId });
+    return c.json({ id: memoryId, type: 'memory_deleted' });
   });
 
-  // A 404 — missing or already archived — raises nothing, so a successful
-  // response is the transition itself (`订阅Webhook.md`).
   app.post('/memory_stores/:id/archive', async (c) => {
     const response = archiveResource(c, deps, 'memory_stores', (row) => toMemoryStore(row, deps));
     if (response.status === 200) {
@@ -321,12 +370,21 @@ export function memoryStoreRoutes(deps: ServerDeps) {
     // SDK's `autoPager()` (`记忆存储.md`), and `会话操作.md` documents the convention — `limit` sets
     // the page size and the `next_page` cursor is handed back as `page`. It previously refused both
     // and answered its whole set.
-    const rejected = rejectUnexpectedQueryParams(c, ['memory_id', 'limit', 'page']);
+    const rejected = rejectUnexpectedQueryParams(c, ['memory_id', 'limit', 'page', 'view', 'operation']);
     if (rejected) return rejected;
     const storeId = c.req.param('id');
     const store = deps.db.prepare('SELECT id FROM memory_stores WHERE id = ? AND archived_at IS NULL').get(storeId);
     if (!store) return notFound(c, 'Memory store not found');
     const memoryId = c.req.query('memory_id');
+    // `operation` is the published filter and uses the published vocabulary —
+    // `modified` is stored as `updated` so existing rows keep their meaning.
+    const operation = c.req.query('operation');
+    if (operation !== undefined && !OFFICIAL_MEMORY_OPERATIONS.has(operation)) {
+      return invalid(c, `operation must be one of: ${[...OFFICIAL_MEMORY_OPERATIONS].join(', ')}`);
+    }
+    const view = parseMemoryView(c, 'basic');
+    if (!view.ok) return view.response;
+    const storedOperation = operation === 'modified' ? 'updated' : operation;
     const rows = (memoryId
       ? deps.db.prepare(
         'SELECT * FROM memory_versions WHERE store_id = ? AND memory_id = ? ORDER BY version DESC',
@@ -334,7 +392,8 @@ export function memoryStoreRoutes(deps: ServerDeps) {
       : deps.db.prepare(
         'SELECT * FROM memory_versions WHERE store_id = ? ORDER BY created_at DESC',
       ).all(storeId)) as unknown as MemoryVersionRow[];
-    const page = memoryVersionsPage(rows.map(toMemoryVersion), {
+    const filtered = storedOperation ? rows.filter((row) => row.change === storedOperation) : rows;
+    const page = memoryVersionsPage(filtered.map((row) => toMemoryVersion(row, view.view)), {
       limit: c.req.query('limit'),
       page: c.req.query('page'),
       memoryId,
@@ -346,13 +405,54 @@ export function memoryStoreRoutes(deps: ServerDeps) {
   });
 
   app.get('/memory_stores/:id/memory_versions/:versionId', (c) => {
+    const rejected = rejectUnexpectedQueryParams(c, ['view']);
+    if (rejected) return rejected;
     const storeId = c.req.param('id');
     const store = deps.db.prepare('SELECT id FROM memory_stores WHERE id = ? AND archived_at IS NULL').get(storeId);
     if (!store) return notFound(c, 'Memory store not found');
     const row = deps.db.prepare(
       'SELECT * FROM memory_versions WHERE id = ? AND store_id = ?',
     ).get(c.req.param('versionId'), storeId) as unknown as MemoryVersionRow | undefined;
-    return row ? c.json(toMemoryVersion(row)) : notFound(c, 'Memory version not found');
+    if (!row) return notFound(c, 'Memory version not found');
+    const view = parseMemoryView(c, 'full');
+    if (!view.ok) return view.response;
+    return c.json(toMemoryVersion(row, view.view));
+  });
+
+  // Redaction clears what a version recorded while keeping the row — the
+  // published contract keeps the version itself listable with its payload
+  // fields nulled and `redacted_at` set. The head version is refused because
+  // redacting it would orphan the memory's current content.
+  app.post('/memory_stores/:id/memory_versions/:versionId/redact', (c) => {
+    const storeId = c.req.param('id');
+    const versionId = c.req.param('versionId');
+    const store = writableStore(c, deps, storeId);
+    if (store instanceof Response) return store;
+    const version = deps.db.prepare(
+      'SELECT * FROM memory_versions WHERE id = ? AND store_id = ?',
+    ).get(versionId, storeId) as unknown as MemoryVersionRow | undefined;
+    if (!version) return notFound(c, 'Memory version not found');
+    const head = deps.db.prepare(
+      'SELECT id FROM memory_versions WHERE store_id = ? AND memory_id = ? ORDER BY version DESC LIMIT 1',
+    ).get(storeId, version.memory_id) as { id: string } | undefined;
+    if (head?.id === versionId) {
+      return c.json(
+        { error: { type: 'conflict_error', code: 'memory_version_is_head', message: 'Cannot redact the memory\'s current version' } },
+        409,
+      );
+    }
+    // Redacting an already-redacted version is a no-op that answers the version
+    // as it now stands — the row is already in its terminal redacted state.
+    if (!version.redacted_at) {
+      deps.db.prepare(
+        `UPDATE memory_versions
+         SET content = NULL, content_sha256 = NULL, content_size_bytes = NULL, path = NULL,
+             redacted_at = datetime('now')
+         WHERE id = ?`,
+      ).run(versionId);
+    }
+    const row = deps.db.prepare('SELECT * FROM memory_versions WHERE id = ?').get(versionId) as unknown as MemoryVersionRow;
+    return c.json(toMemoryVersion(row, 'full'));
   });
 
   return app;
@@ -398,19 +498,32 @@ function recordMemoryVersion(
   );
 }
 
-function toMemoryVersion(row: MemoryVersionRow) {
+const OFFICIAL_MEMORY_OPERATIONS = new Set(['created', 'modified', 'deleted']);
+
+/**
+ * The published `memory_version` object. The stored `change` column keeps its
+ * local vocabulary (`updated`) so existing rows stay meaningful; the projection
+ * emits the published `modified`. A `deleted` version and a redacted version
+ * both null their payload fields; redaction additionally nulls `path`.
+ */
+function toMemoryVersion(row: MemoryVersionRow, view: MemoryView = 'basic') {
+  const redacted = Boolean(row.redacted_at);
+  const deleted = row.change === 'deleted';
   return {
     id: row.id,
     type: 'memory_version',
-    store_id: row.store_id,
     memory_id: row.memory_id,
-    version: row.version,
-    path: row.path,
-    content_sha256: row.content_sha256,
-    content_size_bytes: row.content_size_bytes,
-    change: row.change,
-    session_id: row.session_id,
+    memory_store_id: row.store_id,
+    operation: row.change === 'updated' ? 'modified' : row.change,
     created_at: row.created_at,
+    content: view === 'full' && !redacted && !deleted ? row.content : null,
+    content_sha256: redacted || deleted ? null : row.content_sha256,
+    content_size_bytes: redacted || deleted ? null : row.content_size_bytes,
+    path: redacted ? null : row.path,
+    created_by: row.session_id
+      ? { type: 'session_actor', session_id: row.session_id }
+      : null,
+    redacted_at: row.redacted_at ?? null,
   };
 }
 
@@ -445,31 +558,72 @@ function toMemoryStore(row: MemoryStoreRow, deps?: ServerDeps) {
   };
 }
 
-function listMemories(deps: ServerDeps, storeId: string) {
+function listMemories(deps: ServerDeps, storeId: string, view: MemoryView = 'full') {
   const rows = deps.db.prepare(
     `SELECT *
      FROM memory_records
      WHERE store_id = ? AND archived_at IS NULL
      ORDER BY path ASC`,
   ).all(storeId) as unknown as MemoryRecordRow[];
-  return rows.map(toMemory);
+  return rows.map((row) => toMemory(row, deps, view));
 }
 
-function toMemory(row: MemoryRecordRow) {
+/**
+ * The published `memory` object: `store_id` is `memory_store_id`, the content
+ * digest is `content_sha256`, and `memory_version_id` names the version row
+ * that recorded the current state. `content` is populated only under `view=full`;
+ * the `basic` view still carries the hash and byte size so a client can diff
+ * without fetching content.
+ */
+function toMemory(row: MemoryRecordRow, deps: ServerDeps, view: MemoryView = 'basic') {
   const content = row.content ?? '';
+  const head = deps.db.prepare(
+    'SELECT id FROM memory_versions WHERE store_id = ? AND memory_id = ? ORDER BY version DESC LIMIT 1',
+  ).get(row.store_id, row.id) as { id: string } | undefined;
   return {
     id: row.id,
     type: 'memory',
-    store_id: row.store_id,
+    memory_store_id: row.store_id,
+    memory_version_id: head?.id ?? null,
     path: row.path,
-    content,
-    content_size_bytes: Buffer.byteLength(content, 'utf8'),
-    content_hash: createHash('sha256').update(content, 'utf8').digest('hex'),
-    metadata: parseObject(row.metadata),
+    content: view === 'full' ? content : null,
+    content_sha256: memoryContentHash(content),
+    content_size_bytes: memoryContentBytes(content),
     created_at: row.created_at,
     updated_at: row.updated_at,
-    archived_at: row.archived_at ?? null,
   };
+}
+
+type MemoryView = 'basic' | 'full';
+
+/** `view` accepts only the published pair; anything else is a 400. */
+function parseMemoryView(c: any, fallback: MemoryView): { ok: true; view: MemoryView } | { ok: false; response: Response } {
+  const raw = c.req.query('view');
+  if (raw === undefined) return { ok: true, view: fallback };
+  if (raw === 'basic' || raw === 'full') return { ok: true, view: raw };
+  return { ok: false, response: invalid(c, "view must be 'basic' or 'full'") };
+}
+
+/**
+ * The published path-conflict error: the write refused because another memory
+ * already holds the requested path. The blocking memory's id is included when
+ * it can be identified.
+ */
+function memoryPathConflict(c: any, deps: ServerDeps, storeId: string, path: string, excludeMemoryId?: string) {
+  const blocker = deps.db.prepare(
+    'SELECT id FROM memory_records WHERE store_id = ? AND path = ? AND archived_at IS NULL',
+  ).get(storeId, path) as { id: string } | undefined;
+  return c.json(
+    {
+      error: {
+        type: 'memory_path_conflict_error',
+        message: `Memory already exists at path: ${path}`,
+        conflicting_path: path,
+        conflicting_memory_id: blocker && blocker.id !== excludeMemoryId ? blocker.id : '',
+      },
+    },
+    409,
+  );
 }
 
 /**
@@ -547,13 +701,14 @@ interface MemoryVersionRow {
   store_id: string;
   memory_id: string;
   version: number;
-  path: string;
-  content: string;
-  content_sha256: string;
-  content_size_bytes: number;
+  path: string | null;
+  content: string | null;
+  content_sha256: string | null;
+  content_size_bytes: number | null;
   change: string;
   session_id: string | null;
   created_at: string;
+  redacted_at: string | null;
 }
 
 interface MemoryRecordRow {

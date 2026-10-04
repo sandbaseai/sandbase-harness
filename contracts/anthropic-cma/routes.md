@@ -102,9 +102,12 @@ every row is mounted, and every mounted route has a row.
 | GET | `/v1/memory_stores/{id}/memories` | `src/api/routes/memory-stores.ts` |
 | POST | `/v1/memory_stores/{id}/memories` | `src/api/routes/memory-stores.ts` |
 | DELETE | `/v1/memory_stores/{id}/memories/{memoryId}` | `src/api/routes/memory-stores.ts` |
+| GET | `/v1/memory_stores/{id}/memories/{memoryId}` | `src/api/routes/memory-stores.ts` |
+| POST | `/v1/memory_stores/{id}/memories/{memoryId}` | `src/api/routes/memory-stores.ts` |
 | PUT | `/v1/memory_stores/{id}/memories/{memoryId}` | `src/api/routes/memory-stores.ts` |
 | GET | `/v1/memory_stores/{id}/memory_versions` | `src/api/routes/memory-stores.ts` |
 | GET | `/v1/memory_stores/{id}/memory_versions/{versionId}` | `src/api/routes/memory-stores.ts` |
+| POST | `/v1/memory_stores/{id}/memory_versions/{versionId}/redact` | `src/api/routes/memory-stores.ts` |
 | GET | `/v1/outcomes` | `src/api/routes/operations.ts` |
 | POST | `/v1/outcomes` | `src/api/routes/operations.ts` |
 | GET | `/v1/outcomes/{id}` | `src/api/routes/operations.ts` |

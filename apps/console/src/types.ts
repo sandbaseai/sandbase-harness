@@ -253,15 +253,14 @@ export type MemoryStore = {
 export type MemoryRecord = {
   id: string;
   type: 'memory';
-  store_id: string;
+  memory_store_id: string;
+  memory_version_id: string | null;
   path: string;
-  content: string;
+  content: string | null;
   content_size_bytes: number;
-  content_hash: string;
-  metadata: Record<string, unknown>;
+  content_sha256: string;
   created_at: string;
   updated_at: string;
-  archived_at: string | null;
 };
 
 export type Skill = {

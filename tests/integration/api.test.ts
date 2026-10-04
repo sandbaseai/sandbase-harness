@@ -2857,7 +2857,7 @@ description: Uploaded from a compressed package.
         content: 'duplicate',
       });
       expect(duplicate.res.status).toBe(409);
-      expect(duplicate.body.error.type).toBe('conflict');
+      expect(duplicate.body.error.type).toBe('memory_path_conflict_error');
 
       const detailRes = await app.request(`/v1/memory_stores/${store.id}`);
       expect(detailRes.status).toBe(200);
@@ -2906,7 +2906,7 @@ description: Uploaded from a compressed package.
       expect(store.memory_count).toBe(0);
       expect(store.memories).toEqual([]);
 
-      const memoryRes = await app.request(`/v1/memory_stores/${store.id}/memories`, {
+      const memoryRes = await app.request(`/v1/memory_stores/${store.id}/memories?view=full`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2922,7 +2922,7 @@ description: Uploaded from a compressed package.
       expect(memory.path).toBe('/note/d');
       expect(memory.content).toBe('ddd');
 
-      const updateRes = await app.request(`/v1/memory_stores/${store.id}/memories/${memory.id}`, {
+      const updateRes = await app.request(`/v1/memory_stores/${store.id}/memories/${memory.id}?view=full`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: 'updated' }),
@@ -2938,9 +2938,9 @@ description: Uploaded from a compressed package.
 
       const deleteRes = await app.request(`/v1/memory_stores/${store.id}/memories/${memory.id}`, { method: 'DELETE' });
       expect(deleteRes.status).toBe(200);
-      expect((await deleteRes.json()).deleted).toBe(true);
+      expect((await deleteRes.json()).type).toBe('memory_deleted');
 
-      const recreateRes = await app.request(`/v1/memory_stores/${store.id}/memories`, {
+      const recreateRes = await app.request(`/v1/memory_stores/${store.id}/memories?view=full`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

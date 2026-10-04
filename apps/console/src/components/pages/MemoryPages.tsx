@@ -1,6 +1,6 @@
 import { Check, ChevronDown, Database, FileText, Pencil, Plus, X } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { putJson } from '../../api';
+import { postJson } from '../../api';
 import { EmptyState, FilterSelect, StatusPill, SummaryStrip, Toolbar } from '../Common';
 import { formatBytes, formatDateShort, shortId, truncateMiddle } from '../../lib/format';
 import type { ConsoleData, MemoryRecord, MemoryStore } from '../../types';
@@ -142,7 +142,7 @@ export function MemoryStoreDetail({
 
   const save = async () => {
     if (!selected) return;
-    await putJson(`/v1/memory_stores/${store.id}/memories/${selected.id}`, { content });
+    await postJson(`/v1/memory_stores/${store.id}/memories/${selected.id}`, { content });
     setEditing(false);
     onRefresh();
   };
@@ -191,13 +191,13 @@ export function MemoryStoreDetail({
                   <h2>{selected.path}</h2>
                   <p>
                     <span className="monoText">{shortId(selected.id)}</span>
-                    {' '}· {selected.content_size_bytes} B · sha256:{truncateMiddle(selected.content_hash, 18)}
+                    {' '}· {selected.content_size_bytes} B · sha256:{truncateMiddle(selected.content_sha256, 18)}
                     {' '}· Updated {formatDateShort(selected.updated_at)}
                   </p>
                 </div>
                 {editing ? (
                   <div className="toolbarActions">
-                    <button className="secondaryButton" type="button" onClick={() => { setEditing(false); setContent(selected.content); }}><X size={16} />Cancel</button>
+                    <button className="secondaryButton" type="button" onClick={() => { setEditing(false); setContent(selected.content ?? ''); }}><X size={16} />Cancel</button>
                     <button className="primaryButton" type="button" onClick={() => void save()}><Check size={16} />Save</button>
                   </div>
                 ) : (

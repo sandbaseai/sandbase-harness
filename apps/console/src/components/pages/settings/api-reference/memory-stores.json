@@ -169,12 +169,29 @@
     "title": "List memories",
     "method": "GET",
     "path": "/v1/memory_stores/{memory_store_id}/memories",
-    "summary": "List persistent memory entries in a store.",
+    "summary": "List memories in a store. view=basic (default) returns each memory with content null while content_sha256 and content_size_bytes stay populated; view=full embeds content.",
     "response": [
       {
         "name": "data",
         "type": "Memory[]",
-        "description": "Memory entries ordered by path."
+        "description": "Published memory objects (id, memory_store_id, memory_version_id, path, content, content_sha256, content_size_bytes, timestamps)."
+      }
+    ],
+    "parameters": [
+      {
+        "name": "path_prefix",
+        "type": "string",
+        "description": "Optional. Absolute path ending in /; matching is segment-based."
+      },
+      {
+        "name": "depth",
+        "type": "number",
+        "description": "Optional. 0 lists the whole subtree, 1 lists only direct children."
+      },
+      {
+        "name": "view",
+        "type": "string",
+        "description": "Optional. basic (default) or full."
       }
     ]
   },
@@ -184,24 +201,24 @@
     "title": "Create memory",
     "method": "POST",
     "path": "/v1/memory_stores/{memory_store_id}/memories",
-    "summary": "Write a persistent memory entry into a mounted store. Memory paths are slash-prefixed and rendered as a tree in the Console.",
+    "summary": "Create a memory at a path inside the store. A path already held by another memory is a 409 memory_path_conflict_error. The response uses view=basic unless view=full is passed.",
     "parameters": [
       {
         "name": "path",
         "type": "string",
         "required": true,
-        "description": "Absolute memory path, such as /notes/release."
+        "description": "Absolute memory path, e.g. /notes/release."
       },
       {
         "name": "content",
         "type": "string",
         "required": true,
-        "description": "Memory text content."
+        "description": "UTF-8 content, max 100 kB."
       },
       {
-        "name": "metadata",
-        "type": "object",
-        "description": "Optional bookkeeping tags."
+        "name": "view",
+        "type": "string",
+        "description": "Optional query param. basic (default) or full."
       }
     ],
     "response": [
@@ -223,27 +240,54 @@
     ]
   },
   {
+    "id": "memory-get",
+    "group": "Memory stores",
+    "title": "Get memory",
+    "method": "GET",
+    "path": "/v1/memory_stores/{memory_store_id}/memories/{memory_id}",
+    "summary": "Retrieve a memory. view defaults to full so content is embedded unless view=basic is passed.",
+    "parameters": [
+      {
+        "name": "view",
+        "type": "string",
+        "description": "Optional query param. full (default) or basic."
+      }
+    ],
+    "response": [
+      {
+        "name": "memory",
+        "type": "object",
+        "description": "The published memory object."
+      }
+    ]
+  },
+  {
     "id": "memory-update",
     "group": "Memory stores",
     "title": "Update memory",
-    "method": "PUT",
+    "method": "POST",
     "path": "/v1/memory_stores/{memory_store_id}/memories/{memory_id}",
-    "summary": "Update a memory entry content, path, or metadata.",
+    "summary": "Update a memory by id. POST is the published verb; PUT is a deprecated alias. A content_sha256 precondition mismatch is a 409 memory_precondition_failed_error carrying current_content_sha256, unless the stored state already equals the requested content and path.",
     "parameters": [
       {
         "name": "path",
         "type": "string",
-        "description": "New absolute memory path."
+        "description": "New path."
       },
       {
         "name": "content",
         "type": "string",
-        "description": "Updated memory text."
+        "description": "New content."
       },
       {
-        "name": "metadata",
+        "name": "precondition",
         "type": "object",
-        "description": "Updated tags."
+        "description": "Optional {type: content_sha256, content_sha256} optimistic-concurrency check."
+      },
+      {
+        "name": "view",
+        "type": "string",
+        "description": "Optional query param. basic (default) or full."
       }
     ],
     "response": [
@@ -260,22 +304,45 @@
     ]
   },
   {
+    "id": "memory-update-put",
+    "group": "Memory stores",
+    "title": "Update memory (deprecated PUT alias)",
+    "method": "PUT",
+    "path": "/v1/memory_stores/{memory_store_id}/memories/{memory_id}",
+    "summary": "Deprecated alias of POST /v1/memory_stores/{memory_store_id}/memories/{memory_id} with identical semantics. Use POST.",
+    "parameters": [],
+    "response": [
+      {
+        "name": "memory",
+        "type": "object",
+        "description": "The updated memory."
+      }
+    ]
+  },
+  {
     "id": "memory-delete",
     "group": "Memory stores",
     "title": "Delete memory",
     "method": "DELETE",
     "path": "/v1/memory_stores/{memory_store_id}/memories/{memory_id}",
-    "summary": "Archive one memory entry.",
+    "summary": "Delete a memory. Optional expected_content_sha256 query param refuses a delete when the hash no longer matches, with 409 memory_precondition_failed_error. Returns {id, type: \"memory_deleted\"}.",
     "response": [
       {
         "name": "id",
         "type": "string",
-        "description": "Memory identifier."
+        "description": "Deleted memory id."
       },
       {
-        "name": "memory",
-        "type": "object",
-        "description": "Created or updated memory resource."
+        "name": "type",
+        "type": "string",
+        "description": "memory_deleted"
+      }
+    ],
+    "parameters": [
+      {
+        "name": "expected_content_sha256",
+        "type": "string",
+        "description": "Optional query param. Delete only if the current hash matches."
       }
     ]
   },
@@ -305,12 +372,32 @@
     "title": "List memory versions",
     "method": "GET",
     "path": "/v1/memory_stores/{memory_store_id}/memory_versions",
-    "summary": "List the recorded versions of the memories in a store, newest first. Pass memory_id to read the history of one memory alone. A memory is overwritten in place, so without these rows nothing could say what a path held before or attribute a change to the session that made it.",
+    "summary": "List recorded versions of a store, newest first. operation filters by created|modified|deleted; view=basic (default) nulls content while content_sha256 and content_size_bytes stay populated.",
     "parameters": [
       {
         "name": "memory_id",
         "type": "string",
-        "description": "Optional. Restricts the listing to the version history of one memory."
+        "description": "Optional. Restrict the listing to one memory."
+      },
+      {
+        "name": "operation",
+        "type": "string",
+        "description": "Optional. created, modified, or deleted."
+      },
+      {
+        "name": "view",
+        "type": "string",
+        "description": "Optional. basic (default) or full."
+      },
+      {
+        "name": "limit",
+        "type": "number",
+        "description": "Optional page size (1-100, default 20)."
+      },
+      {
+        "name": "page",
+        "type": "string",
+        "description": "Optional cursor from a previous page."
       }
     ],
     "response": [
@@ -327,7 +414,7 @@
     "title": "Get a memory version",
     "method": "GET",
     "path": "/v1/memory_stores/{memory_store_id}/memory_versions/{version_id}",
-    "summary": "Read one recorded version by its own memver_ id.",
+    "summary": "Retrieve one recorded version. view defaults to full; a redacted or deleted version answers null payload fields.",
     "response": [
       {
         "name": "id",
@@ -348,6 +435,22 @@
         "name": "change",
         "type": "string",
         "description": "created, updated, or deleted."
+      }
+    ]
+  },
+  {
+    "id": "memory-version-redact",
+    "group": "Memory stores",
+    "title": "Redact memory version",
+    "method": "POST",
+    "path": "/v1/memory_stores/{memory_store_id}/memory_versions/{version_id}/redact",
+    "summary": "Clear a version payload: content, path, content_sha256, and content_size_bytes become null and redacted_at is set, while the row stays listable. The memory head version is refused with 409 memory_version_is_head.",
+    "parameters": [],
+    "response": [
+      {
+        "name": "memory_version",
+        "type": "object",
+        "description": "The redacted memory_version."
       }
     ]
   }

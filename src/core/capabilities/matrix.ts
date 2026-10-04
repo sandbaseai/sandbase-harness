@@ -272,7 +272,7 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
     area: 'memory-stores',
     id: 'memory-crud',
     status: 'supported',
-    reason: 'Memory stores and memories support create, read, update, delete, and list with path and depth scoping.',
+    reason: 'Memory stores and memories support create, read, update, delete, and list with path and depth scoping. The published object fields (memory_store_id, content_sha256, memory_version_id) and view projections are emitted.',
     contract: 'contracts/anthropic-cma/memory-stores.md',
   },
   {
@@ -286,7 +286,7 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
     area: 'memory-stores',
     id: 'memory-version-audit',
     status: 'supported',
-    reason: 'Each write records a memory version that can be listed and read afterwards.',
+    reason: 'Each write records a memory version that can be listed and read afterwards, and a non-head version can be redacted.',
     contract: 'contracts/anthropic-cma/memory-stores.md',
   },
   {

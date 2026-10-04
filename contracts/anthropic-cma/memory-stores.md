@@ -105,11 +105,31 @@ Store lifecycle:
   differently. The single-resource read keeps its `404` for an archived store;
   `include_archived` on the listing remains the read path for it.
 
+Memory resource shape:
+
+- A memory projects the published fields: `id`, `type: "memory"`,
+  `memory_store_id`, `memory_version_id` (the version row that recorded the
+  current state), `path`, `content`, `content_sha256`, `content_size_bytes`,
+  `created_at`, `updated_at`. `content` is populated under `view=full` and is
+  `null` under `view=basic`; the default is `basic` on list, create, and
+  update, and `full` on retrieve — matching the published view defaults.
+- `GET /memory_stores/:id/memories/:memoryId` retrieves one memory, `POST` is
+  the published update verb (`PUT` remains a deprecated alias running the same
+  semantics), and `DELETE` answers `{id, type: "memory_deleted"}` with an
+  optional `expected_content_sha256` query precondition.
+- A path collision — on create or on a rename — is a `409`
+  `memory_path_conflict_error` naming `conflicting_path` and, when the
+  blocking memory can be identified, `conflicting_memory_id`.
+
 Preconditions:
 
 - A write may carry a `content_sha256` precondition. A mismatch returns 409
-  `precondition_failed` with the current hash, so the caller can retry against
-  the real state instead of guessing.
+  `memory_precondition_failed_error` (code `precondition_failed`) with the
+  current hash, so the caller can retry against the real state instead of
+  guessing — unless the stored state already equals the requested `content`
+  and `path`, which the published contract answers with the memory itself.
+- A malformed precondition — a non-object, an unknown `type`, or a missing
+  hash — is a `400` `invalid_request_error` with code `invalid_precondition`.
 - The hash is computed over UTF-8 bytes, matching what `memoryContentBytes`
   measures for the size limit, so the two checks cannot disagree.
 
@@ -148,7 +168,18 @@ write that already happened.
 Audit:
 
 - Every memory write records a row in `memory_versions`, listable per store and
-  readable per version.
+  readable per version. The projected object emits the published vocabulary —
+  `operation` is `created`, `modified`, or `deleted` (the stored `updated` kind
+  projects as `modified`) — plus `created_by` (a `session_actor` when a mounted
+  session wrote the version) and `redacted_at`.
+- `POST /memory_stores/:id/memory_versions/:versionId/redact` clears a
+  version's recorded payload (`content`, `path`, `content_sha256`, and
+  `content_size_bytes` all become `null`) and sets `redacted_at`, while the row
+  stays listable. A `deleted` version projects the same null payload fields but
+  keeps its `path`. The memory's head version is refused with `409`
+  `memory_version_is_head`, because redacting it would orphan the memory's
+  current content; redacting an already-redacted version is a no-op answering
+  the version as it stands.
 
 Mounting:
 
@@ -162,25 +193,29 @@ Mounting:
 ## 3. Alignment
 
 Aligned for: all four published limits, `access` default and values, the
-`path_prefix` requirement, `depth` values, `content_sha256` preconditions, and
-per-write version auditing.
+`path_prefix` requirement, `depth` values, `content_sha256` preconditions with
+the published error type, the published memory and memory-version object
+shapes, the `view` projections and their per-endpoint defaults, the published
+update and delete verbs and tombstones, version redaction, and per-write
+version auditing.
 
 ## 4. Differences
 
 | Difference | Detail |
 | --- | --- |
-| Precondition status | A mismatch is a 409 `precondition_failed`. The published contract states the precondition concept without fixing the status pairing. |
 | Version retention | SandBase records versions in its own table. The published contract requires auditability without fixing a storage shape. |
 | Slug fallback | A store name with no alphanumeric characters mounts at `/mnt/memory/memory/`. The published contract documents the slug rule but not this edge case. |
+| Error extensions | `memory_precondition_failed_error` carries `current_content_sha256` and a `precondition_failed` code beyond the published fields, so a caller can retry without a re-read. |
+| Actor attribution | `created_by` is `null` for API writes because the local runtime does not record per-key actor ids; session writes carry a `session_actor`. |
 
 ## 5. Reason for the difference
 
-- 409 was chosen over 400 because the request was well-formed; the stored state
-  had moved. A 400 would tell the caller to fix their request, which is the
-  wrong next action.
 - The slug fallback exists so a store with a punctuation-only name still mounts
   somewhere predictable rather than at `/mnt/memory//`, which would be an
   invalid path.
+- `current_content_sha256` travels inside the published error envelope rather
+  than forcing a re-read: the published type is kept and the hash is an
+  extension field, so an SDK decoder still sees the documented shape.
 
 ## 6. Corresponding tests
 
@@ -213,6 +248,17 @@ per-write version auditing.
 - `tests/conformance/memory-store-update-delete.test.ts` — the official SDK's
   `memoryStores.update` / `.delete` driven against a live runtime, including
   the archived-store refusal as a `ConflictError`.
+- `tests/integration/memory-official-shape.test.ts` — the published object key
+  set, `view` defaults and projections, the `POST` update verb with its `PUT`
+  alias, `memory_precondition_failed_error` semantics including the
+  matching-write 200, `expected_content_sha256` on delete, the
+  `memory_path_conflict_error` fields, the published version vocabulary, and
+  non-head versus head redaction.
+- `tests/conformance/memory-official-shape.test.ts` — the official SDK's
+  `memories.create/.retrieve/.update/.delete` and
+  `memoryVersions.list/.redact` driven against a live runtime: the stale-hash
+  retry surfaces as `ConflictError`, the head-version redact is refused, and
+  the non-head redact nulls the recorded payload.
 - `tests/integration/collection-pagination.test.ts` — the published `limit`/`page`
   window on this listing and the vault listing together: the default page of 20,
   a walk that partitions the collection exactly once, `prev_page` returning the

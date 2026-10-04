@@ -1670,10 +1670,19 @@ that already exists is refused by a unique index rather than overwriting the
 first. Numbering is per memory, so two memories in one store do not share a
 sequence. The live memory row is unchanged by reading a version.
 
-| Method | Path | Purpose |
-| --- | --- | --- |
-| `GET` | `/v1/memory_stores/{memory_store_id}/memory_versions` | List recorded versions, newest first. |
-| `GET` | `/v1/memory_stores/{memory_store_id}/memory_versions/{version_id}` | Read one recorded version. |
+The projected object is the published `memory_version`: `operation` is
+`created`, `modified`, or `deleted` (the stored `updated` kind is emitted as
+`modified`), the writer shows as `created_by` (a `session_actor` when a mounted
+session wrote it), and `content`, `content_sha256`, and `content_size_bytes`
+are null on a `deleted` version and under `view=basic`. `view` defaults to
+`basic` on the listing and `full` on a retrieve.
+
+`POST .../memory_versions/{version_id}/redact` clears a version's payload —
+`content`, `path`, `content_sha256`, and `content_size_bytes` become null and
+`redacted_at` is set — while the row itself stays listable. The memory's head
+version is refused with `409` `memory_version_is_head`, because redacting it
+would orphan the memory's current content; redacting an already-redacted
+version answers the version as it stands.
 
 Pass `memory_id` to the listing to read the history of one memory alone. The
 recorded content hash is the same digest the store's precondition checks use, so
@@ -2309,11 +2318,26 @@ A write may carry a precondition:
 }
 ```
 
-The write is refused with `409 conflict` and code `precondition_failed` when the
-stored content no longer matches, and the refusal carries
-`current_content_sha256` so a caller can retry without a separate re-read. An
-unknown precondition type, and a precondition with no hash, are each refused with
-code `invalid_precondition` rather than treated as a no-op.
+The write is refused with `409` and error type `memory_precondition_failed_error`
+(code `precondition_failed`) when the stored content no longer matches, and the
+refusal carries `current_content_sha256` so a caller can retry without a
+separate re-read. When the stored state already equals the requested `content`
+and `path` exactly, a failed precondition answers `200` with the memory instead
+of `409`. An unknown precondition type, and a precondition with no hash, are
+each refused with `400` code `invalid_precondition` rather than treated as a
+no-op. A create or update that collides with an existing path is refused with
+`409` `memory_path_conflict_error`, naming `conflicting_path` and
+`conflicting_memory_id` when the blocking memory can be identified.
+
+`DELETE .../memories/{memory_id}` accepts an optional
+`expected_content_sha256` query parameter: when it does not match the memory's
+current hash the delete is refused with `409`
+`memory_precondition_failed_error` and nothing is deleted.
+
+Every memory read takes `view`: `basic` (the default on list, create, and
+update) returns the object with `content: null` while `content_sha256` and
+`content_size_bytes` stay populated, and `full` (the default on retrieve)
+populates `content`. Any other `view` value is a `400`.
 
 ## Memory Stores
 
@@ -2356,10 +2380,14 @@ than a `404` — while archiving itself remains terminal.
 | `POST` | `/v1/memory_stores/{store_id}` | Update a memory store with patch semantics (`PUT` is a deprecated alias). |
 | `DELETE` | `/v1/memory_stores/{store_id}` | Delete a memory store and its contents. Returns `{id, type: "memory_store_deleted"}`. |
 | `POST` | `/v1/memory_stores/{store_id}/archive` | Archive a memory store. |
-| `GET` | `/v1/memory_stores/{store_id}/memories` | List memories. |
+| `GET` | `/v1/memory_stores/{store_id}/memories` | List memories (`path_prefix`, `depth`, `view`). |
 | `POST` | `/v1/memory_stores/{store_id}/memories` | Add a memory. |
-| `PUT` | `/v1/memory_stores/{store_id}/memories/{memory_id}` | Update a memory. |
-| `DELETE` | `/v1/memory_stores/{store_id}/memories/{memory_id}` | Delete a memory. |
+| `GET` | `/v1/memory_stores/{store_id}/memories/{memory_id}` | Retrieve a memory (`view` defaults to `full`). |
+| `POST` | `/v1/memory_stores/{store_id}/memories/{memory_id}` | Update a memory (`PUT` is a deprecated alias). |
+| `DELETE` | `/v1/memory_stores/{store_id}/memories/{memory_id}` | Delete a memory. Returns `{id, type: "memory_deleted"}`. |
+| `GET` | `/v1/memory_stores/{store_id}/memory_versions` | List memory versions (`memory_id`, `operation`, `view`, `limit`, `page`). |
+| `GET` | `/v1/memory_stores/{store_id}/memory_versions/{version_id}` | Retrieve a memory version (`view` defaults to `full`). |
+| `POST` | `/v1/memory_stores/{store_id}/memory_versions/{version_id}/redact` | Redact a non-head memory version. |
 
 Create a memory:
 

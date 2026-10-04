@@ -50,7 +50,7 @@ that every Claude hosted capability exists locally.
 | Vault credentials | `/v1/credential-vaults/{id}/credentials` | Supported | Create/list/archive/delete credentials with secret redaction, replace a stored secret by rotation, and mark one used. A write accepts the canonical nested `auth` object or the flat legacy spelling, and a read carries the canonical `display_name` / `auth` projection beside the local fields. There is no update route: structural fields are locked after creation, so changing one means archiving the credential and creating a new one. |
 | Credential audit | `/v1/credential-vaults/{id}/audit` and `/v1/credential-vaults/{id}/credentials/{credential_id}/audit` | Supported | Lists rotation, use, injection and denial events at vault or credential scope, newest first, without secret material; the trail survives deletion. |
 | Memory stores | `/v1/memory_stores` | Supported | Create/list/retrieve/update/archive/delete stores. |
-| Memory records | `/v1/memory_stores/{id}/memories` | Supported | Create/list/update/delete memory records with size/hash metadata. Content is capped at 100 kB measured in bytes, a store holds at most 10,000 memories, `path_prefix` and `depth` scope a list, and a `content_sha256` precondition refuses a stale write and reports the current hash. |
+| Memory records | `/v1/memory_stores/{id}/memories` | Supported | Create/list/retrieve/update/delete memory records under the published object shape (`memory_store_id`, `content_sha256`, `memory_version_id`). Content is capped at 100 kB measured in bytes, a store holds at most 10,000 memories, `path_prefix` and `depth` scope a list, `view` selects the `basic`/`full` projection with the published per-endpoint default, a `content_sha256` precondition refuses a stale write with `memory_precondition_failed_error` and reports the current hash, a path collision is a `memory_path_conflict_error`, delete answers `{id, type: "memory_deleted"}` and accepts `expected_content_sha256`, and `POST` is the published update verb with `PUT` as a deprecated alias. Versions list by `memory_id`/`operation`/`view` and a non-head version can be redacted (`memory_version_is_head` refuses the head). |
 | Session memory mounts | Session creation `resources[]` | Supported | Mount up to eight memory stores at whole-segment paths; file tools persist mounted reads/writes through `memory_records`, read-only mounts reject writes, and existing-file updates require a content precondition. |
 | Skills | `/v1/skills` | Supported | List built-in/custom skills and upload validated custom ZIPs. |
 | API keys | `/v1/api-keys` | Supported | List/create/delete managed keys; config/env keys are read-only. |
@@ -97,7 +97,7 @@ organization administration are excluded from this managed-agent inventory.
 Unrecognized SDK request syntax fails rather than silently losing routes.
 
 Verified on October 2, 2026 with SDK `0.129.0`: 110 distinct method/path pairs,
-56 existing resource mounts, 29 explicit refusals, and 25 exact deferred mounts.
+59 existing resource mounts, 29 explicit refusals, and 22 exact deferred mounts.
 The deferrals (including multi-agent threads) are tracked in
 [issue #706](https://github.com/sandbaseai/sandbase-harness/issues/706) and in
 `PENDING_OFFICIAL_ROUTES`. Each entry has a reason and follow-up; stale,

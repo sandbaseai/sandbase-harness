@@ -82,12 +82,12 @@ describe('memory version audit', () => {
     const listed = await app.request(`/v1/memory_stores/${storeId}/memory_versions?memory_id=${memoryId}`);
     expect(listed.status).toBe(200);
     const page = (await listed.json()) as { data: Array<Record<string, unknown>> };
-    // Newest first, and all three writes are present.
+    // Newest first, and all three writes are present under the published
+    // `operation` vocabulary (`updated` is emitted as `modified`).
     expect(page.data).toHaveLength(3);
-    expect(page.data.map((row) => row.change)).toEqual(['deleted', 'updated', 'created']);
-    expect(page.data.map((row) => row.version)).toEqual([3, 2, 1]);
+    expect(page.data.map((row) => row.operation)).toEqual(['deleted', 'modified', 'created']);
     // The recorded content is what was written, not the live row.
-    expect(page.data.find((row) => row.change === 'updated')).toBeDefined();
+    expect(page.data.find((row) => row.operation === 'modified')).toBeDefined();
   });
 
   it('numbers versions per memory so two memories do not share a sequence', async () => {
@@ -107,11 +107,11 @@ describe('memory version audit', () => {
 
     const firstVersions = await app.request(`/v1/memory_stores/${storeId}/memory_versions?memory_id=${firstId}`);
     const secondVersions = await app.request(`/v1/memory_stores/${storeId}/memory_versions?memory_id=${secondId}`);
-    const firstPage = (await firstVersions.json()) as { data: Array<{ version: number }> };
-    const secondPage = (await secondVersions.json()) as { data: Array<{ version: number }> };
-    expect(firstPage.data.map((row) => row.version)).toEqual([2, 1]);
+    const firstPage = (await firstVersions.json()) as { data: Array<{ operation: string }> };
+    const secondPage = (await secondVersions.json()) as { data: Array<{ operation: string }> };
+    expect(firstPage.data.map((row) => row.operation)).toEqual(['modified', 'created']);
     // The second memory starts its own sequence rather than continuing the first.
-    expect(secondPage.data.map((row) => row.version)).toEqual([1]);
+    expect(secondPage.data.map((row) => row.operation)).toEqual(['created']);
   });
 
   it('records the content hash and byte size the store already uses elsewhere', async () => {

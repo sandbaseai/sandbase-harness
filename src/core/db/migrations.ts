@@ -1082,6 +1082,46 @@ const M049_SESSION_ARCHIVED_AT = `
 ALTER TABLE sessions ADD COLUMN archived_at TEXT;
 `;
 
+/**
+ * Version redaction needs nullable content columns (`content`, `content_sha256`,
+ * `content_size_bytes`, `path` all clear to NULL when a version is redacted) and
+ * a `redacted_at` timestamp. SQLite cannot relax a column constraint in place,
+ * so the table is rebuilt, matching the M009 memory-records rebuild.
+ */
+const M050_MEMORY_VERSION_REDACTION = `
+CREATE TABLE memory_versions_next (
+  id TEXT PRIMARY KEY,
+  store_id TEXT NOT NULL,
+  memory_id TEXT NOT NULL,
+  version INTEGER NOT NULL,
+  path TEXT,
+  content TEXT,
+  content_sha256 TEXT,
+  content_size_bytes INTEGER,
+  change TEXT NOT NULL,
+  session_id TEXT,
+  created_at TEXT NOT NULL,
+  redacted_at TEXT,
+  FOREIGN KEY (store_id) REFERENCES memory_stores(id)
+);
+
+INSERT INTO memory_versions_next (
+  id, store_id, memory_id, version, path, content, content_sha256,
+  content_size_bytes, change, session_id, created_at
+)
+SELECT id, store_id, memory_id, version, path, content, content_sha256,
+  content_size_bytes, change, session_id, created_at
+FROM memory_versions;
+
+DROP TABLE memory_versions;
+ALTER TABLE memory_versions_next RENAME TO memory_versions;
+
+CREATE INDEX idx_memory_versions_memory
+  ON memory_versions(store_id, memory_id, version DESC);
+CREATE UNIQUE INDEX idx_memory_versions_unique
+  ON memory_versions(store_id, memory_id, version);
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: '001_initial', sql: M001_INITIAL },
   { version: 2, name: '002_memory', sql: M002_MEMORY },
@@ -1132,4 +1172,5 @@ export const MIGRATIONS: Migration[] = [
   { version: 47, name: '047_work_item_abandon', sql: M047_WORK_ITEM_ABANDON },
   { version: 48, name: '048_work_item_status_vocabulary', sql: M048_WORK_ITEM_STATUS_VOCABULARY },
   { version: 49, name: '049_session_archived_at', sql: M049_SESSION_ARCHIVED_AT },
+  { version: 50, name: '050_memory_version_redaction', sql: M050_MEMORY_VERSION_REDACTION },
 ];

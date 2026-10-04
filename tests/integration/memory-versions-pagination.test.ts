@@ -90,23 +90,23 @@ describe('memory version history pagination', () => {
     );
     expect(second.status).toBe(200);
     expect(second.body.data.length).toBe(1);
-    expect(second.body.data[0].version).not.toBe(first.body.data[0].version);
+    expect(second.body.data[0].id).not.toBe(first.body.data[0].id);
     // A caller that walked forward can walk back.
     expect(second.body.prev_page).not.toBeNull();
 
     // Walking the history through cursors reaches all three versions, newest first, each exactly once.
-    const seen: number[] = [];
+    const seen: string[] = [];
     let cursor: string | null = null;
     for (let step = 0; step < 6; step++) {
       const page = await json(
         `/v1/memory_stores/${storeId}/memory_versions?memory_id=${memoryId}&limit=1${cursor ? `&page=${encodeURIComponent(cursor)}` : ''}`,
       );
       expect(page.status).toBe(200);
-      seen.push(page.body.data[0].version as number);
+      seen.push(page.body.data[0].operation as string);
       cursor = page.body.next_page;
       if (!cursor) break;
     }
-    expect(seen).toEqual([3, 2, 1]);
+    expect(seen).toEqual(['deleted', 'modified', 'created']);
   });
 
   it('keeps the memory filter inside the cursor, so a cursor cannot address another memory', async () => {
@@ -151,7 +151,7 @@ describe('memory version history pagination', () => {
     const { status, body } = await json(`/v1/memory_stores/${storeId}/memory_versions?memory_id=${memoryId}`);
     expect(status).toBe(200);
     // The default page size is 20, so three versions are one complete page.
-    expect(body.data.map((row: any) => row.change)).toEqual(['deleted', 'updated', 'created']);
+    expect(body.data.map((row: any) => row.operation)).toEqual(['deleted', 'modified', 'created']);
     expect(body.next_page).toBeNull();
     expect(body.prev_page).toBeNull();
   });
