@@ -16,13 +16,32 @@
 Memory、凭证、审计日志、事件回放和可视化 Console 放在同一个运行时边界中，
 并提供原生 DeepSeek Harness stdio MCP 插件。
 
-> 正在使用 DeepSeek Harness 构建 Agent？可查看独立的 [DeepSeek Harness Handbook](https://github.com/sandbaseai/deepseek-harness-handbook)，其中包含有来源依据的运行时指南、多语言故障排查，以及持续更新的 [Agent-first 资源地图](https://sandbaseai.github.io/deepseek-harness-handbook/awesome-deepseek-harness-resources.html)。
-
 ![SandBase Harness 架构](docs/assets/sandbase-harness-architecture.svg)
 
-> 当前稳定版本：[v0.3.8](https://github.com/sandbaseai/sandbase-harness/releases/tag/v0.3.8)
+## 为什么需要它
 
-MCP Bridge 容器镜像：[GitHub Container Registry](https://github.com/orgs/sandbaseai/packages/container/package/sandbase-harness-mcp)。
+模型 SDK 负责调用模型，但生产 Agent 还需要解决另一组问题：会话和产物如何
+持久化、工具在哪个沙箱中执行、敏感动作如何经过权限与审批、出错后如何回放
+现场、不同模型如何通过同一运行时接入。SandBase Harness 提供这层运行时
+基础设施——它不是可视化工作流编辑器，也不替代模型 SDK。
+
+| 需求 | Harness 提供的能力 |
+| --- | --- |
+| 安全运行生成的代码 | Local、Docker、Kubernetes、自托管 Worker 沙箱 |
+| 检查长时间运行的 Agent | 持久化会话、可恢复事件流、审计与回放 |
+| 控制工具访问 | MCP Toolset、凭证保管库、权限策略与审批 |
+| 接入任意模型 | OpenAI、Anthropic、MiniMax、OpenAI-compatible，含 DeepSeek V4 |
+| 基础设施归自己 | 本地优先的 SQLite 与文件存储，无需托管控制面 |
+
+## 核心能力
+
+- Claude Managed Agents 风格的 /v1 API 和本地 Console
+- SQLite 会话、Agent、Memory、Skill、文件、凭证和 API Key 元数据
+- 可恢复的 Server-Sent Events 与会话事件回放
+- Local、Docker、Kubernetes 和自托管 Worker 沙箱
+- MCP Toolset、权限策略、内置工具和 Skill Package
+- TypeScript SDK：managed-agents/sdk
+- 发布门禁：npm run release:check
 
 ## 五分钟快速开始
 
@@ -65,7 +84,7 @@ node ../sandbase-harness/dist/index.js chat agent_assistant --message "你好" -
 `chat` 发完这一条消息、回合结束就退出；不带 `--message` 时才会保持会话打开，
 持续输出直到你按 Ctrl+C。`--tool-approval allow` 事先授权 Agent
 可能发起的工具调用；`init` 模板默认会把这些调用挂起等待人工确认。其余命令见
-[CLI](README.md#cli)。
+[CLI](#cli)。
 
 npm 上未加 scope 的 managed-agents **不是**本项目。在本仓库公布官方 scoped 包之前，
 请只使用上面带标签的 GitHub 源码安装。不要运行 npx managed-agents 或
@@ -85,6 +104,12 @@ node dist/index.js start --host 0.0.0.0
 中配置模型。GitHub 可能会对 Codespaces 用量计费；上方的本地快速开始仍然免费，
 并会把全部运行时数据保存在你的机器上。
 
+## 界面截图
+
+| Console 总览 | 设置 | API 参考 |
+| --- | --- | --- |
+| ![overview](docs/assets/dashboard-overview.png) | ![settings](docs/assets/dashboard-settings-models.png) | ![api-ref](docs/assets/dashboard-api-reference.png) |
+
 ## 使用官方 SDK
 
 运行时的 `/v1` API 就在同一个端口上，官方 Anthropic TypeScript SDK 客户端可以
@@ -95,16 +120,20 @@ node dist/index.js start --host 0.0.0.0
 所以这里描述的是被测试过的兼容性，而不是声明出来的兼容性。
 
 同一套接口的规范见 [docs/api.md](docs/api.md)；本仓库自带的 TypeScript SDK 见下文
-[SDK](#使用官方-sdk)。
+[SDK](#sdk)。
 
 ## CMA 兼容性
 
 运行时对已发布 Claude Managed Agents 契约的覆盖逐条记录在
-[`src/core/capabilities/matrix.ts`](src/core/capabilities/matrix.ts) 中；下表由
-`npm run docs:compat` 从该文件生成，contract-honesty 测试会在表与矩阵不一致时
-失败，因此本节内容不手工编写。`Partial` 与 `Unsupported` 行必须写明原因；
-矩阵中更细的状态（`unavailable`、`planned`、`not_applicable`、`unverified`）
-在此表中归为 `Unsupported`，并在备注中保留精确状态。
+[`src/core/capabilities/matrix.ts`](src/core/capabilities/matrix.ts) 中：
+官方 SDK 路由面中 76 条已挂载、29 条按名拒绝、5 条（多智能体 Thread 面）
+延期到受跟踪的 Issue。`Partial` 与 `Unsupported` 条目必须写明原因。
+
+下表由 `npm run docs:compat` 从该矩阵生成，contract-honesty 测试会在表与
+矩阵不一致时失败。
+
+<details>
+<summary><strong>完整兼容性表（生成）</strong></summary>
 
 <!-- compat-table:start -->
 | Area | Official capability | Status | Notes |
@@ -165,6 +194,91 @@ node dist/index.js start --host 0.0.0.0
 | unsupported | `web-search-execution` | Unsupported | No search provider is bundled or configured, and search-engine HTML scraping is not an accepted substitute; enabling web_search fails admission before a session is persisted. WebFetch execution is a separate, implemented capability. |
 <!-- compat-table:end -->
 
+</details>
+
+## CLI
+
+```bash
+managed-agents init
+managed-agents start [--host 127.0.0.1] [--port 3000]
+managed-agents list
+managed-agents reload
+managed-agents chat <agent-id> --message "你好" [--tool-approval ask|allow|deny]
+managed-agents template list | install <name> | create <name>
+```
+
+需要审批的工具调用会挂起而不是失败：`chat` 先询问、确认后让运行时继续同一回合。
+`--tool-approval allow` 预先授权全部此类调用（脚本和 CI 用它），`deny` 则拒绝。
+没有终端可询问时，默认的 `ask` 不作答并以非零退出、列明等待中的调用，让脚本
+显式表达策略而不是继承默认行为。自定义工具例外：只有你的客户端能给出结果，
+`chat` 会说明并以非零退出。详见 [usage](docs/usage.md#cli-commands)。
+
+## SDK
+
+```typescript
+import { ManagedAgentsClient } from 'managed-agents/sdk';
+
+const client = new ManagedAgentsClient({
+  baseUrl: 'http://127.0.0.1:3000',
+});
+
+const session = await client.sessions.create({
+  agent: 'agent_...',
+  environment_id: 'env_...',
+});
+
+for await (const event of client.sessions.chat(session.id, 'Hello')) {
+  if (event.type === 'agent.message_chunk') {
+    process.stdout.write(event.delta ?? '');
+  }
+}
+```
+
+`/v1` API 遵循 Claude Managed Agents 的资源形状，因此也可以直接把 Anthropic
+SDK 指向本地运行时：
+
+```typescript
+import Anthropic from '@anthropic-ai/sdk';
+
+const client = new Anthropic({
+  apiKey: process.env.MANAGED_AGENTS_API_KEY ?? 'local-dev-key',
+  baseURL: 'http://127.0.0.1:3000',
+});
+
+const session = await client.beta.sessions.create({
+  agent: 'agent_...',
+  environment_id: 'env_...',
+});
+```
+
+## 认证
+
+默认开放。存在至少一个 API Key 时认证自动生效：
+
+```bash
+# 通过环境变量提供静态 Key
+export MANAGED_AGENTS_API_KEY=sk-local-example
+
+# 或创建一个受管 Key
+curl -X POST http://127.0.0.1:3000/v1/api-keys \
+  -H "Content-Type: application/json" \
+  -d '{ "name": "Local Console" }'
+```
+
+客户端通过 `Authorization: Bearer <key>` 发送凭证。
+
+## 集成与示例
+
+- **DeepSeek Harness 插件**——把本运行时作为 DSH 插件通过 MCP stdio 接入：
+  安装、预检、工具列表与故障排查见
+  [`examples/deepseek-harness`](examples/deepseek-harness/README.md)。
+- **Agent Plugins 1.0 客户端**（Copilot CLI、VS Code）与独立的
+  **MCP Bridge 容器**——见 [`agent-plugin/PLUGIN.md`](agent-plugin/PLUGIN.md)。
+- **使用场景**——[场景展示](docs/showcase.zh-CN.md) 包含可审计 Coding Agent、
+  以 DSH 为交互前端，以及 Local、Docker、Kubernetes、自托管沙箱的受控代码执行。
+- **Agent 配置**——YAML Agent 定义、`config.yaml` 与工作区结构见
+  [使用指南](docs/usage.md)；各资源的 curl 示例见 [docs/api.md](docs/api.md)。
+
 ## 文档
 
 - [机器可读项目元数据](./llms.txt)
@@ -177,156 +291,13 @@ node dist/index.js start --host 0.0.0.0
 - [DeepSeek V4](./docs/deepseek-v4.md)
 - [MiniMax](./docs/minimax.md)
 - [系统设计](./docs/spec/design.md)
-
-## 为什么需要它
-
-模型 SDK 负责调用模型，但生产 Agent 还需要解决另一组问题：
-
-- 会话和产物如何持久化？
-- 工具在哪个沙箱中执行？
-- 敏感动作如何经过权限与审批？
-- 出错后如何查看事件、回放并恢复？
-- 不同模型如何通过同一运行时接入？
-
-SandBase Harness 提供这层运行时基础设施。它不是可视化工作流编辑器，
-也不替代模型 SDK。
-
-## 核心能力
-
-- Claude Managed Agents 风格的 /v1 API 和本地 Console
-- SQLite 会话、Agent、Memory、Skill、文件、凭证和 API Key 元数据
-- 可恢复的 Server-Sent Events 与会话事件回放
-- OpenAI、Anthropic、MiniMax 和 OpenAI-compatible 模型边界
-- Local、Docker、Kubernetes 和自托管 Worker 沙箱
-- MCP Toolset、权限策略、内置工具和 Skill Package
-- DeepSeek Harness 原生 stdio MCP Bridge
-- TypeScript SDK：managed-agents/sdk
-- 发布门禁：npm run release:check
-
-## 从使用场景开始
-
-参见[场景展示](docs/showcase.zh-CN.md)，了解可审计 Coding Agent、以 DeepSeek
-Harness 为交互前端，以及 Local、Docker、Kubernetes、自托管沙箱的受控代码执行。
-
-社区实践讨论：
-
-- [Codex、Claude Code 与 DSH 的 Memory 迁移](https://github.com/deepseek-ai/deepseek-harness/discussions/14#discussioncomment-18202967)
-- [第三方插件的沙箱与文件系统防护](https://github.com/deepseek-ai/deepseek-harness/discussions/5068#discussioncomment-18202943)
-
-## 接入 DeepSeek Harness
-
-先构建固定版本源码并启动 Runtime：
-
-~~~bash
-git clone --branch v0.3.8 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
-cd sandbase-harness
-npm ci
-npm run build:runtime
-
-mkdir ../my-agents && cd ../my-agents
-node ../sandbase-harness/dist/index.js init
-node ../sandbase-harness/dist/index.js start
-~~~
-
-另开终端，把插件安装到 DSH Web Profile：
-
-~~~bash
-export MANAGED_AGENTS_URL=http://127.0.0.1:3000
-# 仅在 Runtime 开启认证时设置 MANAGED_AGENTS_API_KEY
-# 从上面创建的 my-agents 目录运行，直接安装固定源码，不解析 npm 同名包
-dsh plugin --profile web add -w ../sandbase-harness
-# Git URL 备选。保持 HTTPS，不要改成 SSH。
-# dsh plugin --profile web add git+https://github.com/sandbaseai/sandbase-harness.git
-dsh web
-~~~
-
-如果 Plugin Hub 在重复或半途失败的安装后提示
-`already installed: managed-agents`，请先更新 Hub，再只移除已显示的
-`managed-agents` 插件条目，然后使用带标签的 HTTPS Git 源重试：
-
-~~~bash
-dsh plugin --profile web update dsh-plugin
-dsh plugin --profile web remove managed-agents
-dsh plugin --profile web add git+https://github.com/sandbaseai/sandbase-harness.git
-~~~
-
-这是 Plugin Hub 的重复安装路径问题，不是 npm 安装路径。如果已安装列表
-显示了不同的目标标识，就只移除列表中显示的精确标识。运行成功前请保留
-profile 目录和诊断证据；详见[已报告的恢复 Issue](https://github.com/sandbaseai/sandbase-harness/issues/78)。
-
-Git 安装需要额外一步 pnpm 构建白名单。第一次 add 会以
-`ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED` 失败，并打印对应的精确 key；把该 key
-加到 profile 的 `pnpm-workspace.yaml` 的 `allowBuilds:` 下，然后重新运行同一条
-add 命令。裸包名无法匹配 git-hosted 解析：
-
-~~~yaml
-allowBuilds:
-  "managed-agents@https://codeload.github.com/sandbaseai/sandbase-harness/tar.gz/<commit>": true
-~~~
-
-第二次运行会通过 `prepare` 构建 `dist/`，创建 `managed-agents` /
-`managed-agents-mcp` 可执行入口，并挂载 Bundle 层。
-
-DSH 随后可以通过原生 MCP Namespace：
-
-- 列出 Agent
-- 创建和运行持久化会话
-- 读取会话状态和产物
-- 停止正在运行的任务
-
-完整工具列表、兼容性证据、权限边界和卸载方法见
-[DeepSeek Harness 集成指南](./examples/deepseek-harness/README.md)。
-
-如果希望从 DSH 开始，按步骤加入这个第三方 Runtime 插件，请阅读
-[DeepSeek Harness 开发者指南](https://blog.sandbase.ai/zh-CN/deepseek-harness-developer-preview-2026/#接入一个真实的第三方-runtime-插件)。
-
-官方社区展示：
-[DeepSeek Harness Discussion #1918](https://github.com/deepseek-ai/deepseek-harness/discussions/1918)。
-
-也可以直接阅读 Handbook 的 [SandBase Harness bridge 专题](https://sandbaseai.github.io/deepseek-harness-handbook/sandbase-harness-bridge.html)，
-查看 DSH 集成契约、验证步骤和常见故障边界。
-
-相关实践：[构建可审计的 Research Agent：证据账本、沙箱与回放](https://blog.sandbase.ai/zh-CN/auditable-research-agent-evidence-ledger-sandbox-replay/)。
-文章展示如何将证据账本、沙箱执行、凭证、审计和回放组合到 SandBase Harness 工作流中。
-
-该文档之外，也可以阅读已更新到 v0.3.8 的[中文 DeepSeek Harness 开发者指南](https://blog.sandbase.ai/zh-CN/deepseek-harness-developer-preview-2026/#接入一个真实的第三方-runtime-插件)，以及[英文版本](https://blog.sandbase.ai/deepseek-harness-developer-preview-2026/#add-a-real-third-party-runtime-plugin)。
-
-## 添加可移植研究 Skill
-
-在同一个 DSH 项目根目录安装无需 SandBase 账号的 multi-source-search：
-
-~~~bash
-npx --yes github:sandbaseai/sandbase-skills add multi-source-search
-dsh web
-~~~
-
-安装器会把完整 Skill 写入 DSH 的项目级发现目录
-.dsh/skills/multi-source-search。当 DSH 已提供网页搜索和页面读取工具时，
-该 Skill 不需要 SandBase API。
-
-## 工作区结构
-
-~~~text
-my-agents/
-├── agents/                  # YAML Agent 定义
-├── skills/                  # 启动时导入的 Skill
-└── .managed-agents/         # Runtime 状态（应加入 gitignore）
-    ├── config.yaml
-    ├── data.db
-    ├── logs/
-    ├── files/
-    ├── skills/
-    ├── snapshots/
-    └── sandbox/
-~~~
+- [DeepSeek Harness 集成](./examples/deepseek-harness/README.md)
 
 ## 安全边界
 
-- API Key 应只通过环境变量或受控配置传入，不要写入 Prompt 或提交到 Git。
-- 默认 Local Sandbox 以当前操作系统用户执行命令，适合可信开发环境。
-- 需要更强隔离时使用 Docker 或 Kubernetes Sandbox。
-- DSH MCP 子进程只连接 MANAGED_AGENTS_URL，有效权限由
-  MANAGED_AGENTS_API_KEY 决定，Bridge 不持久化凭证。
+- API Key 只通过环境变量或受控配置传入，不要写入 Prompt 或提交到 Git。
+- 默认 Local Sandbox 以当前操作系统用户执行命令，适合可信开发环境；
+  需要更强隔离时使用 Docker 或 Kubernetes Sandbox。
 
 安全问题请使用仓库的
 [Security 页面](https://github.com/sandbaseai/sandbase-harness/security)，
@@ -352,4 +323,6 @@ npm run release:check
 如果它解决了你的真实 Agent 基础设施问题，欢迎
 [为仓库点 Star](https://github.com/sandbaseai/sandbase-harness)，帮助更多开发者发现它。
 
-生态目录、社区指南与相关项目见 [docs/ecosystem.md](docs/ecosystem.md)。
+生态目录、社区指南与相关项目见 [docs/ecosystem.md](docs/ecosystem.md)。社区实践讨论：
+[Codex、Claude Code 与 DSH 的 Memory 迁移](https://github.com/deepseek-ai/deepseek-harness/discussions/14#discussioncomment-18202967)、
+[第三方插件的沙箱与文件系统防护](https://github.com/deepseek-ai/deepseek-harness/discussions/5068#discussioncomment-18202943)。

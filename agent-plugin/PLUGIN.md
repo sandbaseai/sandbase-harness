@@ -34,6 +34,28 @@ the user and are not embedded in this plugin.
 
 The source-backed directory page is [Agent Plugins Directory](https://agent-plugins.directory/sandbaseai/sandbase-harness). It indexes the public manifests and source revision; the directory page is a discovery surface, not an execution service or security endorsement.
 
+## Running the bridge container directly
+
+The six-tool MCP bridge is also published as a standalone multi-architecture
+OCI image for MCP clients that do not use Agent Plugins. Start the Harness
+API, then add this stdio command to the client:
+
+```bash
+docker pull ghcr.io/sandbaseai/sandbase-harness-mcp:0.3.8
+docker run --rm -i \
+  -e MANAGED_AGENTS_URL=http://host.docker.internal:3000 \
+  ghcr.io/sandbaseai/sandbase-harness-mcp:0.3.8
+```
+
+Container package: [GitHub Container Registry](https://github.com/orgs/sandbaseai/packages/container/package/sandbase-harness-mcp)
+
+For an authenticated remote runtime, also pass `MANAGED_AGENTS_API_KEY`. The
+container image contains only the MCP bridge; agent sessions and sandbox work
+remain in the connected Harness runtime. Every release image is built from the
+matching Git tag for `linux/amd64` and `linux/arm64`, includes OCI source and
+MCP ownership metadata, and receives a GitHub build-provenance attestation.
+On Linux, map `host.docker.internal` through `host-gateway`.
+
 ## Compatibility
 
 - Agent Plugins 1.0-compatible clients with MCP support

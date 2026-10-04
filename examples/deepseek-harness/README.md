@@ -122,11 +122,43 @@ stronger isolation boundary.
 - `git ls-remote git+ssh://...`: keep the original HTTPS spec
   (`git+https://github.com/sandbaseai/sandbase-harness.git`). Converting it to
   SSH fails on Windows hosts without GitHub SSH access.
+- `already installed: managed-agents` after a partial or repeated install:
+  this is a Plugin Hub duplicate-install path, not an npm installation path.
+  Update the Hub first, then remove only the displayed `managed-agents` plugin
+  entry — if the installed view shows a different target identifier, remove
+  that exact identifier instead — and retry from the tagged HTTPS Git source:
+
+  ```bash
+  dsh plugin --profile web update dsh-plugin
+  dsh plugin --profile web remove managed-agents
+  dsh plugin --profile web add git+https://github.com/sandbaseai/sandbase-harness.git
+  ```
+
+  Keep the profile directory and its evidence until the runtime starts
+  successfully; see [the reported recovery issue](https://github.com/sandbaseai/sandbase-harness/issues/78).
 - `fetch failed`: start the runtime and check `MANAGED_AGENTS_URL`.
 - `401` or `403`: set `MANAGED_AGENTS_API_KEY` to a key accepted by the
   runtime.
 - No `mcp__sandbase__*` tools: confirm the patch path and inspect DSH startup
   logs for `mcp-sandbase-harness`.
+
+## Further reading
+
+- [DeepSeek Harness developer guide](https://blog.sandbase.ai/deepseek-harness-developer-preview-2026/#add-a-real-third-party-runtime-plugin)
+  ([Chinese edition](https://blog.sandbase.ai/zh-CN/deepseek-harness-developer-preview-2026/#接入一个真实的第三方-runtime-插件))
+  — a walkthrough that starts with DSH and adds this runtime as a real
+  third-party plugin, maintained against the pinned v0.3.8 integration.
+- [DeepSeek Harness Handbook](https://github.com/sandbaseai/deepseek-harness-handbook)
+  — independent, source-backed quickstarts and architecture maps; its
+  [SandBase Harness bridge guide](https://sandbaseai.github.io/deepseek-harness-handbook/sandbase-harness-bridge.html)
+  covers the DSH-specific contract, the
+  [Install Doctor](https://sandbaseai.github.io/deepseek-harness-handbook/install-doctor.html)
+  collects installation evidence, and the
+  [Failure Router](https://sandbaseai.github.io/deepseek-harness-handbook/diagnose.html)
+  identifies the first broken runtime boundary.
+- [Build an Auditable Research Agent](https://blog.sandbase.ai/auditable-research-agent-evidence-ledger-sandbox-replay/)
+  — combines the evidence ledger with sandboxed execution, credentials,
+  audit, and replay.
 
 ## Development and verification
 
