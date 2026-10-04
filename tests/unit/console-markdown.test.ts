@@ -3,7 +3,9 @@ import { describe, expect, it } from 'vitest';
 import { safeMarkdownUrl } from '../../apps/console/src/lib/markdown.js';
 
 const css = readFileSync('apps/console/src/styles.css', 'utf8');
-const sessionPage = readFileSync('apps/console/src/components/pages/SessionPages.tsx', 'utf8');
+// The markdown pipeline lives with the event render table since the
+// eventRenderers split — the contract is unchanged, only the file moved.
+const sessionPage = readFileSync('apps/console/src/components/session/eventRenderers.tsx', 'utf8');
 
 describe('Console Markdown contracts', () => {
   it('allows web and mail links while rejecting executable URL schemes', () => {
