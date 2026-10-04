@@ -11,6 +11,9 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['tests/**/*.{test,spec,prop}.{ts,tsx}'],
+    // tests/e2e is Playwright, not vitest — the `.spec.ts` suffix would match
+    // the include above and run the browser scenario under the wrong runner.
+    exclude: ['tests/e2e/**'],
     // Declare the per-test budget instead of inheriting vitest's implicit
     // 5000ms. A slow Windows machine can be roughly ten times slower than a
     // fast developer machine on this suite:

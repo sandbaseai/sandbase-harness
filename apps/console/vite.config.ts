@@ -13,7 +13,10 @@ export default defineConfig({
     port: 5173,
     strictPort: false,
     proxy: {
-      '/v1': 'http://localhost:3000',
+      // The dev proxy normally points at `npm run dev` on :3000; tests inject
+      // the harness runtime's port so the Console can run against a real
+      // runtime that is not the developer's own.
+      '/v1': process.env.CONSOLE_API_TARGET ?? 'http://localhost:3000',
     },
   },
 });

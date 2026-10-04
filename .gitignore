@@ -15,6 +15,8 @@ dist/
 .env
 .env.local
 coverage/
+playwright-report/
+test-results/
 .DS_Store
 .kiro/
 # Local reference material (cloned OSS projects) — not shipped

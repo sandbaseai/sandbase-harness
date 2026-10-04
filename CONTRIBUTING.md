@@ -158,6 +158,18 @@ The component commands are:
 | `npm run package:check` | published-package contents |
 | `npm run smoke:release` | packaged CLI and example startup smoke checks |
 
+The Console browser smoke test is deliberately outside this list:
+
+```bash
+npx playwright install chromium   # once per machine
+npm run test:e2e
+```
+
+It starts the conformance stub model, a real runtime, and the Vite dev server,
+then drives one ordered scenario — create an agent, approve a gated `bash`
+call, read the reply, archive the session — through Chromium. CI runs it as a
+separate `E2E` job so `release:check` never needs a browser download.
+
 CI runs the test suite on Ubuntu only. Windows compatibility is not checked in
 CI; for changes that can behave differently on Windows it is checked by
 running `npm run release:check` locally on Windows, as described above. The
