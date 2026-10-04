@@ -45,7 +45,7 @@ export async function runDocsExample(page: DocsExamplePage): Promise<DocsExample
   }
 }
 
-export function renderDocsExampleScript(page: DocsExamplePage, source: string): string {
+export function renderDocsExampleScript(page: DocsExamplePage, source: string, fixtureModelId = 'claude-opus-5'): string {
   const replaced = stripClientBootstrap(applyReplacements(source, page.replacements ?? []));
   const prelude = [
     'import Anthropic from "@anthropic-ai/sdk";',
@@ -54,7 +54,7 @@ export function renderDocsExampleScript(page: DocsExamplePage, source: string): 
 
   for (const fixture of page.fixtures ?? []) {
     if (fixture === 'agent') {
-      prelude.push('const fixtureAgent = await client.beta.agents.create({ name: "docs-example-fixture", model: "claude-opus-5" });');
+      prelude.push(`const fixtureAgent = await client.beta.agents.create({ name: "docs-example-fixture", model: ${JSON.stringify(fixtureModelId)} });`);
     } else if (fixture === 'environment') {
       prelude.push('const fixtureEnvironment = await client.beta.environments.create({ name: "docs-example-fixture", config: { type: "local" } });');
     } else {

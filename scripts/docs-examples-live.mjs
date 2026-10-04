@@ -21,7 +21,6 @@
 
 import { execSync, spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
@@ -99,7 +98,9 @@ async function runPage(page) {
   // Fixture agents must name a real Anthropic model in a live run; the stub
   // suite's placeholder id would fail provider admission.
   const script = renderDocsExampleScript(page, source.text, MODEL);
-  const scriptDir = mkdtempSync(join(tmpdir(), 'docs-example-live-'));
+  // The script resolves `@anthropic-ai/sdk` from its own location, so it must
+  // live inside the repository — os.tmpdir() has no node_modules.
+  const scriptDir = mkdtempSync(join(repositoryRoot, 'tests', 'conformance', '.docs-example-live-'));
   const scriptPath = join(scriptDir, 'example.mts');
   writeFileSync(scriptPath, script, 'utf8');
   const runtime = await startRuntimeHarness({

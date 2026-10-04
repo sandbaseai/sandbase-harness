@@ -23,3 +23,7 @@ test-results/
 references/
 # Operator's local working notes — private to this checkout
 /local-notes/
+
+# Docs-example live-run scratch dirs (crash leftovers)
+tests/conformance/.docs-example-*/
+tests/conformance/.docs-example-live-*/
