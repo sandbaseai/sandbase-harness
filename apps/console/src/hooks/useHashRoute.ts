@@ -87,7 +87,6 @@ function isView(value: string): value is ViewId {
     'scheduled-deployments',
     'outcomes',
     'workspace',
-    'runtime',
     'models',
     'loop-engine',
     'storage',
@@ -98,7 +97,6 @@ function isView(value: string): value is ViewId {
     'api-reference',
     'api-keys',
     'advanced',
-    'observability',
     'settings',
   ].includes(value);
 }

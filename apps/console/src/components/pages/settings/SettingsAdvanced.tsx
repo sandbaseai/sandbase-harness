@@ -40,6 +40,7 @@ export function SettingsAdvanced({ data, setView }: { data: ConsoleData; setView
           <div className="settingsLinkList">
             <button type="button" onClick={() => setView('logs')}>Runtime logs</button>
             <button type="button" onClick={() => setView('monitoring')}>Monitoring</button>
+            <button type="button" onClick={() => setView('outcomes')}>Outcome templates (local)</button>
           </div>
         </div>
         <div className="panel subtlePanel advancedJsonPanel">

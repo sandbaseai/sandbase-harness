@@ -1,6 +1,5 @@
 import {
   Activity,
-  Check,
   Clock,
   Database,
   FileText,
@@ -42,11 +41,10 @@ export const NAV_GROUPS: Array<{ label: string; items: Array<{ id: ViewId; label
     ],
   },
   {
-    label: 'Advanced',
+    label: 'Operations',
     items: [
       { id: 'webhooks', label: 'Webhooks', icon: Activity },
       { id: 'scheduled-deployments', label: 'Scheduled', icon: Clock },
-      { id: 'outcomes', label: 'Outcome templates', icon: Check },
     ],
   },
   {
@@ -60,7 +58,6 @@ export const NAV_GROUPS: Array<{ label: string; items: Array<{ id: ViewId; label
 export const SETTINGS_VIEW_IDS: ViewId[] = [
   'settings',
   'workspace',
-  'runtime',
   'models',
   'loop-engine',
   'storage',
@@ -71,7 +68,6 @@ export const SETTINGS_VIEW_IDS: ViewId[] = [
   'logs',
   'monitoring',
   'advanced',
-  'observability',
 ];
 
 export function ConsoleRouteView(props: {
@@ -183,8 +179,6 @@ export function ConsoleRouteView(props: {
       return <OutcomesPage data={props.data} onRefresh={props.onRefresh} />;
     case 'workspace':
       return <SettingsView data={props.data} section="workspace" onRefresh={props.onRefresh} setView={props.setView} />;
-    case 'runtime':
-      return <SettingsView data={props.data} section="advanced" onRefresh={props.onRefresh} setView={props.setView} />;
     case 'advanced':
       return <SettingsView data={props.data} section="advanced" onRefresh={props.onRefresh} setView={props.setView} />;
     case 'models':
@@ -204,8 +198,6 @@ export function ConsoleRouteView(props: {
     case 'logs':
       return <SettingsView data={props.data} section="logs" onRefresh={props.onRefresh} setView={props.setView} />;
     case 'monitoring':
-      return <SettingsView data={props.data} section="monitoring" onRefresh={props.onRefresh} setView={props.setView} />;
-    case 'observability':
       return <SettingsView data={props.data} section="monitoring" onRefresh={props.onRefresh} setView={props.setView} />;
     case 'settings':
       return <SettingsView data={props.data} section="general" onRefresh={props.onRefresh} setView={props.setView} />;

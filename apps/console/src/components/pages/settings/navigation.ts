@@ -20,6 +20,6 @@ export type SettingsSection = VisibleSettingsSection
   | 'monitoring';
 export const SETTINGS_GROUPS = ['Project', 'Access', 'Developer'] as const;
 export const SETTINGS_VIEW_IDS: ViewId[] = [
-  'settings', 'workspace', 'runtime', 'models', 'loop-engine', 'storage',
-  'memory', 'sandbox', 'api-keys', 'api-reference', 'logs', 'monitoring', 'observability', 'advanced',
+  'settings', 'workspace', 'models', 'loop-engine', 'storage',
+  'memory', 'sandbox', 'api-keys', 'api-reference', 'logs', 'monitoring', 'advanced',
 ];

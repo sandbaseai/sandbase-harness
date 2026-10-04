@@ -441,8 +441,12 @@ describe('Console page static coverage', () => {
     expect(consoleRoutes).toContain('export const NAV_GROUPS');
     expect(consoleRoutes).toContain('export const SETTINGS_VIEW_IDS');
     expect(consoleRoutes).toContain('export function ConsoleRouteView');
-    expect(consoleRoutes).toContain("label: 'Advanced'");
+    expect(consoleRoutes).toContain("label: 'Operations'");
     expect(consoleRoutes).toContain("label: 'System'");
+    expect(consoleRoutes).not.toContain("label: 'Advanced'");
+    expect(consoleRoutes).not.toContain("{ id: 'outcomes'");
+    expect(consoleRoutes).not.toContain("case 'runtime'");
+    expect(consoleRoutes).not.toContain("case 'observability'");
     expect(consoleRoutes).toContain("case 'agent-detail'");
     expect(consoleRoutes).toContain("case 'api-reference'");
     const modal = readFileSync('apps/console/src/components/Modal.tsx', 'utf8');
@@ -461,6 +465,7 @@ describe('Console page static coverage', () => {
     expect(settingsAdvanced).toContain('Storage editor');
     expect(settingsAdvanced).toContain('Memory editor');
     expect(settingsAdvanced).toContain('Sandbox editor');
+    expect(settingsAdvanced).toContain("setView('outcomes')");
     expect(readFileSync('apps/console/src/components/pages/MemoryPages.tsx', 'utf8')).toContain('mobileResourceList');
     expect(readFileSync('apps/console/src/components/pages/MemoryPages.tsx', 'utf8')).toContain('mobileResourceCard');
     expect(readFileSync('apps/console/src/components/pages/MemoryPages.tsx', 'utf8')).toContain('Memory Stores are attachable session resources');

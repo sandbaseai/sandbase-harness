@@ -660,7 +660,6 @@ export type ViewId =
   | 'skills'
   | 'files'
   | 'workspace'
-  | 'runtime'
   | 'models'
   | 'loop-engine'
   | 'storage'
@@ -674,7 +673,6 @@ export type ViewId =
   | 'scheduled-deployments'
   | 'outcomes'
   | 'advanced'
-  | 'observability'
   | 'agent-detail'
   | 'session-detail'
   | 'settings';
