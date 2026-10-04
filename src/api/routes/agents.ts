@@ -207,11 +207,16 @@ export function agentsRoutes(deps: ServerDeps) {
 
     refreshAgentsFromDb(deps.db, deps.agents);
 
+    // The response is built before the publish `await`: `agentRowMeta` reads
+    // the row this writer just bumped, and yielding first would let a second
+    // writer's version land between the write and the read, so both responses
+    // would report the newer number.
+    const updated = toApiAgent(agent, agentRowMeta(deps, id));
     // `agent.updated` fires only on a real transition — this path is reached
     // exactly when a new immutable version was written; the equal-definition
     // retry returned above without one (`订阅Webhook.md:52`).
     await publishOperationEvent(deps, { type: 'agent.updated', subjectId: id });
-    return c.json(toApiAgent(agent, agentRowMeta(deps, id)));
+    return c.json(updated);
   };
 
   // Partial-update semantics rather than a full replace: a `PUT` that silently
