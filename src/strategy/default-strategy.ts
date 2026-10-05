@@ -133,6 +133,9 @@ function modelErrorDetail(error: Error): string | undefined {
   if (typeof status === 'number') parts.push(`HTTP ${status}`);
   const cause = record.cause as Record<string, unknown> | undefined;
   if (cause && typeof cause.code === 'string') parts.push(cause.code);
+  if (typeof record.url === 'string' && record.url) parts.push(`url=${redactSecrets(record.url)}`);
+  const body = record.responseBody ?? record.data;
+  if (typeof body === 'string' && body.trim()) parts.push(truncateDetail(redactSecrets(body.trim())));
   return parts.length > 0 ? parts.join(' ') : undefined;
 }
 

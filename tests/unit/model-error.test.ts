@@ -19,6 +19,31 @@ describe('describeModelError', () => {
     expect(result.message).toContain('ECONNRESET');
   });
 
+  it('keeps the upstream body on an Error that already has a message', () => {
+    // APICallError carries `message: "Bad Request"` plus statusCode and
+    // responseBody; the body used to be dropped, leaving "Bad Request (HTTP
+    // 400)" with no way to tell an overdrawn account from a bad parameter.
+    const err = Object.assign(new Error('Bad Request'), {
+      statusCode: 400,
+      responseBody: '{"code":"Arrearage","message":"Access denied"}',
+    });
+    const result = describeModelError(err);
+    expect(result.message).toContain('Bad Request');
+    expect(result.message).toContain('HTTP 400');
+    expect(result.message).toContain('Arrearage');
+  });
+
+  it('redacts secrets in a message-bearing Error\'s body and url too', () => {
+    const err = Object.assign(new Error('Bad Request'), {
+      statusCode: 400,
+      url: 'https://gw.example.com/v1/messages?api_key=top-secret-999',
+      responseBody: 'key sk-ant-zzzz9999 rejected',
+    });
+    const result = describeModelError(err);
+    expect(result.message).not.toContain('top-secret-999');
+    expect(result.message).not.toContain('sk-ant-zzzz9999');
+  });
+
   it('reconstructs a message from an AI SDK-style error with an empty message', () => {
     // APICallError-style object whose message is blank but which carries the
     // real detail in statusCode/url/responseBody.
