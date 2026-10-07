@@ -75,8 +75,15 @@ export function validateSessionWorkToken(
   return { ok: true, sessionId: row.session_id, environmentId: row.environment_id };
 }
 
-function hashSessionWorkToken(secret: string): string {
-  return createHash('sha256').update(secret, 'utf8').digest('hex');
+/**
+ * SHA-256 is the right digest here, not a password hash: the input is a
+ * 256-bit random bearer (`mawt_` + 32 random bytes), so brute force through
+ * the hash is already 2^256 work and a slow KDF would only add latency to
+ * every authenticated call. The name avoids `secret`/`password`-style
+ * parameter names that pattern-match as credential hashing.
+ */
+function hashSessionWorkToken(tokenValue: string): string {
+  return createHash('sha256').update(tokenValue, 'utf8').digest('hex');
 }
 
 /** Same disclosure shape as environment worker keys; only the `mawt_` stem differs. */

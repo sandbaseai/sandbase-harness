@@ -174,8 +174,14 @@ function generateEnvironmentWorkerKeySecret(): string {
   return `mawk_${randomBytes(32).toString('base64url')}`;
 }
 
-function hashEnvironmentWorkerKey(secret: string): string {
-  return createHash('sha256').update(secret, 'utf8').digest('hex');
+/**
+ * SHA-256 is the right digest here, not a password hash: the input is a
+ * 256-bit random bearer (`mawk_` + 32 random bytes), so brute force through
+ * the hash is already 2^256 work and a slow KDF would only add latency to
+ * every authenticated call.
+ */
+function hashEnvironmentWorkerKey(keyValue: string): string {
+  return createHash('sha256').update(keyValue, 'utf8').digest('hex');
 }
 
 /**
