@@ -10,7 +10,7 @@
  *   `{ type: "unrestricted" | "limited", allowed_hosts, allow_mcp_servers,
  *   allow_package_managers }`.
  *
- * Measured against the official TypeScript SDK at `0.129.0`, `config.networking`
+ * Measured against the official TypeScript SDK at `0.131.0`, `config.networking`
  * was stored as written and never read, so an official client could declare a
  * limited policy and receive a response that never mentioned it. Both spellings
  * are normalized here — one function, one stored shape — so a stored policy

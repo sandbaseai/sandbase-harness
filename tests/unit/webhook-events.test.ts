@@ -4,7 +4,7 @@
  * Two published surfaces are pinned here:
  *
  * - `OFFICIAL_WEBHOOK_EVENTS` is the subscription vocabulary: the
- *   `BetaWebhook*EventData.type` union in `@anthropic-ai/sdk@0.129.0` minus
+ *   `BetaWebhook*EventData.type` union in `@anthropic-ai/sdk@0.131.0` minus
  *   the names this runtime can never produce. The count and the no-wildcard
  *   invariants are the contract — a name that drifts in without a producer
  *   silently unsubscribes it, and a wildcard coming back would silently
@@ -25,7 +25,7 @@ import {
 
 describe('OFFICIAL_WEBHOOK_EVENTS', () => {
   it('contains every name the published contract defines that this runtime can produce', () => {
-    // The `BetaWebhook*EventData.type` union in `@anthropic-ai/sdk@0.129.0` is
+    // The `BetaWebhook*EventData.type` union in `@anthropic-ai/sdk@0.131.0` is
     // 17 session + 7 vault + 4 agent + 6 deployment + 3 deployment_run +
     // 4 environment + 3 memory_store = 44 names. This catalog is that union
     // minus the four with no producing surface — `session.thread_created`,

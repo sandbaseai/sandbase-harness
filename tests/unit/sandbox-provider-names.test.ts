@@ -197,7 +197,7 @@ describe('environment hosting_type resolution', () => {
   });
 
   it('reads the published config.type as the hosting type', () => {
-    // Measured against the official TypeScript SDK at 0.129.0: this shape used
+    // Measured against the official TypeScript SDK at 0.131.0: this shape used
     // to be accepted and resolved to `local` because only `hosting_type` was read.
     expect(sandboxProviderForEnvironmentConfig({ type: 'self_hosted' }, 'Environment env_x')).toBe('self_hosted');
     expect(sandboxProviderForEnvironmentConfig({ type: 'docker' }, 'Environment env_x')).toBe('docker');

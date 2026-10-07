@@ -137,7 +137,7 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@anthropic-ai/sdk": "0.129.0",
+    "@anthropic-ai/sdk": "0.131.0",
     "@babel/parser": "7.29.9",
     "@base-ui/react": "^1.8.0",
     "@fontsource-variable/geist-mono": "^5.3.0",

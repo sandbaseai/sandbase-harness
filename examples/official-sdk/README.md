@@ -103,7 +103,7 @@ it at; nothing is deleted afterwards. To clean up, archive them from the Console
 or `DELETE /v1/agents/{id}` / `/v1/environments/{id}` and let the sessions expire,
 or point the script at a throwaway runtime.
 
-Verified against `@anthropic-ai/sdk` 0.129.0 (the version pinned in
+Verified against `@anthropic-ai/sdk` 0.131.0 (the version pinned in
 `devDependencies`) on 2026-09-29, and executed by
 `tests/conformance/official-sdk-quickstart.test.ts` on every CI run, which is
 what keeps this page from drifting away from the script.

@@ -4,7 +4,7 @@
  * Two published rules live here so they cannot drift apart:
  *
  * - `OFFICIAL_WEBHOOK_EVENTS` is the set a subscription may name: the
- *   `BetaWebhook*EventData.type` union in `@anthropic-ai/sdk@0.129.0`
+ *   `BetaWebhook*EventData.type` union in `@anthropic-ai/sdk@0.131.0`
  *   (`resources/beta/webhooks.d.ts`), minus the four names this runtime can
  *   never produce — the `session.thread_*` family, because there is no
  *   multiagent thread surface, and `agent.deleted`, because agents archive

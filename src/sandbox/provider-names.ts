@@ -87,7 +87,7 @@ export type EnvironmentHostingType = (typeof ENVIRONMENT_HOSTING_TYPES)[number];
  * is the published CMA spelling inside `config`
  * (`config: { type: "cloud" | "self_hosted" }`, the official quickstart shape).
  * They name one vocabulary, so they are read together rather than one of them
- * being ignored: measured against the official TypeScript SDK at `0.129.0`,
+ * being ignored: measured against the official TypeScript SDK at `0.131.0`,
  * `config: { type: "self_hosted" }` used to be accepted and reported back as
  * `hosting_type: "local"` while `config: { type: "cloud" }` was accepted
  * outright.

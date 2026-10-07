@@ -1,7 +1,7 @@
 /**
  * An Environment's published `config` shape is interpreted, or refused.
  *
- * Measured against the official TypeScript SDK at `0.129.0`, the quickstart
+ * Measured against the official TypeScript SDK at `0.131.0`, the quickstart
  * shape `config: { type: "self_hosted" }` was accepted and read back as
  * `hosting_type: "local"` with `sandbox_provider: null`, `config: { type:
  * "cloud" }` was refused by name, and `config: { networking: … }` was stored

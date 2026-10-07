@@ -42,7 +42,7 @@ environment-network-policy: partial
   with bare `curl` commands, which is the published-document reference this
   repository already relies on
   (`tests/integration/environments-query-admission.test.ts:1-14`). The typed
-  shape above was measured against `@anthropic-ai/sdk@0.129.0`, whose beta
+  shape above was measured against `@anthropic-ai/sdk@0.131.0`, whose beta
   resource types are generated from the published contract.
 
 ## 2. Current SandBase shape

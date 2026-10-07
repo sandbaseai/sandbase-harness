@@ -3,7 +3,7 @@
  *
  * Transcribed by hand from the SDK union
  * `BetaManagedAgentsSessionEventType` in
- * `@anthropic-ai/sdk@0.129.0` (`resources/beta/sessions/events.d.ts`) — the
+ * `@anthropic-ai/sdk@0.131.0` (`resources/beta/sessions/events.d.ts`) — the
  * Console's event render table is keyed by these names. Update this list when
  * the pinned SDK version changes.
  */

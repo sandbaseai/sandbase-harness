@@ -97,7 +97,7 @@ pinned official SDK's `resources/beta/**/*.js`. Messages, models, and
 organization administration are excluded from this managed-agent inventory.
 Unrecognized SDK request syntax fails rather than silently losing routes.
 
-Verified on October 5, 2026 with SDK `0.129.0`: 110 distinct method/path pairs.
+Verified on October 8, 2026 with SDK `0.131.0`: 110 distinct method/path pairs.
 The split is now 90 resource mounts and 20 explicit refusals — the entire
 Work family (data and management planes) is mounted, and `mcp_oauth_validate`
 answers a live `initialize` probe, so nothing in the vault or work families

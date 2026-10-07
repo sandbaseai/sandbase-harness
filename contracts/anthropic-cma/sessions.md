@@ -585,7 +585,7 @@ materialized `agent` with a pinned `version` and `multiagent: null`.
   sent by block id, resumes the model with the paired tool result.
 - `tests/unit/api-standard.test.ts` — the session object's published key set,
   compared against the `BetaManagedAgentsSession` field list transcribed from
-  `@anthropic-ai/sdk@0.129.0` (only `loop_engine` may be extra), plus
+  `@anthropic-ai/sdk@0.131.0` (only `loop_engine` may be extra), plus
   `budget` always present, `stats` timing, and `agent.version`/`multiagent`.
 - `tests/conformance/session-object-fields.test.ts` — the same fields over the
   wire on create, retrieve, and list, `stats.active_seconds` derived from

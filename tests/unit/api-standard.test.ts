@@ -5,7 +5,7 @@ import type { Session, SessionEvent } from '@/types/session.js';
 
 /**
  * The published key set of `BetaManagedAgentsSession`, transcribed from
- * `@anthropic-ai/sdk@0.129.0`
+ * `@anthropic-ai/sdk@0.131.0`
  * (`resources/beta/sessions/sessions.d.ts`). Two fields are intentionally out
  * of the expected set: `deployment_id` (optional upstream; this runtime has no
  * deployments) and `outcome_evaluations` (required upstream, but its

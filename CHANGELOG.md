@@ -131,6 +131,19 @@
   update like any name outside the catalog, because a stored subscription
   that can never deliver reads as a working one. They re-enter the catalog
   when their producing surface exists.
+- The pinned official SDK is now `@anthropic-ai/sdk` 0.131.0 (from
+  0.129.0). The managed-agent beta surface this runtime serves is
+  unchanged between the two versions: the session event-type union, the
+  webhook event-name union, and the session object shape carry no deltas.
+  0.131.0 adds hosted surfaces outside this runtime's scope — an
+  `organization` administration subtree (analytics, plugins and
+  marketplaces, RBAC groups/roles, spend limits), repository-checkout
+  error types, and `BetaManagedAgentsSessionRefusal`/`stop_details` on
+  `session.status_idle` events, all of which a server may emit but none
+  of which this runtime is required to produce. Route coverage,
+  session-object keys, webhook vocabulary, and the whole official-SDK
+  conformance suite pass unchanged against the new pin; no route enters
+  or leaves `PENDING_OFFICIAL_ROUTES`.
 
 ### Fixed
 
