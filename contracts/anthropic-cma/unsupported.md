@@ -26,7 +26,6 @@ mcp-tunnel: not_applicable
 | --- | --- | --- |
 | MCP tunnel | `not_applicable` | Not implemented; a hosted connectivity feature outside local-first scope. Official SDK tunnel, certificate, and token routes explicitly refuse it. |
 | Hosted user profiles | `not_applicable` | Hosted user management is outside the single-tenant scope; official SDK profile routes explicitly refuse it. |
-| Environment Work management plane | `unavailable` | The Work data plane (poll, ack, heartbeat, update, stop) is implemented over the local worker queue — see [`work.md`](./work.md). The management surface (`GET /work`, `GET /work/{id}`, `GET /work/stats`) is not yet implemented and explicitly refuses the capability. |
 | MCP OAuth validation endpoint | `unavailable` | Token refresh runs at the MCP connect boundary (see [`credentials.md`](./credentials.md)); the dedicated `mcp_oauth_validate` endpoint is not implemented and explicitly refuses the capability. |
 | Session budget alerts | `not_applicable` | Not implemented; notifiability is a hosted billing feature with no local analogue. |
 

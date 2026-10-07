@@ -8,6 +8,9 @@
  *   POST /v1/environments/:id/work/:workId/heartbeat     renew the heartbeat lease
  *   POST /v1/environments/:id/work/:workId               metadata merge patch
  *   POST /v1/environments/:id/work/:workId/stop          graceful/forced shutdown
+ *   GET  /v1/environments/:id/work                       list, newest first, keyset cursor
+ *   GET  /v1/environments/:id/work/stats                 queue counters
+ *   GET  /v1/environments/:id/work/:workId               retrieve one item
  *
  * The runtime's queue underneath is tool-call-shaped (`/v1/x/worker`), while
  * the published work item is session-scoped: `data` is always
@@ -56,13 +59,74 @@ type WorkCredential =
   | { kind: 'session_token'; environmentId: string; sessionId: string };
 
 /**
- * `work` is mounted before the refusal router, which still owns the
- * management half (`GET /work`, `/work/stats`, `GET /work/:workId`) until the
- * management plane lands.
+ * `work` is mounted before the refusal router; every published route in the
+ * family is implemented here, so the refusal router no longer carries a Work
+ * entry at all.
  */
 export function environmentWorkRoutes(deps: EnvironmentWorkRouteDeps): Hono {
   const app = new Hono();
 
+  // Registration order is load-bearing on this router: every literal
+  // (`stats`, `poll`) must land before the `/:workId` parameter route, or the
+  // parameter wins the path and the literal is read as a work id.
+  app.get('/environments/:id/work/stats', (c) => {
+    const auth = resolveWorkCredential(c, deps);
+    if (auth instanceof Response) return auth;
+    // Stats is queue authority, like poll: a session token is item authority
+    // and must not read the queue-wide view.
+    if (auth.kind === 'session_token') {
+      return c.json(
+        { error: { type: 'authentication_error', message: 'A session work token cannot read queue stats.' } },
+        401,
+      );
+    }
+    const environmentId = c.req.param('id') ?? '';
+    const scopeError = requireEnvironmentScope(c, deps.db, environmentId, auth);
+    if (scopeError) return scopeError;
+    const stats = deps.queue.queueStats(environmentId);
+    return c.json({
+      type: 'work_queue_stats',
+      depth: stats.depth,
+      pending: stats.pending,
+      oldest_queued_at: stats.oldestQueuedAt ? iso(stats.oldestQueuedAt) : null,
+      workers_polling: deps.queue.workersPolling(),
+    });
+  });
+
+  app.get('/environments/:id/work', (c) => {
+    const auth = resolveWorkCredential(c, deps);
+    if (auth instanceof Response) return auth;
+    if (auth.kind === 'session_token') {
+      return c.json(
+        { error: { type: 'authentication_error', message: 'A session work token cannot list work.' } },
+        401,
+      );
+    }
+    const environmentId = c.req.param('id') ?? '';
+    const scopeError = requireEnvironmentScope(c, deps.db, environmentId, auth);
+    if (scopeError) return scopeError;
+
+    const limit = parsePageLimit(c.req.query('limit'));
+    if (limit instanceof Response) return limit;
+    const after = decodePageCursor(c.req.query('page'));
+    if (after instanceof Response) return after;
+    const items = deps.queue.list({ environmentId, limit: limit + 1, after });
+    const page = items.slice(0, limit);
+    const last = page[page.length - 1];
+    return c.json({
+      data: page.map((item) => toOfficialWork(item, environmentId)),
+      // A full page publishes the keyset of its last row as the opaque cursor;
+      // the next fetch answers empty with next_page null, which is how the
+      // SDK's page iterator ends the walk.
+      next_page: items.length > limit && last?.rowId !== undefined && last.createdAt !== undefined
+        ? Buffer.from(JSON.stringify({ c: last.createdAt, r: last.rowId }), 'utf8').toString('base64url')
+        : null,
+    });
+  });
+
+  // `poll` must register before `/:workId`: the router serves GET
+  // `/work/poll` in registration order, so the literal has to land first or
+  // every poll would read as a retrieve for a work item named "poll".
   app.get('/environments/:id/work/poll', async (c) => {
     const auth = resolveWorkCredential(c, deps);
     if (auth instanceof Response) return auth;
@@ -203,6 +267,12 @@ export function environmentWorkRoutes(deps: EnvironmentWorkRouteDeps): Hono {
     }
     const outcome = deps.queue.stopItem(scoped.workId);
     if (outcome === 'not_found') return notFound(c, 'work item not found');
+    return c.json(toOfficialWork(deps.queue.get(scoped.workId)!, scoped.environmentId));
+  });
+
+  app.get('/environments/:id/work/:workId', (c) => {
+    const scoped = requireItemScope(c, deps);
+    if (scoped instanceof Response) return scoped;
     return c.json(toOfficialWork(deps.queue.get(scoped.workId)!, scoped.environmentId));
   });
 
@@ -393,6 +463,53 @@ function requireItemScope(
     if (!item || item.sessionId !== auth.sessionId) return notFound(c, 'work item not found');
   }
   return { workId, environmentId, auth };
+}
+
+const WORK_LIST_MAX_LIMIT = 200;
+const WORK_LIST_DEFAULT_LIMIT = 50;
+
+function parsePageLimit(raw: string | undefined): number | Response {
+  if (raw === undefined) return WORK_LIST_DEFAULT_LIMIT;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value < 1 || value > WORK_LIST_MAX_LIMIT) {
+    return new Response(
+      JSON.stringify({
+        error: { type: 'invalid_request_error', message: `limit must be an integer between 1 and ${WORK_LIST_MAX_LIMIT}` },
+      }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
+  return value;
+}
+
+/**
+ * Decode the list cursor. The cursor is base64url JSON `{c, r}` carrying the
+ * last row's `(created_at, rowid)` keyset; a malformed or wrong-shaped value
+ * is refused rather than silently restarting the walk at the first page.
+ */
+function decodePageCursor(raw: string | undefined): { createdAt: string; rowId: number } | Response | undefined {
+  if (raw === undefined) return undefined;
+  const parsed = (() => {
+    try {
+      return JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')) as unknown;
+    } catch {
+      return null;
+    }
+  })();
+  if (
+    !parsed || typeof parsed !== 'object'
+    || typeof (parsed as { c?: unknown }).c !== 'string'
+    || typeof (parsed as { r?: unknown }).r !== 'number'
+    || !Number.isInteger((parsed as { r: number }).r)
+  ) {
+    return new Response(
+      JSON.stringify({
+        error: { type: 'invalid_request_error', message: 'page is not a cursor this route issued' },
+      }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
+  return { createdAt: (parsed as { c: string }).c, rowId: (parsed as { r: number }).r };
 }
 
 function parseBlockMs(raw: string | undefined): number | Response {

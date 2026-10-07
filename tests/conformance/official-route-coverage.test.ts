@@ -86,14 +86,31 @@ describe('official SDK route coverage', () => {
       maxRetries: 0, fetch: async (input, init) => app.request(input, init),
     });
     const expected = { status: 400, error: { error: { type: 'unsupported_capability' } } };
-    // Dreams are served, not refused: an unknown id decodes the real route's
-    // 404 rather than the unsupported-capability envelope.
-    await expect(client.beta.dreams.retrieve('x_probe')).rejects.toMatchObject({
-      status: 404, error: { error: { type: 'not_found' } },
+    // Dreams and Work are served, not refused: an unknown id decodes the real
+    // route's 404 rather than the unsupported-capability envelope. The work
+    // surface resolves its own credential set, so the probe goes in
+    // credential-free — the conformance app runs open, and an unknown bearer
+    // would be refused at authentication before reaching the item lookup.
+    const anonymous = new Anthropic({
+      baseURL: 'http://conformance.local', apiKey: 'route-test-key', authToken: null,
+      maxRetries: 0,
+      fetch: async (input, init) => {
+        const headers = new Headers(init?.headers);
+        headers.delete('authorization');
+        headers.delete('x-api-key');
+        return app.request(input, { ...init, headers });
+      },
     });
+    for (const notFoundProbe of [
+      client.beta.dreams.retrieve('x_probe'),
+      anonymous.beta.environments.work.retrieve('x_probe', { environment_id: 'x_probe' }),
+    ]) {
+      await expect(notFoundProbe).rejects.toMatchObject({
+        status: 404, error: { error: { type: 'not_found' } },
+      });
+    }
     await expect(client.beta.tunnels.retrieve('x_probe')).rejects.toMatchObject(expected);
     await expect(client.beta.userProfiles.retrieve('x_probe')).rejects.toMatchObject(expected);
-    await expect(client.beta.environments.work.retrieve('x_probe', { environment_id: 'x_probe' })).rejects.toMatchObject(expected);
     await expect(client.beta.vaults.credentials.mcpOAuthValidate('x_probe', { vault_id: 'x_probe' })).rejects.toMatchObject(expected);
     await expect(client.beta.sessions.threads.list('x_probe')).rejects.toMatchObject(expected);
     await expect(client.beta.sessions.threads.retrieve('x_probe', { session_id: 'x_probe' })).rejects.toMatchObject(expected);

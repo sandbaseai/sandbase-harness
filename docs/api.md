@@ -177,8 +177,8 @@ Known unsupported official SDK operations instead return HTTP 400 with
 `error.type: "unsupported_capability"`, a message pointing to
 `docs/api-matrix.md#unsupported-official-routes`, and
 `error.details.capabilities` containing the capability id and reason. These
-explicit refusals cover MCP tunnels, hosted user profiles, the hosted
-environment Work API, session threads (the unimplemented multiagent surface),
+explicit refusals cover MCP tunnels, hosted user profiles,
+session threads (the unimplemented multiagent surface),
 and MCP OAuth validation; they do not create resources or
 execute work. Authentication, throttling, and compatibility admission still run
 first. Only the documented official methods and paths are registered; unrelated
@@ -204,9 +204,6 @@ router, so both vault spellings preserve the same behavior.
 | GET, POST | `/v1/user_profiles` |
 | GET, POST | `/v1/user_profiles/{id}` |
 | POST | `/v1/user_profiles/{id}/enrollment_url` |
-| GET | `/v1/environments/{id}/work` |
-| GET | `/v1/environments/{id}/work/{work_id}` |
-| GET | `/v1/environments/{id}/work/stats` |
 | GET | `/v1/sessions/{id}/threads` |
 | GET | `/v1/sessions/{id}/threads/{thread_id}` |
 | GET | `/v1/sessions/{id}/threads/{thread_id}/events` |
@@ -2249,13 +2246,19 @@ The published self-hosted worker surface is mounted over the same queue:
 | `POST` | `/v1/environments/{id}/work/{work_id}` | Merge a `metadata` patch: a string upserts, `null` deletes, omitted keys are preserved. This route does not carry results. |
 | `POST` | `/v1/environments/{id}/work/{work_id}/stop` | Record the stop marker (`stopping`). `force` is accepted but selects nothing: the marker is already the immediate form. |
 
-The management half — `GET /v1/environments/{id}/work`, `.../work/{id}`, and
-`.../work/stats` — is still a mounted `unsupported_capability` refusal.
+The management reads project the same queue:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/v1/environments/{id}/work` | List work items newest first. `limit` bounds the page (1–200, default 50) and `page` carries the keyset cursor the previous page's `next_page` returned — an opaque base64url value this route issued, refused rather than rewound when malformed. `next_page` is `null` on the last page. |
+| `GET` | `/v1/environments/{id}/work/stats` | `work_queue_stats` for the environment: `depth` is what a poll could hand out now, `pending` is claimed-but-unacknowledged work inside its lease, `oldest_queued_at` is the oldest row in that live population, and `workers_polling` counts worker identities seen on `poll` in the last 30 seconds. |
+| `GET` | `/v1/environments/{id}/work/{work_id}` | Retrieve one work item; `secret` is null on this path. Environment mismatch and another session's item — for a session token — answer `404`. |
 
 Authentication is the published credential set, not the account key: an
-environment worker key (`mawk_...`) polls and operates any item in its
-environment, and the `sessions_token` inside a claimed item's `secret`
-operates that session's own items. The `secret` is minted per claim —
+environment worker key (`mawk_...`) polls, lists, reads stats, and operates
+any item in its environment, and the `sessions_token` inside a claimed
+item's `secret` operates that session's own items — item authority only, so
+`poll`, `list`, and `stats` refuse it. The `secret` is minted per claim —
 base64url JSON `{sessions_token, api_base_url}` in the published
 `BetaWorkSecret` shape, where `api_base_url` points back at this runtime so
 the runner's downstream calls stay local — and its hash is all that is

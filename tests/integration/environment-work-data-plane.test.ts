@@ -6,8 +6,7 @@
  * published `BetaSelfHostedWork` shape. These assertions pin the pieces a
  * caller depends on: environment scoping, the per-claim `secret` and the
  * session token inside it, the `NO_HEARTBEAT` lease claim, `412` optimistic
- * concurrency, the `lease_extended` shutdown signal, and the management-plane
- * refusals that remain until the next slice lands.
+ * concurrency, and the `lease_extended` shutdown signal.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -406,16 +405,6 @@ describe('Environment work data plane', () => {
 
     const stopped = await client.beta.environments.work.stop(work!.id, { environment_id: 'env_a', force: true });
     expect(stopped.state).toBe('stopping');
-  });
-
-  it('keeps the management plane refused until it is implemented', async () => {
-    for (const path of ['/v1/environments/env_a/work', '/v1/environments/env_a/work/stats', '/v1/environments/env_a/work/x_probe']) {
-      const res = await app.request(path, {
-        headers: { ...HEADERS, authorization: `Bearer ${envKeyA}` },
-      });
-      expect(res.status, path).toBe(400);
-      expect((await res.json() as { error: { type: string } }).error.type).toBe('unsupported_capability');
-    }
   });
 
   it('projects a completed local item as stopped', async () => {

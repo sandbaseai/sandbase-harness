@@ -99,6 +99,13 @@ export interface WorkItem {
    * `null` on every (re)claim so a new claim epoch starts unleased.
    */
   heartbeatAt?: string | null;
+  /**
+   * The row's SQLite rowid — the second half of the list cursor's keyset, and
+   * populated only where a query selects it (`list`); absent elsewhere. It
+   * exists because `created_at` has second precision and equal timestamps are
+   * common enough that ordering or paginating on it alone would be unstable.
+   */
+  rowId?: number;
 }
 
 export type WorkCompletionResult = 'completed' | 'not_found' | 'not_claimed_by_worker';
@@ -804,24 +811,68 @@ export class WorkQueue {
     return res.changes;
   }
 
-  list(opts: { environmentId?: string; limit?: number } = {}): WorkItem[] {
+  /**
+   * Page of items, newest first. `after` is the keyset cursor the official
+   * list route hands back as `next_page`: `created_at` has second precision,
+   * so the pair `(created_at, rowid)` — the same pair the ordering uses — is
+   * the only boundary that cannot skip or repeat a row sharing a second.
+   */
+  list(opts: { environmentId?: string; limit?: number; after?: { createdAt: string; rowId: number } } = {}): WorkItem[] {
     const limit = Math.max(1, Math.min(opts.limit ?? 50, 200));
+    const keyset = (prefix: string) =>
+      `(${prefix}created_at < ? OR (${prefix}created_at = ? AND ${prefix}rowid < ?))`;
+    const keysetArgs = opts.after ? [opts.after.createdAt, opts.after.createdAt, opts.after.rowId] : [];
     const rows = opts.environmentId
       ? this.db.prepare(
-        `SELECT wi.*
+        `SELECT wi.*, wi.rowid AS work_row_id
          FROM work_items wi
          JOIN sessions s ON s.id = wi.session_id
-         WHERE s.environment_id = ?
+         WHERE s.environment_id = ?${opts.after ? ` AND ${keyset('wi.')}` : ''}
          ORDER BY wi.created_at DESC, wi.rowid DESC
          LIMIT ?`,
-      ).all(opts.environmentId, limit)
+      ).all(opts.environmentId, ...keysetArgs, limit)
       : this.db.prepare(
-        `SELECT *
+        `SELECT *, rowid AS work_row_id
          FROM work_items
+         ${opts.after ? `WHERE ${keyset('')}` : ''}
          ORDER BY created_at DESC, rowid DESC
          LIMIT ?`,
-      ).all(limit);
+      ).all(...keysetArgs, limit);
     return (rows as unknown as RawWorkItem[]).map(toWorkItem);
+  }
+
+  /**
+   * The published `work_queue_stats` counters for one environment.
+   *
+   * The published model is a stream: `depth` is work never delivered,
+   * `pending` is delivered-but-unacknowledged. On this queue the claim lease
+   * is the delivery marker: `pending` counts a queued row whose claim is
+   * still inside the lease, and `depth` counts what a poll could hand out
+   * right now — never claimed, or claimed long enough ago that the lease has
+   * run out and the row is reclaimable again. A stopped row and a row whose
+   * session has ended are counted in neither, because neither can ever be
+   * handed out; `oldest_queued_at` spans the same live population, matching
+   * the published "queued and pending" wording.
+   */
+  queueStats(environmentId: string): { depth: number; pending: number; oldestQueuedAt: string | null } {
+    const leaseModifier = `-${this.leaseMs / 1000} seconds`;
+    const row = this.db.prepare(
+      `SELECT
+         SUM(CASE WHEN wi.claimed_at IS NULL OR wi.claimed_at <= datetime('now', ?) THEN 1 ELSE 0 END) AS depth,
+         SUM(CASE WHEN wi.claimed_at IS NOT NULL AND wi.claimed_at > datetime('now', ?) THEN 1 ELSE 0 END) AS pending,
+         MIN(wi.created_at) AS oldest_queued_at
+       FROM work_items wi
+       JOIN sessions s ON s.id = wi.session_id
+       WHERE s.environment_id = ?
+         AND wi.status = 'queued'
+         AND wi.stopped_at IS NULL
+         AND s.status NOT IN (${TERMINAL_SESSION_STATUS_SQL})`,
+    ).get(leaseModifier, leaseModifier, environmentId) as { depth: number | null; pending: number | null; oldest_queued_at: string | null };
+    return {
+      depth: row.depth ?? 0,
+      pending: row.pending ?? 0,
+      oldestQueuedAt: row.oldest_queued_at,
+    };
   }
 
   stats(opts: { environmentId?: string } = {}): Record<string, number> {
@@ -1022,6 +1073,7 @@ interface RawWorkItem {
   abandoned_at: string | null;
   metadata: string | null;
   heartbeat_at: string | null;
+  work_row_id?: number;
 }
 
 function toWorkItem(r: RawWorkItem): WorkItem {
@@ -1041,6 +1093,7 @@ function toWorkItem(r: RawWorkItem): WorkItem {
     abandonedAt: r.abandoned_at ?? null,
     metadata: r.metadata ? (JSON.parse(r.metadata) as Record<string, string>) : {},
     heartbeatAt: r.heartbeat_at ?? null,
+    rowId: r.work_row_id,
   };
 }
 

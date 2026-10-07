@@ -1,5 +1,67 @@
 [
   {
+    "id": "work-list",
+    "group": "Work",
+    "title": "List work",
+    "method": "GET",
+    "path": "/v1/environments/{id}/work",
+    "summary": "List the environment's work items newest first. limit bounds the page and page carries the keyset cursor the previous page's next_page returned; a cursor this route did not issue is refused rather than rewound. Requires queue authority — an environment worker key or a managed API key; a session work token is refused.",
+    "parameters": [
+      {
+        "name": "limit",
+        "type": "integer",
+        "description": "Items per page, 1-200; default 50."
+      },
+      {
+        "name": "page",
+        "type": "string",
+        "description": "Opaque cursor from a previous page's next_page."
+      }
+    ],
+    "response": [
+      {
+        "name": "data",
+        "type": "BetaSelfHostedWork[]",
+        "description": "One page of work items; secret is null on this path."
+      },
+      {
+        "name": "next_page",
+        "type": "string | null",
+        "description": "Cursor for the next page, null at the end."
+      }
+    ]
+  },
+  {
+    "id": "work-retrieve",
+    "group": "Work",
+    "title": "Retrieve work",
+    "method": "GET",
+    "path": "/v1/environments/{id}/work/{workId}",
+    "summary": "Retrieve one work item through the same item-scope fence as the item verbs: an environment mismatch answers 404, and a session work token reads only its own session's items.",
+    "response": [
+      {
+        "name": "work",
+        "type": "BetaSelfHostedWork",
+        "description": "The work item; secret is null on this path."
+      }
+    ]
+  },
+  {
+    "id": "work-stats",
+    "group": "Work",
+    "title": "Work queue stats",
+    "method": "GET",
+    "path": "/v1/environments/{id}/work/stats",
+    "summary": "Queue counters for the environment, read from the lease model: depth is what a poll could hand out now, pending is claimed-but-unacknowledged work inside its lease, oldest_queued_at spans the same live population, and workers_polling counts identities seen on poll in the last 30 seconds. Requires queue authority; a session work token is refused.",
+    "response": [
+      {
+        "name": "stats",
+        "type": "BetaSelfHostedWorkQueueStats",
+        "description": "{type: 'work_queue_stats', depth, pending, oldest_queued_at, workers_polling}."
+      }
+    ]
+  },
+  {
     "id": "work-poll",
     "group": "Work",
     "title": "Poll for work",

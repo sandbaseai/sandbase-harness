@@ -1,50 +1,5 @@
 [
   {
-    "id": "unsupported-get-environments-id-work",
-    "group": "Unsupported official capabilities",
-    "title": "Unsupported official operation",
-    "method": "GET",
-    "path": "/v1/environments/{id}/work",
-    "summary": "Deliberately refused after authentication, throttling, and compatibility-header admission; no resource operation is executed.",
-    "response": [
-      {
-        "name": "error",
-        "type": "object",
-        "description": "HTTP 400 unsupported_capability with a capability id, reason, and docs/api-matrix.md#unsupported-official-routes reference."
-      }
-    ]
-  },
-  {
-    "id": "unsupported-get-environments-id-work-workid",
-    "group": "Unsupported official capabilities",
-    "title": "Unsupported official operation",
-    "method": "GET",
-    "path": "/v1/environments/{id}/work/{workId}",
-    "summary": "Deliberately refused after authentication, throttling, and compatibility-header admission; no resource operation is executed.",
-    "response": [
-      {
-        "name": "error",
-        "type": "object",
-        "description": "HTTP 400 unsupported_capability with a capability id, reason, and docs/api-matrix.md#unsupported-official-routes reference."
-      }
-    ]
-  },
-  {
-    "id": "unsupported-get-environments-id-work-stats",
-    "group": "Unsupported official capabilities",
-    "title": "Unsupported official operation",
-    "method": "GET",
-    "path": "/v1/environments/{id}/work/stats",
-    "summary": "Deliberately refused after authentication, throttling, and compatibility-header admission; no resource operation is executed.",
-    "response": [
-      {
-        "name": "error",
-        "type": "object",
-        "description": "HTTP 400 unsupported_capability with a capability id, reason, and docs/api-matrix.md#unsupported-official-routes reference."
-      }
-    ]
-  },
-  {
     "id": "unsupported-get-sessions-id-threads",
     "group": "Unsupported official capabilities",
     "title": "Unsupported official operation",
