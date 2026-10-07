@@ -71,6 +71,7 @@ export const agents = {
         always_ask: "每次询问",
         always_allow: "始终允许",
         never_allow: "从不允许",
+        auto: "自动评估",
       },
     },
     integrations: {
@@ -132,6 +133,7 @@ export const agents = {
       always_allow: "始终允许",
       always_ask: "每次询问",
       never_allow: "从不允许",
+      auto: "自动评估",
     },
     capability: {
       available: "可用",

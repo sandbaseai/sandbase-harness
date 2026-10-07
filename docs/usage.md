@@ -68,6 +68,12 @@ metadata:
   owner: platform
 ```
 
+`permission_policy.type` accepts `always_allow`, `always_ask`, `never_allow`,
+and the opt-in `auto`, which judges each call with a local model evaluation
+(`allow` runs it, `deny` refuses it with an error result, `ask` holds it for
+`user.tool_confirmation`, and any evaluation failure parks the call rather
+than allowing it).
+
 Agent ids are stable object identifiers. YAML seed agents use deterministic ids
 when they are first imported, while agents created through the API or Console
 receive server-generated `agent_...` ids. Use the returned id in API calls,

@@ -288,6 +288,80 @@ export function getAgentToolsets(agent: AgentDefinition): BuiltinAgentToolset[] 
   return (agent.tools ?? []).filter((toolset) => toolset.type === DEFAULT_AGENT_TOOLSET_TYPE);
 }
 
+/**
+ * Runtime names governed by the `auto` permission policy, derived from the
+ * tool map actually resolved for this turn.
+ *
+ * Same resolved-map derivation as {@link resolveToolsRequiringConfirmation}:
+ * an MCP server exposes its tool list only at connect time, so a tool the
+ * agent never named appears in no `configs` entry and a declaration-only list
+ * cannot govern it. `getToolPermission` applies the owning toolset's default
+ * to a discovered namespaced name, so a toolset-wide `auto` reaches the tools
+ * the server adds later as well.
+ *
+ * Custom tools are excluded for the reason {@link getToolsRequiringConfirmation}
+ * excludes them from the confirmation set: the caller executes them and decides
+ * whether to run, so a server-side judgement would be unenforced decoration.
+ * A `never_allow` custom tool is already withheld at admission; `auto` on one
+ * reads as the caller's decision, exactly like `always_ask` does today.
+ */
+/**
+ * The permission policy a resolved, model-visible tool name actually runs
+ * under — `undefined` when no declared policy governs the name.
+ *
+ * {@link getToolPermission} answers a wider question (it projects the single
+ * declared MCP server's default onto any unqualified name, which is what the
+ * admission and confirmation rules want) — too wide for runtime governance: a
+ * built-in name like `bash` must never inherit an MCP toolset's default, and a
+ * delegation or custom name is not governed at all. This resolver is the
+ * stricter reading the evaluation gate and the event projection share:
+ *
+ * - namespaced MCP names resolve through the owning toolset, including the
+ *   toolset default for tools the server exposed but the agent never named;
+ * - built-in names resolve through the built-in toolset's explicit config,
+ *   falling back to the toolset `default_config` — the same grammar
+ *   `docs/api.md` promises (`default_config` "overrides that default in both
+ *   directions"), which `getToolPermission` only reaches for named configs;
+ * - anything else — custom tools the caller executes, delegation helpers, a
+ *   built-in name an agent without the built-in toolset could not have
+ *   resolved — is `undefined`, so no caller fabricates governance.
+ */
+export function runtimeToolPermission(
+  agent: AgentDefinition,
+  toolName: string,
+): PermissionPolicyType | undefined {
+  if (getCustomToolNames(agent).includes(toolName)) return undefined;
+  if (toolName.startsWith(MCP_TOOL_PREFIX)) return getToolPermission(agent, toolName);
+  const builtinToolsets = getAgentToolsets(agent);
+  if (builtinToolsets.length === 0) return undefined;
+  if (!BUILTIN_TOOL_NAMES.includes(toolName as (typeof BUILTIN_TOOL_NAMES)[number])) return undefined;
+  for (const toolset of builtinToolsets) {
+    const config = toolset.configs?.find((item) => item.name === toolName);
+    if (config) return getPermissionPolicy(config, toolset.default_config, toolset.type);
+  }
+  // No tool named the tool: the toolset default is the declared policy. When
+  // several built-in toolsets disagree — a pathological shape — the strictest
+  // default wins rather than the first.
+  const defaults = builtinToolsets.map(
+    (toolset) => getPermissionPolicy(undefined, toolset.default_config, toolset.type),
+  );
+  return defaults.find((policy) => policy === 'never_allow')
+    ?? defaults.find((policy) => policy === 'always_ask')
+    ?? defaults.find((policy) => policy === 'auto')
+    ?? 'always_allow';
+}
+
+export function resolveToolsRequiringEvaluation(
+  agent: AgentDefinition,
+  resolvedToolNames: Iterable<string>,
+): string[] {
+  const required = new Set<string>();
+  for (const name of resolvedToolNames) {
+    if (runtimeToolPermission(agent, name) === 'auto') required.add(name);
+  }
+  return [...required];
+}
+
 function getPermissionPolicy(
   config: AgentToolConfig | undefined,
   defaultConfig: AgentToolConfig | undefined,

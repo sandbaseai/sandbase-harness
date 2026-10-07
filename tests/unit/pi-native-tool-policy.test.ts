@@ -159,6 +159,33 @@ describe('fail-closed refusals', () => {
     expect(plan.argv).toEqual(['--tools', 'bash,edit,read,write,grep']);
   });
 
+  it('refuses a tool declared auto — Pi has no per-call model judgement to apply', () => {
+    // The gate decides a call by blocking for a person; `auto` asks for a
+    // model evaluation the extension cannot run. Compiling it as allowed or
+    // gated would both silently change the declared policy, so admission
+    // refuses with the same code a tool Pi lacks carries.
+    const definition = agentWithTools([
+      {
+        type: 'agent_toolset_20260401',
+        configs: [{ name: 'bash', permission_policy: { type: 'auto' } }],
+      },
+    ]);
+
+    expect(() => compilePiNativeToolPolicy(definition)).toThrow(PiToolPolicyUnsupportedError);
+    expect(() => assertPiAgentCanExecute(definition)).toThrow(/auto.*bash|bash.*auto/i);
+  });
+
+  it('refuses a toolset-wide auto default even when no tool names it explicitly', () => {
+    const definition = agentWithTools([
+      {
+        type: 'agent_toolset_20260401',
+        default_config: { permission_policy: { type: 'auto' } },
+      },
+    ]);
+
+    expect(() => assertPiAgentCanExecute(definition)).toThrow(PiToolPolicyUnsupportedError);
+  });
+
   it('returns the plan from admission for an agent that needs no gate', () => {
     const plan = assertPiAgentCanExecute(agentWithTools([
       { type: 'agent_toolset_20260401', configs: [{ name: 'grep' }] },

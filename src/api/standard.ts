@@ -332,6 +332,18 @@ export interface ApiEvent {
   /** Tool-use this MCP result answers. */
   mcp_tool_use_id?: string;
   /**
+   * The permission outcome an `agent.tool_use` / `agent.mcp_tool_use` records
+   * for its invocation: the resolved policy allowed it, held it for approval,
+   * or refused it before it could run.
+   */
+  evaluated_permission?: 'allow' | 'ask' | 'deny';
+  /**
+   * Which resolved `permission_policy` produced `evaluated_permission`, and
+   * under `auto` the per-call judgement. Absent when the call was refused
+   * before any policy applied.
+   */
+  evaluation?: Record<string, unknown>;
+  /**
    * Name and input of a `tool_use` block, lifted to the top level where
    * `src/types/cma-protocol.ts` and the published client loop read them.
    * `content` still carries the block: this is a projection, not a move. The
@@ -619,6 +631,17 @@ export function toApiEvent(event: SessionEvent): ApiEvent {
   // `content` is kept as well: this is a projection, not a move.
   const toolUse = contentToolUseBlock(event);
   const toolUseId = event.type === 'agent.tool_result' ? contentToolUseId(event) : undefined;
+  // `agent.tool_use` / `agent.mcp_tool_use` persist their permission evidence
+  // through the metadata carrier and project it to the published top-level
+  // fields here. `evaluation` is the discriminated arm (always_allow,
+  // always_ask, or auto carrying the per-call verdict); it is absent only for
+  // a call refused before any policy applied, which the wire reads as deny.
+  const isGovernedToolUse = event.type === 'agent.tool_use' || event.type === 'agent.mcp_tool_use';
+  const rawEvaluated = isGovernedToolUse ? metadataString(event, 'evaluated_permission') : undefined;
+  const evaluatedPermission = rawEvaluated === 'allow' || rawEvaluated === 'ask' || rawEvaluated === 'deny'
+    ? rawEvaluated
+    : undefined;
+  const toolEvaluation = isGovernedToolUse ? metadataObject(event, 'evaluation') : undefined;
   // `user.custom_tool_result` has no content block that names the call it
   // answers — the accepted value lives in the metadata carrier — while
   // `UserCustomToolResultEvent` declares `custom_tool_use_id` as a top-level
@@ -719,6 +742,8 @@ export function toApiEvent(event: SessionEvent): ApiEvent {
     ...(sessionUpdate?.vault_ids !== undefined ? { vault_ids: sessionUpdate.vault_ids as string[] } : {}),
     ...(mcpServerName ? { mcp_server_name: mcpServerName } : {}),
     ...(mcpToolUseId ? { mcp_tool_use_id: mcpToolUseId } : {}),
+    ...(evaluatedPermission ? { evaluated_permission: evaluatedPermission } : {}),
+    ...(toolEvaluation ? { evaluation: toolEvaluation } : {}),
     ...(toolUseId ? { tool_use_id: toolUseId } : {}),
     ...(customToolUseId ? { custom_tool_use_id: customToolUseId } : {}),
     ...(toolUse ?? {}),

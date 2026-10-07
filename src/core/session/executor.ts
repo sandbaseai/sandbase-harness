@@ -49,7 +49,7 @@ import {
   type CredentialInjectionTarget,
 } from '@/core/credentials/injection.js';
 import { modelEndpointHost } from '@/model/registry.js';
-import { getCustomToolNames, getToolsRequiringConfirmation } from '@/core/agent/standard.js';
+import { getCustomToolNames, getToolsRequiringConfirmation, resolveToolsRequiringEvaluation } from '@/core/agent/standard.js';
 import {
   assertPiAgentCanExecute,
   assertPiEnvironmentCanExecute,
@@ -408,6 +408,11 @@ export class DefaultSessionExecutor implements SessionExecutor {
     // surfaces it and waits for the caller's result, so it is routed through the
     // same requires_action path an approval takes.
     const confirmTools = [...getToolsRequiringConfirmation(agent), ...getCustomToolNames(agent)];
+    // `auto` tools keep their `execute` — the judgement is per call, made at
+    // the SDK's needsApproval gate — so the resolved-map set is what the
+    // strategy wraps. Deriving it here rather than from declared configs is
+    // what covers an MCP tool the server exposed but the agent never named.
+    const autoTools = resolveToolsRequiringEvaluation(agent, Object.keys(tools));
 
     // 6. Execute strategy
     const context: StrategyContext = {
@@ -438,6 +443,7 @@ export class DefaultSessionExecutor implements SessionExecutor {
         ),
         temperature: agent.temperature ?? 0.7,
         confirmTools,
+        ...(autoTools.length > 0 ? { autoTools } : {}),
         onRequiresAction: options?.onRequiresAction,
         budgetExhausted: options?.budgetExhausted,
         // The agent's model profile rides into the provider request here; a

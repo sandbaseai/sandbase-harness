@@ -513,6 +513,18 @@ name. A tool the operator marked `never_allow` is not admitted at all rather tha
 shipped and gated, because shipping it would invite the model to call something
 the operator forbade.
 
+A config may also declare `permission_policy: { "type": "auto" }`, opt-in per
+tool or per toolset default. Each invocation is then judged individually by a
+local model evaluation before it may run: `allow` executes it, `deny` never runs
+it and answers the model with a flagged error result, and `ask` parks the call on
+the same `user.tool_confirmation` path an `always_ask` call takes. The evaluation
+is fail-closed — a judge that is unavailable or cannot produce a decision yields
+`ask` with `reason_code: "indeterminate"`, never a silent allow. Governed tool
+events carry the outcome in `evaluated_permission` and `evaluation` (the policy
+arm that produced it, carrying the `auto` verdict and `reason_code` when one
+applies). The Pi loop engine cannot express a per-call judgement and refuses an
+agent that declares `auto` at admission with `pi_tool_policy_not_supported`.
+
 ### Custom tools
 
 A custom tool is declared as an independent `tools[]` entry carrying `type: "custom"`, with `name`, `description`, and `input_schema`. The legacy `custom_toolset` grouping is still accepted on write, with `parameters` accepted as an alias for `input_schema`, and is projected back as flat canonical `custom` entries, so a client reading an agent sees one shape regardless of how it was written. A tool the legacy grouping disables — a config with `enabled: false`, or every config under a `default_config` of `enabled: false` — is dropped rather than translated into a policy. A canonical entry carrying a `permission_policy` is refused with `400 invalid_request_error`: the caller executes the tool and decides whether to run it, so a policy field would claim governance the runtime does not have. A name that collides with a built-in tool, a name declared twice across both shapes, and a malformed input schema are each refused with a message naming the offending entry.
@@ -3452,7 +3464,11 @@ pending call: it is consumed by a conditional update, so a duplicate, mismatched
 or late decision is refused instead of executing anything. A decision that cannot
 be recorded, a gate extension that did not load, a decision whose replacement
 input is not a plain object, and a transport that dies while a decision is pending
-all deny the call rather than letting it run. Docker and Kubernetes Pi transport
+all deny the call rather than letting it run. A native tool declared `auto` is
+refused outright: the gate is a block-for-a-decision extension and Pi's print
+loop has no channel for the per-call model evaluation `auto` requires, so the
+agent is refused with `pi_tool_policy_not_supported` instead of being launched
+with its declared policy silently weakened. Docker and Kubernetes Pi transport
 are not part of this local demo.
 
 The decision a gated call waits for does not have to be a person's. When the

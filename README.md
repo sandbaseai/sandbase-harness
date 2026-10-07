@@ -177,6 +177,7 @@ test fails when it drifts from the matrix.
 | tools | `web-tool-domain-policy` | Supported |  |
 | tools | `tool-output-overflow` | Partial | Overflow has one unified contract (spill path, preview, marker, retrieval), but the local threshold is 50,000 chars rather than the published 100,000. |
 | tools | `mcp-tool-approval-gate` | Supported |  |
+| tools | `auto-permission-policy` | Supported |  |
 | custom-tools | `custom-tool-declaration` | Supported |  |
 | system-message | `system-message-events` | Supported |  |
 | memory-stores | `memory-crud` | Supported |  |

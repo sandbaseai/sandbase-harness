@@ -19,10 +19,17 @@ import { jsonSchema, stepCountIs, streamText } from 'ai';
 import { createAiSdkExecutionLock, type JsonSchemaLike } from 'prefix-safe-json';
 import type { LanguageModel, ModelMessage } from 'ai';
 import type { AgentStrategy, StrategyContext } from '@/types/strategy.js';
+import type { AutoPermissionCall, AutoPermissionVerdict } from '@/types/strategy.js';
+import type { PermissionPolicyType } from '@/types/agent.js';
 import type { SessionEvent } from '@/types/session.js';
 import type { ContentBlock } from '@/types/cma-protocol.js';
 import { resolveMcpServerName } from '@/core/mcp/mcp-manager.js';
-import { toolErrorText } from '@/core/tool-result-error.js';
+import { runtimeToolPermission } from '@/core/agent/standard.js';
+import {
+  AUTO_PERMISSION_REASON_INDETERMINATE,
+  createAutoPermissionEvaluator,
+} from '@/core/session/auto-permission.js';
+import { toolError, toolErrorText } from '@/core/tool-result-error.js';
 import { MODEL_AUTH_FAILED_CODE, MODEL_NOT_FOUND_CODE } from '@/model/errors.js';
 import { resolvedModelIdOf } from '@/model/registry.js';
 import { anthropicCallOptions } from '@/model/anthropic-options.js';
@@ -216,6 +223,7 @@ export class DefaultStrategy implements AgentStrategy {
       tokensIn: number;
       tokensOut: number;
       confirmationGroupId: string;
+      permissionMeta?: Record<string, unknown>;
     }> = [];
     const pendingCustomToolCalls: Array<{
       toolCallId: string;
@@ -225,6 +233,34 @@ export class DefaultStrategy implements AgentStrategy {
       tokensOut: number;
       stopReason?: string;
     }> = [];
+    // Calls governed by `permission_policy: {type: "auto"}` are judged per
+    // invocation before they may execute. The SDK's `needsApproval` hook is
+    // the gate: `allow` runs, `deny` is answered by the wrapped `execute` with
+    // a synthetic error result, and `ask` leaves the call unexecuted so the
+    // turn parks on the same confirmation path `always_ask` uses. The map
+    // records each verdict so the emitted `agent.tool_use` can publish it and
+    // the deny path can refuse without ever running the tool.
+    const autoTools = new Set(config.autoTools ?? []);
+    const autoVerdicts = new Map<string, AutoPermissionVerdict>();
+    const evaluateAutoCall = autoTools.size > 0
+      ? async (call: AutoPermissionCall): Promise<AutoPermissionVerdict> => {
+          try {
+            if (config.evaluateToolPermission) {
+              return await config.evaluateToolPermission(call);
+            }
+            const evaluation = await createAutoPermissionEvaluator(model)(call);
+            // The judge's request is a model request too, so its usage joins
+            // the session's canonical aggregate the same way a step's does.
+            if (evaluation.usage) {
+              eventLog.recordUsage(session.id, evaluation.usage.inputTokens, evaluation.usage.outputTokens);
+            }
+            return evaluation.verdict;
+          } catch {
+            // A judge that cannot answer fails closed to the approval gate.
+            return { type: 'ask', reasonCode: AUTO_PERMISSION_REASON_INDETERMINATE };
+          }
+        }
+      : undefined;
     // The id recorded against every event this turn produces. Resolution order
     // is by how directly each source knows the request: the registry recorded
     // the id the client was built with, a caller-supplied configuration is the
@@ -297,15 +333,22 @@ export class DefaultStrategy implements AgentStrategy {
       const customToolDefinitions = Object.fromEntries(
         Object.entries(tools).filter(([name]) => customTools.has(name)),
       );
+      const autoToolDefinitions = Object.fromEntries(
+        Object.entries(tools).filter(([name]) => autoTools.has(name)),
+      );
       const lockedConfirmationTools = createAiSdkExecutionLock(confirmationToolDefinitions);
       const lockedCustomTools = createAiSdkExecutionLock(customToolDefinitions);
       const aiTools: Record<string, any> = {};
       for (const [name, tool] of Object.entries(tools)) {
-        aiTools[name] = toAiTool(lockedConfirmationTools[name] ?? lockedCustomTools[name] ?? tool, failedToolResultCallIds);
+        const base = lockedConfirmationTools[name] ?? lockedCustomTools[name]
+          ?? (autoTools.has(name) && evaluateAutoCall
+            ? autoPermissionTool(tool, name, evaluateAutoCall, autoVerdicts)
+            : tool);
+        aiTools[name] = toAiTool(base, failedToolResultCallIds);
       }
       const guard = createAiSdkV4ExecutionGuard({
         schemas: Object.fromEntries(
-          Object.entries({ ...confirmationToolDefinitions, ...customToolDefinitions })
+          Object.entries({ ...confirmationToolDefinitions, ...customToolDefinitions, ...autoToolDefinitions })
             .filter(([, tool]) => tool?.parameters && typeof tool.parameters === 'object')
             .map(([name, tool]) => [name, tool.parameters as JsonSchemaLike]),
         ),
@@ -495,7 +538,10 @@ export class DefaultStrategy implements AgentStrategy {
                 }
                 continue;
               }
-              const awaitsConfirmation = confirmTools.has(toolCall.toolName) && !resultIds.has(toolCall.toolCallId);
+              const autoVerdict = autoVerdicts.get(toolCall.toolCallId);
+              const awaitsConfirmation =
+                (confirmTools.has(toolCall.toolName) || autoVerdict?.type === 'ask')
+                && !resultIds.has(toolCall.toolCallId);
               if (awaitsConfirmation) {
                 confirmationGroupId ??= `confirm_${nanoid(16)}`;
                 pendingConfirmationCalls.push({
@@ -504,12 +550,24 @@ export class DefaultStrategy implements AgentStrategy {
                   tokensIn,
                   tokensOut,
                   confirmationGroupId,
+                  permissionMeta: toolPermissionMetadata(
+                    governedPolicyOf(session, toolCall.toolName, customTools),
+                    autoVerdict,
+                    false,
+                    true,
+                  ),
                 });
                 continue;
               }
 
               const isMcp = toolCall.toolName.startsWith('mcp_');
               const mcpServerName = isMcp ? resolveMcpServerName(toolCall.toolName, mcpServerNames) : undefined;
+              const permissionMeta = toolPermissionMetadata(
+                governedPolicyOf(session, toolCall.toolName, customTools),
+                autoVerdict,
+                resultIds.has(toolCall.toolCallId),
+                false,
+              );
               const toolUseEvent = eventLog.append(session.id, {
                 type: isMcp ? 'agent.mcp_tool_use' : 'agent.tool_use',
                 content: [{
@@ -522,7 +580,9 @@ export class DefaultStrategy implements AgentStrategy {
                 tokensOut,
                 modelUsed,
                 stopReason,
-                ...(mcpServerName ? { metadata: { mcp_server_name: mcpServerName } } : {}),
+                ...(mcpServerName || permissionMeta
+                  ? { metadata: { ...(mcpServerName ? { mcp_server_name: mcpServerName } : {}), ...permissionMeta } }
+                  : {}),
               });
               broadcast(toolUseEvent);
             }
@@ -589,6 +649,9 @@ export class DefaultStrategy implements AgentStrategy {
             for (const toolCall of step.toolCalls) {
               if (resultIds.has(toolCall.toolCallId)) continue;
               if (customTools.has(toolCall.toolName) || confirmTools.has(toolCall.toolName)) continue;
+              // An `auto` call the judge parked is already on the confirmation
+              // path — a synthetic error here would claim it failed.
+              if (autoVerdicts.get(toolCall.toolCallId)?.type === 'ask') continue;
               const isMcp = toolCall.toolName.startsWith('mcp_');
               // The SDK's `tool-error` stream part carries the real failure —
               // a thrown execute error or the input-validation message — while
@@ -745,7 +808,10 @@ export class DefaultStrategy implements AgentStrategy {
           tokensOut: pendingCall.tokensOut,
           modelUsed,
           stopReason: 'tool_confirmation',
-          metadata: { confirmation_group_id: pendingCall.confirmationGroupId },
+          metadata: {
+            confirmation_group_id: pendingCall.confirmationGroupId,
+            ...pendingCall.permissionMeta,
+          },
         });
         broadcast(toolUseEvent);
       }
@@ -758,7 +824,8 @@ export class DefaultStrategy implements AgentStrategy {
       const resolvedIds = new Set((toolResults ?? []).map((r: any) => r.toolCallId));
       const pending = (toolCalls ?? []).filter((c: any) => !resolvedIds.has(c.toolCallId));
       const pendingConfirm = pending.filter(
-        (c: any) => confirmTools.has(c.toolName) && confirmableToolCallIds.has(c.toolCallId),
+        (c: any) => (confirmTools.has(c.toolName) || autoVerdicts.get(c.toolCallId)?.type === 'ask')
+          && confirmableToolCallIds.has(c.toolCallId),
       );
       // A persisted custom tool call is also parked work: the runtime is waiting
       // for the caller's result, so the session is actionable in the same way an
@@ -857,4 +924,109 @@ function isAiSdkSchema(value: unknown): boolean {
     typeof value === 'object' &&
     ('jsonSchema' in value || '_def' in value),
   );
+}
+
+/**
+ * Attach the `auto` permission gate to a resolved tool.
+ *
+ * The SDK consults `needsApproval` per call, before execution: the callback
+ * runs the evaluator once, records the verdict under the call id, and returns
+ * `true` only for `ask` — the SDK then emits the call without executing it,
+ * which is exactly the parked shape the confirmation path already handles.
+ *
+ * `deny` cannot return `true` — that would park a call the judge already
+ * condemned — so it returns `false` and the wrapped `execute` answers with a
+ * ToolResultError: the model reads the refusal as an ordinary error result,
+ * and the emitted `agent.tool_result` is flagged `is_error` by the same
+ * marker every other refusal uses. The tool's own `execute` never runs.
+ */
+function autoPermissionTool(
+  tool: any,
+  name: string,
+  evaluate: (call: AutoPermissionCall) => Promise<AutoPermissionVerdict>,
+  verdicts: Map<string, AutoPermissionVerdict>,
+): any {
+  const execute = tool?.execute;
+  return {
+    ...tool,
+    needsApproval: async (input: unknown, options: { toolCallId?: string }) => {
+      const verdict = await evaluate({
+        toolName: name,
+        input: input && typeof input === 'object' ? input as Record<string, unknown> : {},
+        toolCallId: options?.toolCallId ?? '',
+      });
+      if (options?.toolCallId) verdicts.set(options.toolCallId, verdict);
+      return verdict.type === 'ask';
+    },
+    execute: typeof execute === 'function'
+      ? async (input: unknown, options?: { toolCallId?: string }) => {
+          const verdict = options?.toolCallId ? verdicts.get(options.toolCallId) : undefined;
+          if (verdict?.type === 'deny') {
+            return toolError(
+              `Tool call denied by permission policy evaluation (${verdict.reasonCode}).`,
+            );
+          }
+          return execute(input, options);
+        }
+      : execute,
+  };
+}
+
+/**
+ * The resolved permission policy governing a model-visible tool name, or
+ * `undefined` for caller-executed custom tools, which permission policy does
+ * not govern by design.
+ */
+function governedPolicyOf(
+  session: { agentDefinition?: { tools?: unknown[] } },
+  toolName: string,
+  customTools: Set<string>,
+): PermissionPolicyType | undefined {
+  if (customTools.has(toolName)) return undefined;
+  const agent = session.agentDefinition as Parameters<typeof runtimeToolPermission>[0] | undefined;
+  return agent ? runtimeToolPermission(agent, toolName) : undefined;
+}
+
+/**
+ * The permission evidence an `agent.tool_use` event carries.
+ *
+ * `evaluated_permission` is the invocation's outcome; `evaluation` names the
+ * resolved policy arm that produced it, carrying the judge's verdict under
+ * `auto`. The `evaluation` field is absent only when the call was refused
+ * before any policy applied — an unvalidated call that never reached the
+ * evaluator — which reads as `evaluated_permission: "deny"`. `never_allow`
+ * produces no event at all because the tool is withheld upstream.
+ */
+function toolPermissionMetadata(
+  policy: PermissionPolicyType | undefined,
+  verdict: AutoPermissionVerdict | undefined,
+  hasResult: boolean,
+  parked: boolean,
+): Record<string, unknown> | undefined {
+  if (policy === undefined || policy === 'never_allow') return undefined;
+  if (policy === 'auto') {
+    if (!verdict) return { permission: 'auto', evaluated_permission: 'deny' };
+    return {
+      permission: 'auto',
+      evaluated_permission: verdict.type,
+      evaluation: {
+        type: 'auto',
+        evaluated_permission: verdict.type,
+        ...(verdict.type === 'allow' ? {} : { reason_code: verdict.reasonCode }),
+      },
+    };
+  }
+  if (parked) {
+    return {
+      permission: policy,
+      evaluated_permission: 'ask',
+      evaluation: { type: 'always_ask' },
+    };
+  }
+  if (!hasResult) return { permission: policy, evaluated_permission: 'deny' };
+  return {
+    permission: policy,
+    evaluated_permission: 'allow',
+    evaluation: { type: 'always_allow' },
+  };
 }

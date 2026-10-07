@@ -36,7 +36,7 @@ export const mcpServerConfigSchema = z.discriminatedUnion('type', [
 ]);
 
 const permissionPolicySchema = z.object({
-  type: z.enum(['always_allow', 'always_ask', 'never_allow']),
+  type: z.enum(['always_allow', 'always_ask', 'never_allow', 'auto']),
 });
 
 const agentToolConfigSchema = z.object({

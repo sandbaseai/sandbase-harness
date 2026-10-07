@@ -95,6 +95,44 @@ describe('standard API event serialization', () => {
     });
     expect(toApiSessionStatus('requires_action')).toBe('idle');
   });
+
+  it('projects evaluated_permission and evaluation onto a governed tool_use event', () => {
+    const event: SessionEvent = {
+      id: 'sevt_3',
+      sessionId: 'sess_1',
+      seq: 9,
+      type: 'agent.tool_use',
+      content: [{
+        type: 'tool_use', id: 'call_1', name: 'bash', input: { command: 'rm -rf /' },
+      }],
+      metadata: {
+        permission: 'auto',
+        evaluated_permission: 'deny',
+        evaluation: { type: 'auto', evaluated_permission: 'deny', reason_code: 'high_risk' },
+      },
+      createdAt: new Date('2026-09-14T00:00:00.000Z'),
+    };
+
+    expect(toApiEvent(event)).toMatchObject({
+      evaluated_permission: 'deny',
+      evaluation: { type: 'auto', evaluated_permission: 'deny', reason_code: 'high_risk' },
+    });
+  });
+
+  it('publishes no permission fields on an event whose metadata holds none', () => {
+    const event: SessionEvent = {
+      id: 'sevt_4',
+      sessionId: 'sess_1',
+      seq: 10,
+      type: 'agent.tool_use',
+      content: [{ type: 'tool_use', id: 'call_2', name: 'read', input: { path: 'a' } }],
+      createdAt: new Date('2026-09-14T00:00:00.000Z'),
+    };
+
+    const api = toApiEvent(event);
+    expect(api.evaluated_permission).toBeUndefined();
+    expect(api.evaluation).toBeUndefined();
+  });
 });
 
 describe('standard API session serialization', () => {

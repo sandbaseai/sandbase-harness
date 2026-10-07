@@ -1,12 +1,15 @@
 # CMA Contract — tools
 
 Contract area: built-in tools — availability, web tool domain policy, MCP
-toolset approval, and tool output overflow.
+toolset approval, the `auto` per-call permission evaluation, and tool output
+overflow.
 Status: `partial` — every built-in executes, web_search included, but
 web_fetch keeps documented limits and the local overflow threshold differs,
 see §4.
 Source: `src/core/capabilities/registry.ts`, `src/core/agent/web-tool-policy.ts`,
 `src/core/agent/standard.ts`, `src/core/mcp/tool-naming.ts`,
+`src/core/session/auto-permission.ts`, `src/core/session/pi-native-tools.ts`,
+`src/strategy/default-strategy.ts`,
 `src/core/session/tool-output-overflow.ts`, `src/core/web/web-fetch.ts`,
 `src/core/web/web-search-tool.ts`, `src/core/web/search/index.ts`,
 `src/core/web/search/tavily.ts`.
@@ -18,6 +21,7 @@ web-search-execution: supported
 web-tool-domain-policy: supported
 tool-output-overflow: partial
 mcp-tool-approval-gate: supported
+auto-permission-policy: supported
 -->
 
 ---
@@ -36,6 +40,13 @@ mcp-tool-approval-gate: supported
   or omit the field.
 - Tool output beyond the published threshold is automatically written to a
   sandbox file; the model receives a truncated preview plus the file path.
+- A tool config's `permission_policy` also accepts `auto`: each invocation is
+  evaluated individually, and the evaluation answers `allow` (executes),
+  `deny` (the call does not run and the model reads a synthetic error
+  result), or `ask` (held for client approval). An `ask` or `deny` verdict
+  carries a `reason_code` (`indeterminate`, `high_risk`), and a governed
+  `tool_use` event reports `evaluated_permission` plus an `evaluation`
+  object naming the arm that produced it.
 
 ## 2. Current SandBase shape
 
@@ -159,6 +170,22 @@ Toolset approval (`standard.ts`, `tool-naming.ts`):
   `tool-naming.ts` and resolved back to a server by longest-prefix match. The
   layers that name a tool and the layers that gate it must agree on the string;
   a second spelling of the rule is how a policy silently stops applying.
+- `auto` is a third arm, decided per call rather than statically
+  (`resolveToolsRequiringEvaluation`, `auto-permission.ts`,
+  `default-strategy.ts`). Like approval, it is computed from the tool map
+  actually resolved for the turn, so a discovered MCP tool that inherits an
+  `auto` toolset default is evaluated too. The strategy attaches the AI SDK's
+  `needsApproval` hook to each governed tool: the evaluator
+  (`createAutoPermissionEvaluator`, a `generateText` call on the turn's own
+  model) judges the validated invocation once, and the verdict maps onto the
+  three published outcomes — `allow` executes, `ask` leaves the call
+  unexecuted so the turn parks on the same `user.tool_confirmation` path an
+  `always_ask` call takes, and `deny` never executes: the wrapped `execute`
+  answers with a flagged error result the model reads as an ordinary tool
+  failure. The fail-closed rule is asymmetric on purpose: an evaluator that
+  throws, is unreachable, or returns an unreadable verdict collapses to
+  `ask`/`indeterminate`, never to `allow`. The judgement's own usage is added
+  to the session aggregate like any other model request.
 - Pi's pre-execution gate is the one exception, and it is not a Harness
   permission verdict: `assertPiAgentCanExecute` admits an agent whose *effective*
   policy marks a native tool `always_ask`, and that tool's calls are stopped by a
@@ -166,7 +193,10 @@ Toolset approval (`standard.ts`, `tool-naming.ts`):
   "Always_ask gating"). The decision is durable and one-shot, so the call runs only
   if a decision was recorded for it. Anything Pi cannot express at all — a native
   tool Pi does not have, an enabled `mcp_toolset` — is still refused with
-  `pi_tool_policy_not_supported` rather than admitted.
+  `pi_tool_policy_not_supported` rather than admitted. `auto` joins that refused
+  set: the gate is a block-for-a-person extension with no channel for a per-call
+  model judgement, so an agent declaring `auto` is refused rather than launched
+  with a silently different policy.
 
 Tool event fields (`src/api/standard.ts`):
 
@@ -183,6 +213,14 @@ Tool event fields (`src/api/standard.ts`):
   tool-call id remains reachable as `content[0].id`.
 - A field is omitted rather than sent as `null` when the block does not carry it,
   and no field is projected onto an event type whose declared shape has none.
+- A governed `agent.tool_use` / `agent.mcp_tool_use` persists its permission
+  evidence through `metadata` and `toApiEvent` projects it to the published
+  top-level fields: `evaluated_permission` (`allow` / `ask` / `deny`) and
+  `evaluation`, the discriminated arm — `{type: "always_allow"}`,
+  `{type: "always_ask"}`, or `{type: "auto", evaluated_permission, reason_code?}`.
+  `evaluation` is absent only for a call refused before any policy applied,
+  which reads as `evaluated_permission: "deny"`; a `never_allow` tool
+  produces no event because it is withheld upstream.
 
 ## 3. Alignment
 
@@ -190,8 +228,9 @@ Aligned for: the domain grammar and exclusivity rules, the empty-list rejection,
 the refusal to accept configuration the runtime cannot execute, a single
 unified overflow path rather than per-tool truncation, the
 `always_allow` / `always_ask` split by toolset kind including dynamically
-discovered tools, and the projected tool-event field names the published client
-loop reads.
+discovered tools, the `auto` per-call evaluation with its three verdicts and
+fail-closed degradation, and the projected tool-event field names the published
+client loop reads — `evaluated_permission` and `evaluation` included.
 
 ## 4. Differences
 
@@ -262,6 +301,20 @@ loop reads.
   it from reaching the model at all.
 - `tests/unit/pi-engine-session.test.ts` — Pi refuses an agent whose MCP toolset
   asks by kind, including one with no `default_config` written.
+- `tests/unit/auto-permission.test.ts` — the evaluator's verdict parsing and
+  the fail-closed contract: only a literal `allow` grants `allow`, and a
+  malformed answer or a failing judge collapses to `ask`/`indeterminate`.
+- `tests/unit/mcp-tool-permission.test.ts` — `auto` schema acceptance, the
+  resolved-map derivation covering a discovered MCP tool under a toolset-wide
+  `auto` default, `never_allow` precedence, and custom-tool exclusion.
+- `tests/unit/pi-native-tool-policy.test.ts` — Pi refuses `auto` with
+  `pi_tool_policy_not_supported`, per-tool and toolset-wide.
+- `tests/integration/session-auto-permission.test.ts` — the executed half:
+  `allow` runs exactly once, `deny` never runs and answers the model with an
+  error result, `ask` parks through `user.tool_confirmation` and resumes on
+  allow, evaluator failures park instead of executing, two calls in one step
+  take independent verdicts, and the judge's usage joins the session
+  aggregate.
 - `tests/unit/console-tool-permission.test.tsx` — the operator-visible half: the
   Console renders the effective policy per toolset, including the kind defaults,
   so a gated third-party MCP server is distinguishable from an ungated one.

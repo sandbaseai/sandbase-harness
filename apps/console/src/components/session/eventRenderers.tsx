@@ -532,10 +532,10 @@ export function firstBoolean(...values: unknown[]): boolean | undefined {
 
 export function firstPermission(...values: unknown[]): ToolPermission | undefined {
   for (const candidate of values) {
-    if (candidate === 'always_allow' || candidate === 'always_ask' || candidate === 'never_allow') return candidate;
+    if (candidate === 'always_allow' || candidate === 'always_ask' || candidate === 'never_allow' || candidate === 'auto') return candidate;
     if (candidate && typeof candidate === 'object' && 'type' in candidate) {
       const type = (candidate as { type?: unknown }).type;
-      if (type === 'always_allow' || type === 'always_ask' || type === 'never_allow') return type;
+      if (type === 'always_allow' || type === 'always_ask' || type === 'never_allow' || type === 'auto') return type;
     }
   }
   return undefined;

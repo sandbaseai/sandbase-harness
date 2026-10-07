@@ -80,6 +80,23 @@ export interface AgentStrategyConfig {
   temperature?: number;
   /** Tool names that require user confirmation before running (no auto-execute). */
   confirmTools?: string[];
+  /**
+   * Resolved tool names governed by the `auto` permission policy.
+   *
+   * Each call to one of these tools is evaluated individually before it can
+   * execute: the verdict allows it, appends a denial result, or holds it for
+   * human approval through the same parked-confirmation path `confirmTools`
+   * uses. A strategy without an evaluator must still fail closed — a tool on
+   * this list never runs unevaluated, it is held for approval instead.
+   */
+  autoTools?: string[];
+  /**
+   * Per-call evaluator for `auto` tools.
+   *
+   * Optional: a strategy that composes its own judge ignores this, and any
+   * thrown error or unreadable answer reads as `ask` — never `allow`.
+   */
+  evaluateToolPermission?: AutoPermissionEvaluator;
   /** Called by the strategy when a tool call needs user confirmation — the
    *  session should transition to requires_action and await user.tool_confirmation. */
   onRequiresAction?: () => void;
@@ -119,6 +136,34 @@ export interface AgentStrategyConfig {
    */
   contextWindowTokens?: number;
 }
+
+// ============================================================
+// Auto Permission Evaluation
+// ============================================================
+
+/**
+ * The per-invocation judgement the `auto` permission policy produces.
+ *
+ * Mirrors the published `evaluation` registry: `allow` executes without
+ * approval, `deny` appends a synthetic error result and never runs, and `ask`
+ * holds the call for human approval — including every evaluation failure,
+ * which maps to `ask` rather than `allow` so a broken judge cannot silently
+ * widen an agent's reach.
+ */
+export type AutoPermissionVerdict =
+  | { type: 'allow' }
+  | { type: 'ask'; reasonCode: string }
+  | { type: 'deny'; reasonCode: string };
+
+/** One tool invocation presented to the `auto` judge. */
+export interface AutoPermissionCall {
+  toolName: string;
+  input: Record<string, unknown>;
+  /** The model-assigned call id, recorded so the verdict reaches the event. */
+  toolCallId: string;
+}
+
+export type AutoPermissionEvaluator = (call: AutoPermissionCall) => Promise<AutoPermissionVerdict>;
 
 // ============================================================
 // Step & Completion Results

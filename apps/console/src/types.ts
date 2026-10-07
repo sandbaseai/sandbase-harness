@@ -60,7 +60,7 @@ export type McpToolset = {
 
 export type ToolConfig = {
   enabled?: boolean;
-  permission_policy?: { type: 'always_allow' | 'always_ask' | 'never_allow' };
+  permission_policy?: { type: 'always_allow' | 'always_ask' | 'never_allow' | 'auto' };
 };
 
 export type SkillRef = { type: 'custom' | 'anthropic'; skill_id: string; version?: string };
@@ -164,7 +164,7 @@ export type SessionEvent = {
   parent_event_id: string | null;
 };
 
-export type ToolPermission = 'always_allow' | 'always_ask' | 'never_allow';
+export type ToolPermission = 'always_allow' | 'always_ask' | 'never_allow' | 'auto';
 
 export type SessionResourceDraft =
   | { type: 'file'; file_id: string; mount_path: string }

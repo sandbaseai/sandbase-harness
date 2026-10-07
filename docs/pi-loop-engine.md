@@ -194,7 +194,10 @@ or disabled tool is enforced by the child rather than promised by the admission
 check, and an agent that states no policy at all is launched with
 `--no-builtin-tools` rather than with Pi's default toolset. An `always_ask` entry
 no longer refuses the agent: a native tool declared `always_ask` is gated
-before it executes instead, by the extension described above. A fully disabled `mcp_toolset` is admitted
+before it executes instead, by the extension described above. An `auto` entry is
+refused instead: the gate is a block-for-a-decision extension and the print loop
+has no channel for the per-call model evaluation `auto` asks for, so compiling it
+as allowed or as gated would both silently change the declared policy. A fully disabled `mcp_toolset` is admitted
 instead of refused, because nothing is expected to run through it and Pi has no
 MCP transport to enforce: that is a correction of the earlier blanket refusal of
 any `enabled: false` entry, and it makes no tool available. Continuity is guarded

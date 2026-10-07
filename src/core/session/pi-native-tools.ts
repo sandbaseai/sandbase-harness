@@ -10,6 +10,7 @@
  * |------------------------|--------------------------------------------------------|
  * | `always_allow`         | in `--tools`, no gate                                   |
  * | `always_ask`           | in `--tools`, and reported in `plan.gate` for the gate  |
+ * | `auto`                 | fail closed with `pi_tool_policy_not_supported`         |
  * | `never_allow`          | absent from `--tools`, also listed in `--exclude-tools` |
  * | `enabled: false`       | absent from `--tools`, also listed in `--exclude-tools` |
  * | no native tools at all | `--no-builtin-tools`                                    |
@@ -27,7 +28,7 @@
  * gate rather than refused for declaring one.
  */
 
-import { getEnabledToolNames, getExplicitlyEnabledToolNames, getToolsRequiringConfirmation } from '@/core/agent/standard.js';
+import { getEnabledToolNames, getExplicitlyEnabledToolNames, getToolsRequiringConfirmation, resolveToolsRequiringEvaluation } from '@/core/agent/standard.js';
 import type { AgentDefinition } from '@/types/agent.js';
 import { isPiNativeTool } from '@/strategy/pi/native-tools.js';
 
@@ -97,7 +98,17 @@ export function compilePiNativeToolPolicy(agent: AgentDefinition): PiNativeToolP
 
   const allow: string[] = [];
   const gate: string[] = [];
+  const autoTools = new Set(resolveToolsRequiringEvaluation(agent, enabled));
   for (const name of enabled) {
+    // `auto` asks for a per-call model judgement. Pi's gate is a
+    // block-for-a-person extension with no evaluation channel, so admitting
+    // the tool would run it with no judgement at all — refused rather than
+    // silently allowed, the same rule a tool Pi lacks is refused under.
+    if (autoTools.has(name)) {
+      throw new PiToolPolicyUnsupportedError(
+        `Pi cannot evaluate permission_policy "auto" for "${name}"; the managed gate blocks for a person and has no model judgement to apply`,
+      );
+    }
     if (!isPiNativeTool(name)) {
       // A tool the caller named is declared policy — refuse rather than drop.
       // An implicitly enabled tool Pi lacks is an engine-coverage gap, the

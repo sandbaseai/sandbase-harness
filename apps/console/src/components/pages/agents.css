@@ -157,6 +157,10 @@
 .permissionBadge.permission-never_allow {
   text-decoration: line-through;
 }
+.permissionBadge.permission-auto {
+  border-style: dashed;
+  font-style: italic;
+}
 .toolsetHeader strong, .toolsetHeader span {
   display: block;
 }

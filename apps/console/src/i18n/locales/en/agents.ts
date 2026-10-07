@@ -71,6 +71,7 @@ export const agents = {
         always_ask: "Ask each time",
         always_allow: "Always allow",
         never_allow: "Never allow",
+        auto: "Auto-evaluate",
       },
     },
     integrations: {
@@ -132,6 +133,7 @@ export const agents = {
       always_allow: "Always allow",
       always_ask: "Always ask",
       never_allow: "Never allow",
+      auto: "Auto-evaluate",
     },
     capability: {
       available: "Available",

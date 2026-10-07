@@ -102,7 +102,7 @@ export interface AgentSkillRef {
   version?: string;
 }
 
-export type PermissionPolicyType = 'always_allow' | 'always_ask' | 'never_allow';
+export type PermissionPolicyType = 'always_allow' | 'always_ask' | 'never_allow' | 'auto';
 
 export interface AgentToolConfig {
   enabled?: boolean;

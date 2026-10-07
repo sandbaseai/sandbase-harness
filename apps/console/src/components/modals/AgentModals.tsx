@@ -35,7 +35,7 @@ type McpRow = { id: string; name: string; url: string; rest: Record<string, unkn
 const BUILTIN_NAMES = ['bash', 'edit', 'read', 'write', 'glob', 'grep', 'web_fetch', 'web_search'] as const;
 const SPEED_OPTIONS = ['standard', 'fast', 'extended'] as const;
 const EFFORT_OPTIONS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
-const PERMISSION_VALUES = ['always_ask', 'always_allow', 'never_allow'] as const;
+const PERMISSION_VALUES = ['always_ask', 'always_allow', 'never_allow', 'auto'] as const;
 
 let mcpRowSeq = 0;
 
@@ -146,7 +146,7 @@ function AgentDefinitionForm({
     if (value === 'always_ask') {
       delete nextDefault.permission_policy;
     } else {
-      nextDefault.permission_policy = { type: value as 'always_allow' | 'never_allow' };
+      nextDefault.permission_policy = { type: value as 'always_allow' | 'never_allow' | 'auto' };
     }
     patchBuiltin({ default_config: Object.keys(nextDefault).length ? nextDefault : undefined });
   };

@@ -6,6 +6,7 @@ import {
   getToolPermission,
   getToolsRequiringConfirmation,
   mcpDiscoveredToolAdmitted,
+  resolveToolsRequiringEvaluation,
 } from '@/core/agent/standard.js';
 import type { AgentDefinition } from '@/types/agent.js';
 
@@ -95,6 +96,113 @@ describe('default permission policy by toolset type', () => {
 
     expect(getToolPermission(mcpAllowed, 'read_file')).toBe('always_allow');
     expect(getToolPermission(builtinAsked, 'bash')).toBe('always_ask');
+  });
+});
+
+describe('auto permission policy', () => {
+  it('is accepted by the agent definition schema on configs and defaults', () => {
+    const perTool = validateAgentDefinition({
+      name: 'a', model: 'm', system: 's',
+      tools: [{
+        type: 'agent_toolset_20260401',
+        configs: [{ name: 'bash', permission_policy: { type: 'auto' } }],
+      }],
+    });
+    const perDefault = validateAgentDefinition({
+      name: 'a', model: 'm', system: 's',
+      tools: [{
+        type: 'agent_toolset_20260401',
+        default_config: { permission_policy: { type: 'auto' } },
+      }],
+    });
+    expect(perTool.valid).toBe(true);
+    expect(perDefault.valid).toBe(true);
+  });
+
+  it('still rejects a policy value outside the published set', () => {
+    const result = validateAgentDefinition({
+      name: 'a', model: 'm', system: 's',
+      tools: [{
+        type: 'agent_toolset_20260401',
+        configs: [{ name: 'bash', permission_policy: { type: 'sometimes' } }],
+      }],
+    });
+    expect(result.valid).toBe(false);
+  });
+
+  it('resolves an explicit auto tool without touching the confirmation gate', () => {
+    const agent = agentWithTools([
+      {
+        type: 'agent_toolset_20260401',
+        configs: [{ name: 'bash', permission_policy: { type: 'auto' } }],
+      },
+    ]);
+
+    expect(getToolPermission(agent, 'bash')).toBe('auto');
+    // Evaluation is a superset of the approval gate, not a kind of it: an
+    // `auto` tool is never a static `always_ask`.
+    expect(getToolsRequiringConfirmation(agent)).toEqual([]);
+    expect(resolveToolsRequiringEvaluation(agent, ['bash', 'read'])).toEqual(['bash']);
+  });
+
+  it('applies a toolset-wide auto default to every tool it governs', () => {
+    const agent = agentWithTools([
+      {
+        type: 'agent_toolset_20260401',
+        default_config: { permission_policy: { type: 'auto' } },
+      },
+    ]);
+
+    expect(resolveToolsRequiringEvaluation(agent, ['bash', 'read'])).toEqual(['bash', 'read']);
+  });
+
+  it('covers an MCP tool the server exposed but the agent never named', () => {
+    // The resolved map is the first place the discovered name exists, so the
+    // derivation runs off that map — the same derivation `always_ask` uses.
+    const agent = agentWithTools([
+      {
+        type: 'mcp_toolset',
+        mcp_server_name: 'filesystem',
+        default_config: { permission_policy: { type: 'auto' } },
+      },
+    ]);
+
+    expect(resolveToolsRequiringEvaluation(agent, ['mcp_filesystem_read_file', 'bash']))
+      .toEqual(['mcp_filesystem_read_file']);
+  });
+
+  it('lets a per-tool entry out of a toolset-wide auto default', () => {
+    const agent = agentWithTools([
+      {
+        type: 'agent_toolset_20260401',
+        default_config: { permission_policy: { type: 'auto' } },
+        configs: [{ name: 'read', permission_policy: { type: 'always_allow' } }],
+      },
+    ]);
+
+    expect(resolveToolsRequiringEvaluation(agent, ['bash', 'read'])).toEqual(['bash']);
+  });
+
+  it('never evaluates a never_allow tool — it is excluded upstream instead', () => {
+    const agent = agentWithTools([
+      {
+        type: 'agent_toolset_20260401',
+        default_config: { permission_policy: { type: 'auto' } },
+        configs: [{ name: 'bash', permission_policy: { type: 'never_allow' } }],
+      },
+    ]);
+
+    expect(getToolPermission(agent, 'bash')).toBe('never_allow');
+    expect(resolveToolsRequiringEvaluation(agent, ['bash', 'read'])).toEqual(['read']);
+  });
+
+  it('excludes caller-executed custom tools from evaluation', () => {
+    const agent = agentWithTools([
+      { type: 'agent_toolset_20260401', default_config: { permission_policy: { type: 'auto' } } },
+      { type: 'custom', name: 'my_tool', description: 'caller runs this', input_schema: { type: 'object' } },
+    ] as never);
+
+    expect(resolveToolsRequiringEvaluation(agent, ['my_tool', 'bash'])).toEqual(['bash']);
   });
 });
 

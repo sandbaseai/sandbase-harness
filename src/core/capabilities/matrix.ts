@@ -270,6 +270,13 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
     contract: 'contracts/anthropic-cma/tools.md',
   },
   {
+    area: 'tools',
+    id: 'auto-permission-policy',
+    status: 'supported',
+    reason: 'A tool config may declare permission_policy {type: "auto"}; each invocation is judged by a local model evaluation wired through the AI SDK needsApproval gate — allow executes, deny returns a synthetic error result without executing, ask parks on the same user.tool_confirmation path always_ask uses, and every evaluator failure degrades to ask/indeterminate rather than allowing. Governed tool_use events publish evaluated_permission and evaluation. The Pi engine refuses auto outright because its managed gate is a block-for-a-person extension with no evaluation channel.',
+    contract: 'contracts/anthropic-cma/tools.md',
+  },
+  {
     area: 'custom-tools',
     id: 'custom-tool-declaration',
     status: 'supported',
