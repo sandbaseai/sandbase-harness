@@ -205,12 +205,8 @@ router, so both vault spellings preserve the same behavior.
 | GET, POST | `/v1/user_profiles/{id}` |
 | POST | `/v1/user_profiles/{id}/enrollment_url` |
 | GET | `/v1/environments/{id}/work` |
-| GET | `/v1/environments/{id}/work/poll` |
+| GET | `/v1/environments/{id}/work/{work_id}` |
 | GET | `/v1/environments/{id}/work/stats` |
-| GET, POST | `/v1/environments/{id}/work/{work_id}` |
-| POST | `/v1/environments/{id}/work/{work_id}/ack` |
-| POST | `/v1/environments/{id}/work/{work_id}/heartbeat` |
-| POST | `/v1/environments/{id}/work/{work_id}/stop` |
 | GET | `/v1/sessions/{id}/threads` |
 | GET | `/v1/sessions/{id}/threads/{thread_id}` |
 | GET | `/v1/sessions/{id}/threads/{thread_id}/events` |
@@ -2240,6 +2236,41 @@ key's expiry and revocation rules. A claim naming a different environment than t
 key's scope is refused, and a claim presenting a revoked, expired, or unknown key
 is refused before any work item changes hands. A claim without a key is unscoped,
 which is what a runtime that has not issued any worker keys expects.
+
+### Official Work API data plane
+
+The published self-hosted worker surface is mounted over the same queue:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/v1/environments/{id}/work/poll` | Long-poll the queue. `block_ms` (1–999) waits before answering `204` on an empty queue; `reclaim_older_than_ms` (default 5000) decides when a claimed-but-unacknowledged item may be taken back. A claim returns the published work shape with `data: {"type": "session", "id": ...}` and a `secret`. |
+| `POST` | `/v1/environments/{id}/work/{work_id}/ack` | Commit the claim (`queued` → `starting`). Refused with `409` `work_lease_lost` once the claim lease lapses or the item is stopped, and `409` when a `Anthropic-Worker-ID` header names a holder different from the recorded one. |
+| `POST` | `/v1/environments/{id}/work/{work_id}/heartbeat` | Renew the lease. The first beat sends `expected_last_heartbeat=NO_HEARTBEAT` to claim the heartbeat lease, later beats echo the returned `last_heartbeat`; a stale value answers `412` with the server's `current_state` in `error.details`. A stopped or finished item answers `200` with `lease_extended: false` and its projected state — the shutdown signal. |
+| `POST` | `/v1/environments/{id}/work/{work_id}` | Merge a `metadata` patch: a string upserts, `null` deletes, omitted keys are preserved. This route does not carry results. |
+| `POST` | `/v1/environments/{id}/work/{work_id}/stop` | Record the stop marker (`stopping`). `force` is accepted but selects nothing: the marker is already the immediate form. |
+
+The management half — `GET /v1/environments/{id}/work`, `.../work/{id}`, and
+`.../work/stats` — is still a mounted `unsupported_capability` refusal.
+
+Authentication is the published credential set, not the account key: an
+environment worker key (`mawk_...`) polls and operates any item in its
+environment, and the `sessions_token` inside a claimed item's `secret`
+operates that session's own items. The `secret` is minted per claim —
+base64url JSON `{sessions_token, api_base_url}` in the published
+`BetaWorkSecret` shape, where `api_base_url` points back at this runtime so
+the runner's downstream calls stay local — and its hash is all that is
+persisted. A token whose session has ended stops authenticating, and one
+that names a different environment is refused.
+
+The projection's honest edges: `data` is always the session variant because
+every queue item belongs to a session and the per-call payload stays on the
+local `/v1/x/worker` channel; `started_at` equals `acknowledged_at`;
+`desired_ttl_seconds` is reported back rather than applied per item; and
+result reporting remains `POST /v1/x/worker/complete` — the official update
+route is metadata only. States collapse onto the queue's markers: `queued`,
+`starting` (acknowledged, no heartbeat yet), `active` (a heartbeat renewed
+the lease), `stopping`, and `stopped` (`applied`, `failed`, and `unknown`
+all read as `stopped`).
 
 ## Credential Vaults
 

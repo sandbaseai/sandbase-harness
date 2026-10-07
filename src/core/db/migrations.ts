@@ -1374,6 +1374,53 @@ CREATE INDEX idx_dreams_status ON dreams(status) WHERE archived_at IS NULL;
 CREATE INDEX idx_dreams_session_id ON dreams(session_id);
 `;
 
+/**
+ * The official Work API surface for self-hosted environments.
+ *
+ * `work_items.metadata` backs the published `POST /v1/environments/{id}/work/{workId}`
+ * merge patch: user-provided key/value annotations on the item, returned on the
+ * wire projection. Rows written before this column existed read as `NULL`, which
+ * projects as an empty object — the honest answer for an item that was never
+ * annotated, so no back-fill is written.
+ *
+ * `session_work_tokens` is the storage half of the work item's per-session
+ * `secret`: a bearer (`mawt_...`) scoped to one session on one environment,
+ * minted fresh on every claim so a reclaimed item always travels with a new
+ * credential. Only the SHA-256 hash is stored — the raw token lives in the
+ * claimed item's `secret` payload and can never be read back — matching the
+ * worker-key contract.
+ * `environment_id` is denormalized beside `session_id` so validation never
+ * trusts a caller-supplied environment over the recorded binding. A token
+ * outlives nothing: validation also requires the session to be non-terminal,
+ * so a session that ended stops authenticating without a revocation sweep.
+ *
+ * `work_items.heartbeat_at` is the official-wire heartbeat lease anchor —
+ * the value an `expected_last_heartbeat` precondition compares against.
+ * `claimed_at` already records the poll-claim timestamp, but on the published
+ * surface the heartbeat lease is a separate epoch: poll hands out the item
+ * without one, and the worker's first beat claims it by presenting the
+ * `NO_HEARTBEAT` sentinel. Reusing `claimed_at` would make that first beat
+ * always fail its precondition, because a poll claim is exactly what sets
+ * it. The column resets to NULL on every (re)claim so a reclaimed item's
+ * heartbeat epoch starts over — the prior worker's lease is not inherited.
+ */
+const M061_WORK_API_SURFACE = `
+ALTER TABLE work_items ADD COLUMN metadata TEXT;
+ALTER TABLE work_items ADD COLUMN heartbeat_at TEXT;
+
+CREATE TABLE session_work_tokens (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  environment_id TEXT NOT NULL,
+  token_hash TEXT NOT NULL UNIQUE,
+  token_prefix TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  last_seen_at TEXT,
+  revoked_at TEXT
+);
+CREATE INDEX idx_session_work_tokens_session ON session_work_tokens(session_id);
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: '001_initial', sql: M001_INITIAL },
   { version: 2, name: '002_memory', sql: M002_MEMORY },
@@ -1435,4 +1482,5 @@ export const MIGRATIONS: Migration[] = [
   { version: 58, name: '058_credential_oauth_refresh', sql: M058_CREDENTIAL_OAUTH_REFRESH },
   { version: 59, name: '059_webhook_rotation_window_since', sql: M059_WEBHOOK_ROTATION_WINDOW_SINCE },
   { version: 60, name: '060_dreams', sql: M060_DREAMS },
+  { version: 61, name: '061_work_api_surface', sql: M061_WORK_API_SURFACE },
 ];

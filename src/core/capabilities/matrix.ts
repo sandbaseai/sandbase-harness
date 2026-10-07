@@ -424,6 +424,13 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
     contract: 'contracts/anthropic-cma/environments.md',
   },
   {
+    area: 'environments',
+    id: 'environment-work',
+    status: 'partial',
+    reason: 'The published Work API data plane is mounted over the local tool-execution queue: poll claims the oldest claimable item scoped to the calling credential\'s environment and returns it in the published BetaSelfHostedWork shape with a per-claim secret (base64url JSON carrying a sessions_token minted for that claim, plus api_base_url); ack commits the claim, heartbeat renews the heartbeat lease with the published NO_HEARTBEAT first-claim sentinel and expected_last_heartbeat optimistic-concurrency check (412 carrying the server\'s current_state), update merges a metadata patch, and stop records the queue\'s stop marker. The projection is honest about its edges: data is always {type: "session", id} because every local item belongs to a session, per-item desired_ttl_seconds is reported back rather than applied, force-stop has no distinct local mode, and result reporting stays on the local /v1/x/worker channel. Remains partial because the management surface — list, retrieve, and stats — is still a mounted refusal.',
+    contract: 'contracts/anthropic-cma/work.md',
+  },
+  {
     area: 'routes',
     id: 'documented-route-surface',
     status: 'supported',

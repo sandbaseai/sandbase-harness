@@ -5,12 +5,12 @@ import { SessionManager } from '@/core/session/session-manager.js';
 import { CMA_ANTHROPIC_VERSION, CMA_MANAGED_AGENTS_BETA, CMA_RESOURCE_FAMILY_BETAS } from '@/core/cma/compatibility.js';
 import { disposeConformanceContexts, makeConformanceApp, type ConformanceContext } from './support/app.js';
 import { loadOfficialRoutes, missingOfficialRoutes, mountedOfficialRoutes, probeOfficialRoute, routeKey } from './support/official-routes.js';
-import { PENDING_OFFICIAL_ROUTES, UNSUPPORTED_OFFICIAL_ROUTES } from './support/unsupported-official-routes.js';
+import { matchesUnsupportedRoute, PENDING_OFFICIAL_ROUTES, UNSUPPORTED_OFFICIAL_ROUTES } from './support/unsupported-official-routes.js';
 
 const officialRoutes = loadOfficialRoutes();
 const contexts: ConformanceContext[] = [];
 const headers = { 'anthropic-version': CMA_ANTHROPIC_VERSION, 'anthropic-beta': CMA_MANAGED_AGENTS_BETA };
-const unsupportedRoutes = officialRoutes.filter((route) => UNSUPPORTED_OFFICIAL_ROUTES.some((entry) => entry.pattern.test(route.path)));
+const unsupportedRoutes = officialRoutes.filter((route) => UNSUPPORTED_OFFICIAL_ROUTES.some((entry) => matchesUnsupportedRoute(entry, route)));
 
 function context(): ConformanceContext {
   const result = makeConformanceApp('ma-official-route-');
@@ -41,7 +41,7 @@ describe('official SDK route coverage', () => {
     const mounted = mountedOfficialRoutes(context().app);
     for (const entry of UNSUPPORTED_OFFICIAL_ROUTES) {
       expect(entry.reason.length).toBeGreaterThan(0);
-      expect(officialRoutes.some((route) => entry.pattern.test(route.path)), entry.pattern.toString()).toBe(true);
+      expect(officialRoutes.some((route) => matchesUnsupportedRoute(entry, route)), entry.pattern.toString()).toBe(true);
     }
     const keys = new Set(officialRoutes.map(routeKey));
     expect(new Set(PENDING_OFFICIAL_ROUTES.map((entry) => entry.route)).size).toBe(PENDING_OFFICIAL_ROUTES.length);
@@ -52,7 +52,7 @@ describe('official SDK route coverage', () => {
       expect(mounted.has(entry.route), `Remove the now-mounted pending route: ${entry.route}`).toBe(false);
     }
     for (const route of officialRoutes) {
-      const unsupported = UNSUPPORTED_OFFICIAL_ROUTES.filter((entry) => entry.pattern.test(route.path));
+      const unsupported = UNSUPPORTED_OFFICIAL_ROUTES.filter((entry) => matchesUnsupportedRoute(entry, route));
       expect(unsupported.length, routeKey(route)).toBeLessThanOrEqual(1);
       if (unsupported.length) expect(PENDING_OFFICIAL_ROUTES.some((entry) => entry.route === routeKey(route))).toBe(false);
     }

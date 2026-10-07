@@ -25,6 +25,18 @@ export interface AuthConfig {
 }
 
 const PUBLIC_PATHS = new Set(['/', '/dashboard', '/ui', '/v1/x/health', '/v1/x/metrics']);
+
+/**
+ * The official Work API authenticates with its own credential set — an
+ * environment worker key or the per-session token inside a claimed item's
+ * `secret`, validated by the route itself (see routes/environment-work.ts).
+ * Exempting the prefix lets those bearers reach the resolver instead of being
+ * rejected as non-API-key bearers, while the resolver still fails closed on a
+ * credential it cannot place. Subroutes that remain unimplemented answer
+ * `unsupported_capability` whether or not a credential is present, so
+ * exempting them leaks nothing an authenticated caller could not already see.
+ */
+const WORK_API_PATH = /^\/v1\/environments\/[^/]+\/work(?:\/|$)/;
 const INVALID_CREDENTIAL_MESSAGE = 'Missing or invalid API key. Provide exactly one of "Authorization: Bearer <key>" or "x-api-key: <key>".';
 
 export function createAuthMiddleware(config: AuthConfig): MiddlewareHandler {
@@ -54,7 +66,12 @@ export function createAuthMiddleware(config: AuthConfig): MiddlewareHandler {
     }
 
     // Always allow public liveness/root paths and the static console shell.
-    if (PUBLIC_PATHS.has(c.req.path) || c.req.path.startsWith('/dashboard/') || c.req.path.startsWith('/ui/')) {
+    if (
+      PUBLIC_PATHS.has(c.req.path)
+      || c.req.path.startsWith('/dashboard/')
+      || c.req.path.startsWith('/ui/')
+      || WORK_API_PATH.test(c.req.path)
+    ) {
       return next();
     }
 

@@ -26,6 +26,7 @@ import { join } from 'node:path';
 import { createServer } from '@/api/server.js';
 import { Database } from '@/core/db/database.js';
 import { SessionManager } from '@/core/session/session-manager.js';
+import { WorkQueue } from '@/sandbox/self-hosted-provider.js';
 
 export interface ConformanceContext {
   app: ReturnType<typeof createServer>;
@@ -43,6 +44,9 @@ export function makeConformanceApp(prefix = 'ma-conformance-'): ConformanceConte
     sessionManager: new SessionManager(db),
     agents: [],
     reloadAgents: () => ({ agents: [], errors: [] }),
+    // The official Work data plane mounts only when a queue exists; without one
+    // here the conformance suite would report the implemented routes missing.
+    workQueue: new WorkQueue(db),
   });
   return { app, db, tmpDir };
 }

@@ -12,6 +12,7 @@ import runtime_settings from './api-reference/runtime-settings.json';
 import api_keys from './api-reference/api-keys.json';
 import operations from './api-reference/operations.json';
 import worker from './api-reference/worker.json';
+import work from './api-reference/work.json';
 import handoff from './api-reference/handoff.json';
 import webhooks from './api-reference/webhooks.json';
 import scheduled_deployments from './api-reference/scheduled-deployments.json';
@@ -65,6 +66,7 @@ export const API_REFERENCE_DOCS: ApiReferenceEndpoint[] = [
   ...(api_keys as unknown as ApiReferenceEndpoint[]),
   ...(operations as unknown as ApiReferenceEndpoint[]),
   ...(worker as unknown as ApiReferenceEndpoint[]),
+  ...(work as unknown as ApiReferenceEndpoint[]),
   ...(handoff as unknown as ApiReferenceEndpoint[]),
   ...(webhooks as unknown as ApiReferenceEndpoint[]),
   ...(scheduled_deployments as unknown as ApiReferenceEndpoint[]),

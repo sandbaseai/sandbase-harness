@@ -85,6 +85,20 @@ export interface WorkItem {
    * Cleared when a worker claims it, since that begins a new attempt.
    */
   abandonedAt?: string | null;
+  /**
+   * Caller-supplied annotations merged onto the item by the official
+   * `POST /v1/environments/{id}/work/{workId}` update route. Present only on
+   * items written or updated after migration 061; absent reads as `{}`.
+   */
+  metadata?: Record<string, string>;
+  /**
+   * The official-wire heartbeat lease anchor — the value an
+   * `expected_last_heartbeat` precondition compares against. Distinct from
+   * `claimedAt`: a poll claim anchors the claim lease, while the heartbeat
+   * lease begins at the first beat that presents `NO_HEARTBEAT`. Reset to
+   * `null` on every (re)claim so a new claim epoch starts unleased.
+   */
+  heartbeatAt?: string | null;
 }
 
 export type WorkCompletionResult = 'completed' | 'not_found' | 'not_claimed_by_worker';
@@ -120,6 +134,13 @@ export type WorkLeaseResult = 'renewed' | 'not_found' | 'not_claimed_by_worker' 
  * worker in the same instant, which is the double execution this exists to prevent.
  */
 export type WorkAcceptResult = 'accepted' | 'not_found' | 'not_claimed_by_worker' | 'work_lease_lost';
+
+export type WorkHeartbeatScopedResult =
+  | { outcome: 'renewed'; item: WorkItem; lastHeartbeat: string }
+  | { outcome: 'not_found' }
+  | { outcome: 'precondition_failed'; item: WorkItem }
+  | { outcome: 'not_claimed_by_worker'; item: WorkItem }
+  | { outcome: 'work_lease_lost'; item: WorkItem };
 
 /**
  * Machine-readable reasons a bounded wait ends without a result (item 11b).
@@ -209,10 +230,23 @@ const TERMINAL_SESSION_STATUS_SQL = TERMINAL_SESSION_STATUSES.map((status) => `'
 export class WorkQueue {
   private readonly leaseMs: number;
 
+  /**
+   * Workers seen by the official `work/poll` route, in-memory only. A restart
+   * forgets them, which matches the metric's own definition - it counts
+   * workers that polled within a 30-second window, so stale entries expire on
+   * their own without a persisted row.
+   */
+  private readonly pollSeen = new Map<string, number>();
+
   constructor(private readonly db: Database, options: { leaseMs?: number } = {}) {
     this.leaseMs = typeof options.leaseMs === 'number' && Number.isFinite(options.leaseMs) && options.leaseMs > 0
       ? Math.floor(options.leaseMs)
       : DEFAULT_WORK_LEASE_MS;
+  }
+
+  /** The configured claim lease in seconds — what a heartbeat reports as `ttl_seconds`. */
+  get leaseSeconds(): number {
+    return this.leaseMs / 1000;
   }
 
   /**
@@ -269,11 +303,20 @@ export class WorkQueue {
    * the exclusion independent of which path ended the session, and covers rows that
    * are already sitting unmarked in an existing database.
    */
-  claim(workerId: string, sessionId?: string, environmentId?: string): WorkItem | null {
+  claim(workerId: string, sessionId?: string, environmentId?: string, reclaimOlderThanMs?: number): WorkItem | null {
     // SQLite has no `milliseconds` modifier - `datetime('now', '-60000 milliseconds')`
     // is NULL and every comparison against it is NULL, which reads as "nothing is ever
     // reclaimable". Seconds, with a fractional part, is the modifier that exists.
     const leaseModifier = `-${this.leaseMs / 1000} seconds`;
+    // The official poll carries `reclaim_older_than_ms` — how old a
+    // claimed-but-never-acknowledged item must be before a poller may take it
+    // back. It narrows or widens only the stale-claim arm of the predicate:
+    // the accepted-lapse sweep keeps the queue's own lease, because a worker
+    // that committed to running the item answers to the TTL it was given, not
+    // to a later caller's reclaim hint.
+    const reclaimModifier = typeof reclaimOlderThanMs === 'number' && Number.isFinite(reclaimOlderThanMs) && reclaimOlderThanMs > 0
+      ? `-${Math.floor(reclaimOlderThanMs) / 1000} seconds`
+      : leaseModifier;
     // The row's own condition: unstopped, `queued`, and either never held or held under a
     // lease that has run out.
     //
@@ -355,7 +398,7 @@ export class WorkQueue {
                ORDER BY wi.created_at ASC, wi.rowid ASC
                LIMIT 1`
             : `SELECT id FROM work_items WHERE ${claimable('')} AND session_id = ? ORDER BY created_at ASC, rowid ASC LIMIT 1`,
-        ).get(...(environmentId ? [leaseModifier, sessionId, environmentId] : [leaseModifier, sessionId])) as { id: string } | undefined;
+        ).get(...(environmentId ? [reclaimModifier, sessionId, environmentId] : [reclaimModifier, sessionId])) as { id: string } | undefined;
       } else if (environmentId) {
         candidate = this.db.prepare(
           `SELECT wi.id
@@ -364,11 +407,11 @@ export class WorkQueue {
            WHERE ${claimable('wi.')} AND s.environment_id = ?
            ORDER BY wi.created_at ASC, wi.rowid ASC
            LIMIT 1`,
-        ).get(leaseModifier, environmentId) as { id: string } | undefined;
+        ).get(reclaimModifier, environmentId) as { id: string } | undefined;
       } else {
         candidate = this.db.prepare(
           `SELECT id FROM work_items WHERE ${claimable('')} ORDER BY created_at ASC, rowid ASC LIMIT 1`,
-        ).get(leaseModifier) as { id: string } | undefined;
+        ).get(reclaimModifier) as { id: string } | undefined;
       }
       if (!candidate) return null;
 
@@ -384,8 +427,8 @@ export class WorkQueue {
       // attempt. `abandoned_at` is cleared for the same reason: both are statements about a
       // previous holder, and neither may read as though *this* attempt had already ended.
       const res = this.db
-        .prepare(`UPDATE work_items SET claimed_by = ?, claimed_at = datetime('now'), accepted_at = NULL, abandoned_at = NULL WHERE id = ? AND ${claimable('')}`)
-        .run(workerId, candidate.id, leaseModifier) as { changes: number };
+        .prepare(`UPDATE work_items SET claimed_by = ?, claimed_at = datetime('now'), accepted_at = NULL, abandoned_at = NULL, heartbeat_at = NULL WHERE id = ? AND ${claimable('')}`)
+        .run(workerId, candidate.id, reclaimModifier) as { changes: number };
       if (res.changes !== 1) return null; // lost the race — someone else claimed it
 
       const r = this.db.prepare('SELECT * FROM work_items WHERE id = ?').get(candidate.id) as unknown as RawWorkItem;
@@ -540,6 +583,195 @@ export class WorkQueue {
   get(id: string): WorkItem | null {
     const r = this.db.prepare('SELECT * FROM work_items WHERE id = ?').get(id) as RawWorkItem | undefined;
     return r ? toWorkItem(r) : null;
+  }
+
+  /**
+   * The environment a work item belongs to, joined through its session.
+   *
+   * `null` means the item cannot be attributed — its session is gone or
+   * carries no environment — and a route must refuse rather than guess: an
+   * environment-scoped credential checked against an unattributable item
+   * would silently compare against nothing.
+   */
+  environmentOf(id: string): string | null {
+    const row = this.db
+      .prepare(
+        `SELECT s.environment_id AS environment_id
+         FROM work_items wi JOIN sessions s ON s.id = wi.session_id
+         WHERE wi.id = ?`,
+      )
+      .get(id) as { environment_id: string | null } | undefined;
+    return row ? row.environment_id : null;
+  }
+
+  /**
+   * The official-wire acknowledgement: a claimed item's holder confirms, at
+   * the moment of starting, that the claim is still live.
+   *
+   * Same fence as {@link accept} — claimed, inside its lease, unstopped — but
+   * the worker identity is the `Anthropic-Worker-ID` header rather than a
+   * body field, and it is optional: the environment key is the authority on
+   * this wire, so a caller that omits the header accepts on behalf of
+   * whichever worker holds the claim. A header that names a different holder
+   * is still refused, because a named-but-wrong worker is a claim conflict,
+   * not an authority the credential grants.
+   */
+  acceptScoped(id: string, workerId?: string): WorkAcceptResult {
+    const leaseModifier = `-${this.leaseMs / 1000} seconds`;
+    const update = this.db
+      .prepare(
+        `UPDATE work_items SET accepted_at = datetime('now'), status = 'accepted'
+         WHERE id = ? AND status IN ('queued', 'accepted') AND stopped_at IS NULL
+           AND claimed_at IS NOT NULL AND claimed_at > datetime('now', ?)
+           AND (? IS NULL OR claimed_by = ?)`,
+      )
+      .run(id, leaseModifier, workerId ?? null, workerId ?? null) as { changes: number };
+    if (update.changes === 1) return 'accepted';
+    const row = this.get(id);
+    if (!row) return 'not_found';
+    if (row.stoppedAt) return 'work_lease_lost';
+    if (workerId && row.claimedBy && row.claimedBy !== workerId) return 'not_claimed_by_worker';
+    // An unclaimed row, a lapsed lease, and a holder without a header all fail
+    // the same way: the work is no longer this call's to start.
+    return 'work_lease_lost';
+  }
+
+  /**
+   * The official-wire heartbeat: renew the lease, honoring the published
+   * optimistic-concurrency parameter.
+   *
+   * `expectedLastHeartbeat` compares against the recorded heartbeat anchor in
+   * the same statement as the renewal, so a concurrent renewal cannot slip
+   * between a check and a write — the UPDATE's predicate is the fence, and a
+   * heartbeat that observes a moved timestamp changes nothing and reports
+   * `precondition_failed`. The anchor is `heartbeat_at`, not `claimed_at`: on
+   * the published surface the first beat carries `NO_HEARTBEAT` to claim the
+   * heartbeat lease, which is created by that beat rather than by the poll —
+   * if `claimed_at` were the anchor, the sentinel could never match.
+   *
+   * The renewal writes `claimed_at` alongside `heartbeat_at` because the
+   * claim lease is what the reclaim predicate and the accept fence read: a
+   * heartbeat is a life sign, and a heartbeating item must not look stale to
+   * either. The holder check stays on the `Anthropic-Worker-ID` header when
+   * present — a caller that names a different worker is refused even though
+   * the credential itself is the authority, because a named-but-wrong worker
+   * is a claim conflict rather than an impersonation the credential grants.
+   *
+   * `desired_ttl_seconds` is accepted but not honored per item: the lease is
+   * a queue-level constant and the response reports the effective value —
+   * the honest answer rather than a TTL the sweep does not apply.
+   */
+  heartbeatScoped(
+    id: string,
+    opts: { workerId?: string; expectedLastHeartbeat?: string | null } = {},
+  ): WorkHeartbeatScopedResult {
+    const update = this.db
+      .prepare(
+        `UPDATE work_items
+         SET claimed_at = datetime('now'),
+             heartbeat_at = datetime('now'),
+             claimed_by = CASE WHEN claimed_by IS NULL AND ? IS NOT NULL THEN ? ELSE claimed_by END
+         WHERE id = ? AND status IN ('queued', 'accepted') AND stopped_at IS NULL
+           AND (
+             ? IS NULL
+             OR claimed_by = ?
+             OR (heartbeat_at IS NULL AND ? = 'NO_HEARTBEAT')
+           )
+           AND (
+             ? IS NULL
+             OR (? = 'NO_HEARTBEAT' AND heartbeat_at IS NULL)
+             OR REPLACE(heartbeat_at, ' ', 'T') || 'Z' = ?
+           )`,
+      )
+      .run(
+        opts.workerId ?? null,
+        opts.workerId ?? null,
+        id,
+        opts.workerId ?? null,
+        opts.workerId ?? null,
+        opts.expectedLastHeartbeat ?? null,
+        opts.expectedLastHeartbeat ?? null,
+        opts.expectedLastHeartbeat ?? null,
+        opts.expectedLastHeartbeat ?? null,
+      ) as { changes: number };
+    if (update.changes === 1) {
+      const row = this.get(id)!;
+      return { outcome: 'renewed', item: row, lastHeartbeat: row.heartbeatAt! };
+    }
+    const row = this.get(id);
+    if (!row) return { outcome: 'not_found' };
+    if (opts.expectedLastHeartbeat !== undefined && opts.expectedLastHeartbeat !== null) {
+      const expected = opts.expectedLastHeartbeat;
+      const matched = expected === 'NO_HEARTBEAT'
+        ? row.heartbeatAt === null || row.heartbeatAt === undefined
+        : row.heartbeatAt != null && `${row.heartbeatAt.replace(' ', 'T')}Z` === expected;
+      if (!matched) return { outcome: 'precondition_failed', item: row };
+    }
+    if (row.stoppedAt) return { outcome: 'work_lease_lost', item: row };
+    return { outcome: 'not_claimed_by_worker', item: row };
+  }
+
+  /**
+   * Record a stop decision for one item — the route-level half of the
+   * official `work/:id/stop`.
+   *
+   * The marker is the same one {@link stop} writes per session: the item can
+   * never be claimed again, and the holder learns from its next refused
+   * renewal. There is no local graceful/forced distinction — `force` on the
+   * wire selects between "the worker confirms the shutdown" and "mark it at
+   * once", and this queue's marker is already the at-once form: the worker's
+   * heartbeat loop is the shutdown signal, and a result that lands anyway is
+   * still recorded, because the marker says the runtime stopped *wanting*
+   * the work, not that the effect did not happen.
+   */
+  stopItem(id: string): 'stopped' | 'not_found' {
+    const res = this.db
+      .prepare(
+        `UPDATE work_items SET stopped_at = datetime('now')
+         WHERE id = ? AND stopped_at IS NULL AND status IN ('queued', 'accepted')`,
+      )
+      .run(id) as { changes: number };
+    if (res.changes === 1) return 'stopped';
+    return this.get(id) ? 'stopped' : 'not_found';
+  }
+
+  /**
+   * Merge a metadata patch onto an item — the published update semantics:
+   * a `null` value deletes the key, a string upserts it, omitted keys are
+   * preserved. Returns the updated item, or `null` when it does not exist.
+   */
+  updateMetadata(id: string, patch: Record<string, string | null>): WorkItem | null {
+    const existing = this.get(id);
+    if (!existing) return null;
+    const merged = { ...(existing.metadata ?? {}) };
+    for (const [key, value] of Object.entries(patch)) {
+      if (value === null) delete merged[key];
+      else merged[key] = String(value);
+    }
+    this.db.prepare('UPDATE work_items SET metadata = ? WHERE id = ?').run(JSON.stringify(merged), id);
+    return this.get(id);
+  }
+
+  /**
+   * Record a worker identity seen on the official poll route. The
+   * `workers_polling` stat counts identities seen inside its window; entries
+   * age out lazily — a worker that stopped polling stops counting, which is
+   * the entire contract of the field.
+   */
+  recordPoll(workerId: string): void {
+    const now = Date.now();
+    this.pollSeen.set(workerId, now);
+    for (const [id, at] of this.pollSeen) {
+      if (now - at > 60_000) this.pollSeen.delete(id);
+    }
+  }
+
+  /** Workers that polled inside `windowMs` (30s on the published surface). */
+  workersPolling(windowMs = 30_000): number {
+    const cutoff = Date.now() - windowMs;
+    let count = 0;
+    for (const at of this.pollSeen.values()) if (at >= cutoff) count += 1;
+    return count;
   }
 
   /**
@@ -788,6 +1020,8 @@ interface RawWorkItem {
   stopped_at: string | null;
   accepted_at: string | null;
   abandoned_at: string | null;
+  metadata: string | null;
+  heartbeat_at: string | null;
 }
 
 function toWorkItem(r: RawWorkItem): WorkItem {
@@ -805,6 +1039,8 @@ function toWorkItem(r: RawWorkItem): WorkItem {
     stoppedAt: r.stopped_at ?? null,
     acceptedAt: r.accepted_at ?? null,
     abandonedAt: r.abandoned_at ?? null,
+    metadata: r.metadata ? (JSON.parse(r.metadata) as Record<string, string>) : {},
+    heartbeatAt: r.heartbeat_at ?? null,
   };
 }
 

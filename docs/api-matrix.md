@@ -87,7 +87,7 @@ its family is now implemented, not refused.
 | --- | --- | --- |
 | `/v1/tunnels` and certificate/token actions | `mcp-tunnel` | Hosted connectivity is outside the local-first scope. |
 | `/v1/user_profiles` and enrollment actions | `user-profiles` | Hosted user management is outside the single-tenant scope. |
-| `/v1/environments/{id}/work` and its official actions | `environment-work` | The hosted Work API is not the local `/work-items` and `/v1/x/worker` queue API. |
+| `GET /v1/environments/{id}/work`, `.../work/{id}`, `.../work/stats` | `environment-work` | The Work data plane (poll/ack/heartbeat/update/stop) is implemented over the local `/v1/x/worker` queue; its management surface — list, retrieve, and stats — is the refused part. |
 | `/v1/sessions/{id}/threads` and its official actions | `threads-and-coordinator` | Session threads are part of the multiagent surface this runtime does not implement; see `contracts/anthropic-cma/threads.md`. |
 | `POST /v1/vaults/{id}/credentials/{credential_id}/mcp_oauth_validate` | `mcp-oauth-validation` | Token refresh is implemented at the injection boundary; a dedicated validation endpoint is not. |
 
@@ -98,9 +98,11 @@ pinned official SDK's `resources/beta/**/*.js`. Messages, models, and
 organization administration are excluded from this managed-agent inventory.
 Unrecognized SDK request syntax fails rather than silently losing routes.
 
-Verified on October 5, 2026 with SDK `0.129.0`: 110 distinct method/path pairs,
-81 existing resource mounts, 29 explicit refusals, and no deferred mounts — the
-last five (the multi-agent thread routes) are now mounted refusals. The
+Verified on October 5, 2026 with SDK `0.129.0`: 110 distinct method/path pairs.
+The split is now 86 resource mounts and 24 explicit refusals — the Work data
+plane's five routes moved from refusal to mount when it landed, leaving only
+its management half (list, retrieve, stats) refused — and no deferred mounts.
+The
 deferral list was tracked in
 [issue #706](https://github.com/sandbaseai/sandbase-harness/issues/706) and is
 kept as the empty `PENDING_OFFICIAL_ROUTES` array so a future deferral has a

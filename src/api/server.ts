@@ -20,6 +20,7 @@ import { apiKeysRoutes } from './routes/api-keys.js';
 import { extendedRoutes } from './routes/extended.js';
 import { sessionResourceRoutes } from './routes/session-resources.js';
 import { unsupportedOfficialRoutes } from './routes/unsupported-official.js';
+import { environmentWorkRoutes } from './routes/environment-work.js';
 import { streamRoutes } from './routes/stream.js';
 import { createAuthMiddleware } from './auth.js';
 import { createCmaRequestAdmissionMiddleware } from './cma-admission.js';
@@ -188,6 +189,17 @@ app.route('/v1/runs', runsRoutes(deps));
   app.route('/v1', resourceRoutes(deps));
   app.route('/v1/skills', skillsRoutes(deps));
   app.route('/v1/api-keys', apiKeysRoutes(deps));
+  // The implemented Work data plane mounts ahead of the refusal router so its
+  // subroutes win; list/retrieve/stats still fall through to their refusals.
+  if (deps.workQueue) {
+    app.route('/v1', environmentWorkRoutes({
+      queue: deps.workQueue,
+      db: deps.db,
+      apiKeys: deps.apiKeys,
+      hasApiKeys: deps.hasApiKeys,
+      validateApiKey: deps.validateApiKey,
+    }));
+  }
   app.route('/v1', unsupportedOfficialRoutes());
 
   // SSE streaming

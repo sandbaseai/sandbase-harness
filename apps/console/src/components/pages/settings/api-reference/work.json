@@ -1,0 +1,138 @@
+[
+  {
+    "id": "work-poll",
+    "group": "Work",
+    "title": "Poll for work",
+    "method": "GET",
+    "path": "/v1/environments/{id}/work/poll",
+    "summary": "Long-poll for the next claimable work item in an environment. Returns a work item whose secret carries a per-claim session token (base64url JSON with sessions_token and api_base_url), or 204 when nothing is claimable before block_ms expires. The work item is a session-scoped projection of the local tool-execution queue: data is always {type: 'session', id}. Authenticate with an environment worker key or a managed API key; Anthropic-Worker-ID identifies the claiming worker.",
+    "parameters": [
+      {
+        "name": "block_ms",
+        "type": "integer",
+        "description": "How long to wait for work before returning 204. 1-999 milliseconds; omitted polls return immediately."
+      },
+      {
+        "name": "reclaim_older_than_ms",
+        "type": "integer",
+        "description": "Reclaim claimed-but-unacknowledged items older than this; defaults to 5000ms."
+      }
+    ],
+    "headers": [
+      {
+        "name": "Anthropic-Worker-ID",
+        "type": "string",
+        "description": "Worker identity; owns the claim lease and feeds the workers_polling stat."
+      }
+    ],
+    "response": [
+      {
+        "name": "work",
+        "type": "BetaSelfHostedWork",
+        "description": "Claimed work item with secret populated, or HTTP 204 with no body when empty."
+      }
+    ]
+  },
+  {
+    "id": "work-ack",
+    "group": "Work",
+    "title": "Acknowledge work",
+    "method": "POST",
+    "path": "/v1/environments/{id}/work/{workId}/ack",
+    "summary": "Acknowledge a claimed work item, committing the holder to running it — the transition the published contract calls queued to starting. A stopped item or a lapsed lease answers 409 work_lease_lost; an Anthropic-Worker-ID naming a different holder answers 409.",
+    "response": [
+      {
+        "name": "work",
+        "type": "BetaSelfHostedWork",
+        "description": "The acknowledged work item; secret is null on this path."
+      }
+    ]
+  },
+  {
+    "id": "work-heartbeat",
+    "group": "Work",
+    "title": "Heartbeat work lease",
+    "method": "POST",
+    "path": "/v1/environments/{id}/work/{workId}/heartbeat",
+    "summary": "Renew the heartbeat lease on a work item. expected_last_heartbeat=NO_HEARTBEAT claims the heartbeat lease on the first beat; later beats echo the returned last_heartbeat and a mismatch answers 412 with the server's current_state under error.details.current_state. A stopped or terminal item answers 200 with lease_extended: false and state stopping or stopped — the shutdown signal, not an error.",
+    "parameters": [
+      {
+        "name": "expected_last_heartbeat",
+        "type": "string",
+        "description": "Optimistic concurrency precondition; NO_HEARTBEAT claims an unclaimed heartbeat lease."
+      },
+      {
+        "name": "desired_ttl_seconds",
+        "type": "integer",
+        "description": "Accepted but not honored per item; the response reports the effective queue lease as ttl_seconds."
+      }
+    ],
+    "response": [
+      {
+        "name": "last_heartbeat",
+        "type": "string | null",
+        "description": "Recorded heartbeat anchor to echo on the next beat."
+      },
+      {
+        "name": "lease_extended",
+        "type": "boolean",
+        "description": "Whether the lease was renewed; false is the shutdown signal."
+      },
+      {
+        "name": "state",
+        "type": "queued | starting | active | stopping | stopped",
+        "description": "The work item's current projected state."
+      },
+      {
+        "name": "ttl_seconds",
+        "type": "number",
+        "description": "The effective lease TTL."
+      }
+    ]
+  },
+  {
+    "id": "work-update",
+    "group": "Work",
+    "title": "Update work metadata",
+    "method": "POST",
+    "path": "/v1/environments/{id}/work/{workId}",
+    "summary": "Merge a metadata patch onto a work item: a string value upserts the key, null deletes it, omitted keys are preserved. There is no result channel on this surface — the local /v1/x/worker/complete route remains the completion path.",
+    "parameters": [
+      {
+        "name": "metadata",
+        "type": "object",
+        "required": true,
+        "description": "Key/value patch with merge semantics."
+      }
+    ],
+    "response": [
+      {
+        "name": "work",
+        "type": "BetaSelfHostedWork",
+        "description": "The updated work item; secret is null on this path."
+      }
+    ]
+  },
+  {
+    "id": "work-stop",
+    "group": "Work",
+    "title": "Stop work",
+    "method": "POST",
+    "path": "/v1/environments/{id}/work/{workId}/stop",
+    "summary": "Record a stop decision for a work item. The item can never be claimed again and the holder learns from its next heartbeat, which reports lease_extended: false with state stopping. force selects graceful vs forced on the published wire; the local marker is already the immediate form, so both reach the same outcome.",
+    "parameters": [
+      {
+        "name": "force",
+        "type": "boolean",
+        "description": "Immediately stop without graceful shutdown."
+      }
+    ],
+    "response": [
+      {
+        "name": "work",
+        "type": "BetaSelfHostedWork",
+        "description": "The work item as stopped; secret is null on this path."
+      }
+    ]
+  }
+]

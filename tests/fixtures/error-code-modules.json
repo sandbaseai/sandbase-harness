@@ -1,73 +1,219 @@
 {
   "note": "Which module emits each public error code, measured by the same two-shape scan as error-codes.json. A code that moves between modules, or gains a second emitter, changes this file.",
   "modules": {
-    "adapter_unavailable": ["src/core/settings/schema.ts"],
-    "agent_required": ["src/api/routes/session-normalizers.ts"],
-    "already_exists": ["src/core/memory/mount-adapter.ts"],
-    "cycle": ["src/core/orchestrator/agent-orchestrator.ts"],
-    "inbound_rate_limited": ["src/api/rate-limit.ts"],
-    "incompatible_adapter": ["src/core/settings/schema.ts"],
-    "instructions_too_long": ["src/core/memory/semantics.ts"],
-    "internal_error": ["src/core/session/session-manager.ts"],
-    "invalid_agent_ref": ["src/api/routes/session-normalizers.ts"],
-    "invalid_define_outcome": ["src/api/routes/sessions.ts"],
-    "invalid_initial_event_type": ["src/api/routes/initial-events.ts"],
-    "invalid_initial_events": ["src/api/routes/initial-events.ts"],
-    "invalid_json": ["src/api/routes/settings.ts", "src/core/settings/store.ts"],
-    "invalid_path": ["src/core/memory/mount-adapter.ts"],
-    "invalid_precondition": ["src/core/memory/semantics.ts"],
-    "invalid_protocol": ["src/core/settings/schema.ts"],
-    "invalid_request": ["src/core/session/session-resources.ts"],
-    "invalid_type": ["src/core/settings/schema.ts"],
-    "invalid_url": ["src/core/settings/schema.ts"],
-    "loop_engine_invalid": ["src/core/session/loop-engine-admission.ts"],
-    "loop_engine_not_supported": ["src/core/session/loop-engine-admission.ts"],
-    "memory_too_large": ["src/core/memory/mount-adapter.ts", "src/core/memory/semantics.ts"],
-    "memory_version_is_head": ["src/api/routes/memory-stores.ts"],
-    "missing_env": ["src/core/settings/schema.ts"],
-    "model_auth_failed": ["src/model/errors.ts"],
-    "model_config_invalid": ["src/model/errors.ts"],
-    "model_not_found": ["src/model/errors.ts"],
-    "model_provider_not_configured": ["src/model/errors.ts"],
-    "not_found": ["src/core/memory/mount-adapter.ts", "src/core/session/session-resources.ts"],
-    "outcome_evaluator_unavailable": ["src/core/outcomes/grader.ts"],
-    "outcome_grader_unavailable": ["src/core/outcomes/loop.ts"],
-    "outcome_rubric_file_not_found": ["src/core/outcomes/contract.ts"],
-    "pi_always_ask_not_supported": ["src/core/session/pi-policy.ts"],
-    "pi_cleanup_pending": ["src/core/session/session-manager.ts"],
-    "pi_message_content_not_supported": ["src/core/session/pi-policy.ts"],
-    "pi_policy_mismatch": ["src/strategy/pi/session-continuity.ts"],
-    "pi_rpc_approval_not_pending": ["src/strategy/pi/rpc-wire.ts"],
-    "pi_rpc_closed": ["src/strategy/pi/rpc-wire.ts"],
-    "pi_rpc_command_rejected": ["src/strategy/pi/rpc-wire.ts"],
-    "pi_rpc_dialog_unsupported": ["src/strategy/pi/rpc-wire.ts"],
-    "pi_rpc_gate_lost": ["src/strategy/pi/rpc-wire.ts"],
-    "pi_rpc_gate_unavailable": ["src/strategy/pi/rpc-wire.ts"],
-    "pi_rpc_outcome_unknown": ["src/strategy/pi/rpc-wire.ts"],
-    "pi_rpc_protocol_error": ["src/strategy/pi/rpc-wire.ts"],
-    "pi_rpc_session_closed": ["src/strategy/pi/rpc-wire.ts"],
-    "pi_rpc_timeout": ["src/strategy/pi/rpc-wire.ts"],
-    "pi_sandbox_provider_not_supported": ["src/core/session/pi-policy.ts"],
-    "pi_session_busy": ["src/core/session/session-manager.ts"],
-    "pi_timed_out": ["src/core/session/session-manager.ts"],
-    "pi_tool_policy_not_supported": ["src/core/session/pi-native-tools.ts"],
-    "pi_user_event_not_supported": ["src/core/session/pi-policy.ts"],
-    "precondition_failed": ["src/api/routes/memory-stores.ts", "src/core/memory/mount-adapter.ts", "src/core/memory/semantics.ts"],
-    "required": ["src/core/settings/schema.ts"],
-    "requires_action_timeout": ["src/core/session/parked-wait.ts"],
-    "resource_not_mountable": ["src/core/resources/resource-mountability.ts"],
-    "secret_not_configured": ["src/core/settings/schema.ts"],
-      "session_archived": ["src/api/routes/sessions.ts"],
-    "store_full": ["src/core/memory/mount-adapter.ts", "src/core/memory/semantics.ts"],
-    "store_unavailable": ["src/core/memory/mount-adapter.ts"],
-    "target_store_held": ["src/api/routes/dreams.ts"],
-    "too_many_initial_events": ["src/api/routes/initial-events.ts"],
-    "too_many_stores": ["src/core/memory/semantics.ts"],
-    "unresolved_env_reference": ["src/core/settings/schema.ts"],
-    "web_search_provider_failed": ["src/core/web/search/tavily.ts"],
-    "web_search_rate_limited": ["src/core/web/search/tavily.ts"],
-    "work_lease_lost": ["src/api/routes/worker.ts", "src/sandbox/self-hosted-provider.ts"],
-    "work_outcome_unknown": ["src/sandbox/self-hosted-provider.ts"],
-    "work_queue_timeout": ["src/sandbox/self-hosted-provider.ts"]
+    "adapter_unavailable": [
+      "src/core/settings/schema.ts"
+    ],
+    "agent_required": [
+      "src/api/routes/session-normalizers.ts"
+    ],
+    "already_exists": [
+      "src/core/memory/mount-adapter.ts"
+    ],
+    "cycle": [
+      "src/core/orchestrator/agent-orchestrator.ts"
+    ],
+    "inbound_rate_limited": [
+      "src/api/rate-limit.ts"
+    ],
+    "incompatible_adapter": [
+      "src/core/settings/schema.ts"
+    ],
+    "instructions_too_long": [
+      "src/core/memory/semantics.ts"
+    ],
+    "internal_error": [
+      "src/core/session/session-manager.ts"
+    ],
+    "invalid_agent_ref": [
+      "src/api/routes/session-normalizers.ts"
+    ],
+    "invalid_define_outcome": [
+      "src/api/routes/sessions.ts"
+    ],
+    "invalid_initial_event_type": [
+      "src/api/routes/initial-events.ts"
+    ],
+    "invalid_initial_events": [
+      "src/api/routes/initial-events.ts"
+    ],
+    "invalid_json": [
+      "src/api/routes/settings.ts",
+      "src/core/settings/store.ts"
+    ],
+    "invalid_path": [
+      "src/core/memory/mount-adapter.ts"
+    ],
+    "invalid_precondition": [
+      "src/core/memory/semantics.ts"
+    ],
+    "invalid_protocol": [
+      "src/core/settings/schema.ts"
+    ],
+    "invalid_request": [
+      "src/core/session/session-resources.ts"
+    ],
+    "invalid_type": [
+      "src/core/settings/schema.ts"
+    ],
+    "invalid_url": [
+      "src/core/settings/schema.ts"
+    ],
+    "loop_engine_invalid": [
+      "src/core/session/loop-engine-admission.ts"
+    ],
+    "loop_engine_not_supported": [
+      "src/core/session/loop-engine-admission.ts"
+    ],
+    "memory_too_large": [
+      "src/core/memory/mount-adapter.ts",
+      "src/core/memory/semantics.ts"
+    ],
+    "memory_version_is_head": [
+      "src/api/routes/memory-stores.ts"
+    ],
+    "missing_env": [
+      "src/core/settings/schema.ts"
+    ],
+    "model_auth_failed": [
+      "src/model/errors.ts"
+    ],
+    "model_config_invalid": [
+      "src/model/errors.ts"
+    ],
+    "model_not_found": [
+      "src/model/errors.ts"
+    ],
+    "model_provider_not_configured": [
+      "src/model/errors.ts"
+    ],
+    "not_found": [
+      "src/core/memory/mount-adapter.ts",
+      "src/core/session/session-resources.ts"
+    ],
+    "outcome_evaluator_unavailable": [
+      "src/core/outcomes/grader.ts"
+    ],
+    "outcome_grader_unavailable": [
+      "src/core/outcomes/loop.ts"
+    ],
+    "outcome_rubric_file_not_found": [
+      "src/core/outcomes/contract.ts"
+    ],
+    "pi_always_ask_not_supported": [
+      "src/core/session/pi-policy.ts"
+    ],
+    "pi_cleanup_pending": [
+      "src/core/session/session-manager.ts"
+    ],
+    "pi_message_content_not_supported": [
+      "src/core/session/pi-policy.ts"
+    ],
+    "pi_policy_mismatch": [
+      "src/strategy/pi/session-continuity.ts"
+    ],
+    "pi_rpc_approval_not_pending": [
+      "src/strategy/pi/rpc-wire.ts"
+    ],
+    "pi_rpc_closed": [
+      "src/strategy/pi/rpc-wire.ts"
+    ],
+    "pi_rpc_command_rejected": [
+      "src/strategy/pi/rpc-wire.ts"
+    ],
+    "pi_rpc_dialog_unsupported": [
+      "src/strategy/pi/rpc-wire.ts"
+    ],
+    "pi_rpc_gate_lost": [
+      "src/strategy/pi/rpc-wire.ts"
+    ],
+    "pi_rpc_gate_unavailable": [
+      "src/strategy/pi/rpc-wire.ts"
+    ],
+    "pi_rpc_outcome_unknown": [
+      "src/strategy/pi/rpc-wire.ts"
+    ],
+    "pi_rpc_protocol_error": [
+      "src/strategy/pi/rpc-wire.ts"
+    ],
+    "pi_rpc_session_closed": [
+      "src/strategy/pi/rpc-wire.ts"
+    ],
+    "pi_rpc_timeout": [
+      "src/strategy/pi/rpc-wire.ts"
+    ],
+    "pi_sandbox_provider_not_supported": [
+      "src/core/session/pi-policy.ts"
+    ],
+    "pi_session_busy": [
+      "src/core/session/session-manager.ts"
+    ],
+    "pi_timed_out": [
+      "src/core/session/session-manager.ts"
+    ],
+    "pi_tool_policy_not_supported": [
+      "src/core/session/pi-native-tools.ts"
+    ],
+    "pi_user_event_not_supported": [
+      "src/core/session/pi-policy.ts"
+    ],
+    "precondition_failed": [
+      "src/api/routes/memory-stores.ts",
+      "src/core/memory/mount-adapter.ts",
+      "src/core/memory/semantics.ts"
+    ],
+    "required": [
+      "src/core/settings/schema.ts"
+    ],
+    "requires_action_timeout": [
+      "src/core/session/parked-wait.ts"
+    ],
+    "resource_not_mountable": [
+      "src/core/resources/resource-mountability.ts"
+    ],
+    "secret_not_configured": [
+      "src/core/settings/schema.ts"
+    ],
+    "session_archived": [
+      "src/api/routes/sessions.ts"
+    ],
+    "store_full": [
+      "src/core/memory/mount-adapter.ts",
+      "src/core/memory/semantics.ts"
+    ],
+    "store_unavailable": [
+      "src/core/memory/mount-adapter.ts"
+    ],
+    "target_store_held": [
+      "src/api/routes/dreams.ts"
+    ],
+    "too_many_initial_events": [
+      "src/api/routes/initial-events.ts"
+    ],
+    "too_many_stores": [
+      "src/core/memory/semantics.ts"
+    ],
+    "unresolved_env_reference": [
+      "src/core/settings/schema.ts"
+    ],
+    "web_search_provider_failed": [
+      "src/core/web/search/tavily.ts"
+    ],
+    "web_search_rate_limited": [
+      "src/core/web/search/tavily.ts"
+    ],
+    "work_lease_lost": [
+      "src/api/routes/worker.ts",
+      "src/sandbox/self-hosted-provider.ts"
+    ],
+    "work_outcome_unknown": [
+      "src/sandbox/self-hosted-provider.ts"
+    ],
+    "work_queue_timeout": [
+      "src/sandbox/self-hosted-provider.ts"
+    ],
+    "work_lease_precondition_failed": [
+      "src/api/routes/environment-work.ts"
+    ]
   }
 }

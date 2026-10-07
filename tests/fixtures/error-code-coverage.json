@@ -1,73 +1,312 @@
 {
   "note": "Which test files mention each public error code, measured by literal presence in the test tree (not by execution). A code with an empty list is emitted by src but asserted nowhere. This file is measured by scanning tests, excluding the coverage test itself, which necessarily names the uncovered codes.",
   "covered": {
-    "adapter_unavailable": ["tests/integration/api.test.ts", "tests/unit/settings-schema.test.ts", "tests/unit/settings.test.ts", "tests/unit/web-search-settings.test.ts"],
-    "agent_required": ["tests/integration/sdk-error-envelope.test.ts"],
-    "already_exists": ["tests/integration/memory-already-exists.test.ts"],
-    "cycle": ["tests/unit/orchestrator.test.ts"],
-    "inbound_rate_limited": ["tests/integration/rate-limit-api.test.ts", "tests/unit/rate-limit.test.ts"],
-    "incompatible_adapter": ["tests/unit/pi-engine-session.test.ts"],
-    "instructions_too_long": ["tests/unit/memory-semantics.test.ts"],
-    "internal_error": ["tests/integration/dreams.test.ts", "tests/integration/session-error-paths.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "invalid_agent_ref": ["tests/integration/sdk-error-envelope.test.ts", "tests/integration/session-agent-overrides.test.ts", "tests/integration/session-cli-commands.test.ts", "tests/unit/sdk-client.test.ts"],
-    "invalid_define_outcome": ["tests/integration/define-outcome-event.test.ts"],
-    "invalid_initial_event_type": ["tests/integration/api.test.ts", "tests/integration/initial-events-transaction.test.ts", "tests/unit/cma-event-contract.test.ts"],
-    "invalid_initial_events": ["tests/integration/api.test.ts", "tests/integration/define-outcome-event.test.ts", "tests/integration/redacted-content-block.test.ts", "tests/unit/cma-event-contract.test.ts"],
-    "invalid_json": ["tests/integration/settings-invalid-json-body.test.ts"],
-    "invalid_path": ["tests/unit/memory-mount-path.test.ts"],
-    "invalid_precondition": ["tests/unit/memory-semantics-wiring.test.ts", "tests/unit/memory-semantics.test.ts"],
-    "invalid_protocol": ["tests/unit/settings.test.ts"],
-    "invalid_request": ["tests/integration/invalid-request-spelling.test.ts", "tests/unit/session-resource-instances.test.ts"],
-    "invalid_type": ["tests/unit/web-search-settings.test.ts"],
-    "invalid_url": ["tests/unit/settings.test.ts"],
-    "loop_engine_invalid": ["tests/integration/api.test.ts", "tests/integration/session-error-paths.test.ts", "tests/unit/loop-engine-admission.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "loop_engine_not_supported": ["tests/integration/api.test.ts", "tests/integration/session-error-paths.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "memory_too_large": ["tests/unit/memory-semantics-wiring.test.ts", "tests/unit/memory-semantics.test.ts"],
-    "memory_version_is_head": ["tests/integration/memory-official-shape.test.ts"],
-    "missing_env": ["tests/integration/api.test.ts", "tests/integration/sdk-settings-resource.test.ts", "tests/unit/model-registry.test.ts", "tests/unit/settings.test.ts", "tests/unit/web-search-settings.test.ts"],
-    "model_auth_failed": ["tests/unit/model-auth-failed.test.ts", "tests/unit/model-error-hints.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "model_config_invalid": ["tests/integration/unresolved-model-credential.test.ts", "tests/unit/model-config-invalid.test.ts", "tests/unit/model-error-hints.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "model_not_found": ["tests/integration/model-qualified-reference.test.ts", "tests/unit/model-auth-failed.test.ts", "tests/unit/model-error-hints.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "model_provider_not_configured": ["tests/integration/model-qualified-reference.test.ts", "tests/unit/model-error-hints.test.ts", "tests/unit/model-error.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "not_found": ["tests/conformance/file-content-not-found.test.ts", "tests/conformance/official-route-coverage.test.ts", "tests/conformance/unserved-route-envelope.test.ts", "tests/integration/agent-versions-pagination.test.ts", "tests/integration/deployment-archived-event.test.ts", "tests/integration/deployment-path-aliases.test.ts", "tests/integration/deployment-runs-collection.test.ts", "tests/integration/sdk-error-envelope.test.ts", "tests/integration/self-hosted.test.ts", "tests/integration/session-artifacts-query-admission.test.ts", "tests/integration/unrouted-path-404.test.ts", "tests/integration/vault-path-aliases.test.ts", "tests/unit/orchestrator.test.ts", "tests/unit/session-resource-instances.test.ts"],
-    "outcome_evaluator_unavailable": ["tests/integration/outcome-grading.test.ts", "tests/unit/outcome-evaluation.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "outcome_grader_unavailable": ["tests/integration/outcome-loop.test.ts"],
-    "outcome_rubric_file_not_found": ["tests/unit/session-error-shape.test.ts", "tests/unit/unpinned-wire-codes.test.ts"],
-    "pi_always_ask_not_supported": ["tests/integration/session-error-paths.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "pi_cleanup_pending": ["tests/integration/session-error-paths.test.ts", "tests/unit/pi-strategy.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "pi_message_content_not_supported": ["tests/integration/session-error-paths.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "pi_policy_mismatch": ["tests/unit/unpinned-wire-codes.test.ts"],
-    "pi_rpc_approval_not_pending": ["tests/unit/pi-strategy.test.ts"],
-    "pi_rpc_closed": ["tests/integration/session-error-paths.test.ts", "tests/unit/pi-rpc-closed.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "pi_rpc_command_rejected": ["tests/integration/session-error-paths.test.ts", "tests/unit/pi-rpc-transport.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "pi_rpc_dialog_unsupported": ["tests/unit/pi-rpc-dialog-unsupported.test.ts"],
-    "pi_rpc_gate_lost": ["tests/unit/pi-rpc-gate-lost.test.ts"],
-    "pi_rpc_gate_unavailable": ["tests/unit/pi-adapter-gate.test.ts", "tests/unit/pi-rpc-session.test.ts"],
-    "pi_rpc_outcome_unknown": ["tests/integration/session-error-paths.test.ts", "tests/unit/pi-rpc-outcome-unknown.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "pi_rpc_protocol_error": ["tests/integration/session-error-paths.test.ts", "tests/unit/pi-rpc-protocol-error.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "pi_rpc_session_closed": ["tests/unit/pi-rpc-session.test.ts"],
-    "pi_rpc_timeout": ["tests/integration/session-error-paths.test.ts", "tests/unit/pi-rpc-transport.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "pi_sandbox_provider_not_supported": ["tests/integration/api.test.ts", "tests/integration/session-error-paths.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "pi_session_busy": ["tests/integration/session-error-paths.test.ts", "tests/unit/pi-launcher.test.ts", "tests/unit/pi-session-continuity.test.ts", "tests/unit/pi-session-lease.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "pi_timed_out": ["tests/integration/session-error-paths.test.ts", "tests/unit/pi-rpc-session.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "pi_tool_policy_not_supported": ["tests/integration/api.test.ts", "tests/integration/session-error-paths.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "pi_user_event_not_supported": ["tests/integration/api.test.ts", "tests/integration/session-error-paths.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "precondition_failed": ["tests/integration/memory-mounts.test.ts", "tests/unit/memory-semantics-wiring.test.ts", "tests/unit/memory-semantics.test.ts"],
-    "required": ["tests/integration/api.test.ts", "tests/integration/sdk-settings-resource.test.ts", "tests/unit/settings.test.ts"],
-    "requires_action_timeout": ["tests/unit/parked-wait.test.ts"],
-    "resource_not_mountable": ["tests/integration/resource-admission-refusal.test.ts", "tests/integration/session-resources-prompt.test.ts", "tests/unit/capability-matrix.test.ts", "tests/unit/resource-mountability.test.ts"],
-    "secret_not_configured": ["tests/integration/api.test.ts", "tests/unit/settings.test.ts"],
-    "session_archived": ["tests/unit/session-archive.test.ts"],
-    "store_full": ["tests/unit/memory-semantics.test.ts"],
-    "store_unavailable": ["tests/unit/memory-mount-store-unavailable.test.ts"],
-    "target_store_held": ["tests/integration/dreams.test.ts"],
-    "too_many_initial_events": ["tests/integration/api.test.ts", "tests/integration/initial-events-transaction.test.ts", "tests/unit/cma-event-contract.test.ts"],
-    "too_many_stores": ["tests/unit/memory-semantics.test.ts"],
-    "unresolved_env_reference": ["tests/unit/settings.test.ts"],
-    "web_search_provider_failed": ["tests/unit/web-search-tavily.test.ts", "tests/unit/web-search-tool.test.ts"],
-    "web_search_rate_limited": ["tests/unit/web-search-tavily.test.ts", "tests/unit/web-search-tool.test.ts"],
-    "work_lease_lost": ["tests/integration/self-hosted.test.ts", "tests/integration/session-error-paths.test.ts", "tests/integration/worker-poll-cli.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "work_outcome_unknown": ["tests/integration/self-hosted.test.ts", "tests/integration/session-error-paths.test.ts", "tests/unit/session-error-shape.test.ts"],
-    "work_queue_timeout": ["tests/integration/self-hosted.test.ts", "tests/integration/session-error-paths.test.ts", "tests/unit/session-error-shape.test.ts"]
+    "adapter_unavailable": [
+      "tests/integration/api.test.ts",
+      "tests/unit/settings-schema.test.ts",
+      "tests/unit/settings.test.ts",
+      "tests/unit/web-search-settings.test.ts"
+    ],
+    "agent_required": [
+      "tests/integration/sdk-error-envelope.test.ts"
+    ],
+    "already_exists": [
+      "tests/integration/memory-already-exists.test.ts"
+    ],
+    "cycle": [
+      "tests/unit/orchestrator.test.ts"
+    ],
+    "inbound_rate_limited": [
+      "tests/integration/rate-limit-api.test.ts",
+      "tests/unit/rate-limit.test.ts"
+    ],
+    "incompatible_adapter": [
+      "tests/unit/pi-engine-session.test.ts"
+    ],
+    "instructions_too_long": [
+      "tests/unit/memory-semantics.test.ts"
+    ],
+    "internal_error": [
+      "tests/integration/dreams.test.ts",
+      "tests/integration/session-error-paths.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "invalid_agent_ref": [
+      "tests/integration/sdk-error-envelope.test.ts",
+      "tests/integration/session-agent-overrides.test.ts",
+      "tests/integration/session-cli-commands.test.ts",
+      "tests/unit/sdk-client.test.ts"
+    ],
+    "invalid_define_outcome": [
+      "tests/integration/define-outcome-event.test.ts"
+    ],
+    "invalid_initial_event_type": [
+      "tests/integration/api.test.ts",
+      "tests/integration/initial-events-transaction.test.ts",
+      "tests/unit/cma-event-contract.test.ts"
+    ],
+    "invalid_initial_events": [
+      "tests/integration/api.test.ts",
+      "tests/integration/define-outcome-event.test.ts",
+      "tests/integration/redacted-content-block.test.ts",
+      "tests/unit/cma-event-contract.test.ts"
+    ],
+    "invalid_json": [
+      "tests/integration/settings-invalid-json-body.test.ts"
+    ],
+    "invalid_path": [
+      "tests/unit/memory-mount-path.test.ts"
+    ],
+    "invalid_precondition": [
+      "tests/unit/memory-semantics-wiring.test.ts",
+      "tests/unit/memory-semantics.test.ts"
+    ],
+    "invalid_protocol": [
+      "tests/unit/settings.test.ts"
+    ],
+    "invalid_request": [
+      "tests/integration/invalid-request-spelling.test.ts",
+      "tests/unit/session-resource-instances.test.ts"
+    ],
+    "invalid_type": [
+      "tests/unit/web-search-settings.test.ts"
+    ],
+    "invalid_url": [
+      "tests/unit/settings.test.ts"
+    ],
+    "loop_engine_invalid": [
+      "tests/integration/api.test.ts",
+      "tests/integration/session-error-paths.test.ts",
+      "tests/unit/loop-engine-admission.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "loop_engine_not_supported": [
+      "tests/integration/api.test.ts",
+      "tests/integration/session-error-paths.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "memory_too_large": [
+      "tests/unit/memory-semantics-wiring.test.ts",
+      "tests/unit/memory-semantics.test.ts"
+    ],
+    "memory_version_is_head": [
+      "tests/integration/memory-official-shape.test.ts"
+    ],
+    "missing_env": [
+      "tests/integration/api.test.ts",
+      "tests/integration/sdk-settings-resource.test.ts",
+      "tests/unit/model-registry.test.ts",
+      "tests/unit/settings.test.ts",
+      "tests/unit/web-search-settings.test.ts"
+    ],
+    "model_auth_failed": [
+      "tests/unit/model-auth-failed.test.ts",
+      "tests/unit/model-error-hints.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "model_config_invalid": [
+      "tests/integration/unresolved-model-credential.test.ts",
+      "tests/unit/model-config-invalid.test.ts",
+      "tests/unit/model-error-hints.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "model_not_found": [
+      "tests/integration/model-qualified-reference.test.ts",
+      "tests/unit/model-auth-failed.test.ts",
+      "tests/unit/model-error-hints.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "model_provider_not_configured": [
+      "tests/integration/model-qualified-reference.test.ts",
+      "tests/unit/model-error-hints.test.ts",
+      "tests/unit/model-error.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "not_found": [
+      "tests/conformance/file-content-not-found.test.ts",
+      "tests/conformance/official-route-coverage.test.ts",
+      "tests/conformance/unserved-route-envelope.test.ts",
+      "tests/integration/agent-versions-pagination.test.ts",
+      "tests/integration/deployment-archived-event.test.ts",
+      "tests/integration/deployment-path-aliases.test.ts",
+      "tests/integration/deployment-runs-collection.test.ts",
+      "tests/integration/sdk-error-envelope.test.ts",
+      "tests/integration/self-hosted.test.ts",
+      "tests/integration/session-artifacts-query-admission.test.ts",
+      "tests/integration/unrouted-path-404.test.ts",
+      "tests/integration/vault-path-aliases.test.ts",
+      "tests/unit/orchestrator.test.ts",
+      "tests/unit/session-resource-instances.test.ts"
+    ],
+    "outcome_evaluator_unavailable": [
+      "tests/integration/outcome-grading.test.ts",
+      "tests/unit/outcome-evaluation.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "outcome_grader_unavailable": [
+      "tests/integration/outcome-loop.test.ts"
+    ],
+    "outcome_rubric_file_not_found": [
+      "tests/unit/session-error-shape.test.ts",
+      "tests/unit/unpinned-wire-codes.test.ts"
+    ],
+    "pi_always_ask_not_supported": [
+      "tests/integration/session-error-paths.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "pi_cleanup_pending": [
+      "tests/integration/session-error-paths.test.ts",
+      "tests/unit/pi-strategy.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "pi_message_content_not_supported": [
+      "tests/integration/session-error-paths.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "pi_policy_mismatch": [
+      "tests/unit/unpinned-wire-codes.test.ts"
+    ],
+    "pi_rpc_approval_not_pending": [
+      "tests/unit/pi-strategy.test.ts"
+    ],
+    "pi_rpc_closed": [
+      "tests/integration/session-error-paths.test.ts",
+      "tests/unit/pi-rpc-closed.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "pi_rpc_command_rejected": [
+      "tests/integration/session-error-paths.test.ts",
+      "tests/unit/pi-rpc-transport.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "pi_rpc_dialog_unsupported": [
+      "tests/unit/pi-rpc-dialog-unsupported.test.ts"
+    ],
+    "pi_rpc_gate_lost": [
+      "tests/unit/pi-rpc-gate-lost.test.ts"
+    ],
+    "pi_rpc_gate_unavailable": [
+      "tests/unit/pi-adapter-gate.test.ts",
+      "tests/unit/pi-rpc-session.test.ts"
+    ],
+    "pi_rpc_outcome_unknown": [
+      "tests/integration/session-error-paths.test.ts",
+      "tests/unit/pi-rpc-outcome-unknown.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "pi_rpc_protocol_error": [
+      "tests/integration/session-error-paths.test.ts",
+      "tests/unit/pi-rpc-protocol-error.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "pi_rpc_session_closed": [
+      "tests/unit/pi-rpc-session.test.ts"
+    ],
+    "pi_rpc_timeout": [
+      "tests/integration/session-error-paths.test.ts",
+      "tests/unit/pi-rpc-transport.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "pi_sandbox_provider_not_supported": [
+      "tests/integration/api.test.ts",
+      "tests/integration/session-error-paths.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "pi_session_busy": [
+      "tests/integration/session-error-paths.test.ts",
+      "tests/unit/pi-launcher.test.ts",
+      "tests/unit/pi-session-continuity.test.ts",
+      "tests/unit/pi-session-lease.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "pi_timed_out": [
+      "tests/integration/session-error-paths.test.ts",
+      "tests/unit/pi-rpc-session.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "pi_tool_policy_not_supported": [
+      "tests/integration/api.test.ts",
+      "tests/integration/session-error-paths.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "pi_user_event_not_supported": [
+      "tests/integration/api.test.ts",
+      "tests/integration/session-error-paths.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "precondition_failed": [
+      "tests/integration/memory-mounts.test.ts",
+      "tests/unit/memory-semantics-wiring.test.ts",
+      "tests/unit/memory-semantics.test.ts"
+    ],
+    "required": [
+      "tests/integration/api.test.ts",
+      "tests/integration/sdk-settings-resource.test.ts",
+      "tests/unit/settings.test.ts"
+    ],
+    "requires_action_timeout": [
+      "tests/unit/parked-wait.test.ts"
+    ],
+    "resource_not_mountable": [
+      "tests/integration/resource-admission-refusal.test.ts",
+      "tests/integration/session-resources-prompt.test.ts",
+      "tests/unit/capability-matrix.test.ts",
+      "tests/unit/resource-mountability.test.ts"
+    ],
+    "secret_not_configured": [
+      "tests/integration/api.test.ts",
+      "tests/unit/settings.test.ts"
+    ],
+    "session_archived": [
+      "tests/unit/session-archive.test.ts"
+    ],
+    "store_full": [
+      "tests/unit/memory-semantics.test.ts"
+    ],
+    "store_unavailable": [
+      "tests/unit/memory-mount-store-unavailable.test.ts"
+    ],
+    "target_store_held": [
+      "tests/integration/dreams.test.ts"
+    ],
+    "too_many_initial_events": [
+      "tests/integration/api.test.ts",
+      "tests/integration/initial-events-transaction.test.ts",
+      "tests/unit/cma-event-contract.test.ts"
+    ],
+    "too_many_stores": [
+      "tests/unit/memory-semantics.test.ts"
+    ],
+    "unresolved_env_reference": [
+      "tests/unit/settings.test.ts"
+    ],
+    "web_search_provider_failed": [
+      "tests/unit/web-search-tavily.test.ts",
+      "tests/unit/web-search-tool.test.ts"
+    ],
+    "web_search_rate_limited": [
+      "tests/unit/web-search-tavily.test.ts",
+      "tests/unit/web-search-tool.test.ts"
+    ],
+    "work_lease_lost": [
+      "tests/integration/environment-work-data-plane.test.ts",
+      "tests/integration/self-hosted.test.ts",
+      "tests/integration/session-error-paths.test.ts",
+      "tests/integration/worker-poll-cli.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "work_outcome_unknown": [
+      "tests/integration/self-hosted.test.ts",
+      "tests/integration/session-error-paths.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "work_queue_timeout": [
+      "tests/integration/self-hosted.test.ts",
+      "tests/integration/session-error-paths.test.ts",
+      "tests/unit/session-error-shape.test.ts"
+    ],
+    "work_lease_precondition_failed": [
+      "tests/integration/environment-work-data-plane.test.ts"
+    ]
   }
 }

@@ -67,6 +67,7 @@
     "web_search_provider_failed",
     "web_search_rate_limited",
     "work_lease_lost",
+    "work_lease_precondition_failed",
     "work_outcome_unknown",
     "work_queue_timeout"
   ]

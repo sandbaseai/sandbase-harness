@@ -30,21 +30,6 @@
     ]
   },
   {
-    "id": "unsupported-get-environments-id-work-poll",
-    "group": "Unsupported official capabilities",
-    "title": "Unsupported official operation",
-    "method": "GET",
-    "path": "/v1/environments/{id}/work/poll",
-    "summary": "Deliberately refused after authentication, throttling, and compatibility-header admission; no resource operation is executed.",
-    "response": [
-      {
-        "name": "error",
-        "type": "object",
-        "description": "HTTP 400 unsupported_capability with a capability id, reason, and docs/api-matrix.md#unsupported-official-routes reference."
-      }
-    ]
-  },
-  {
     "id": "unsupported-get-environments-id-work-stats",
     "group": "Unsupported official capabilities",
     "title": "Unsupported official operation",
@@ -200,66 +185,6 @@
     "title": "Unsupported official operation",
     "method": "GET",
     "path": "/v1/user_profiles/{id}",
-    "summary": "Deliberately refused after authentication, throttling, and compatibility-header admission; no resource operation is executed.",
-    "response": [
-      {
-        "name": "error",
-        "type": "object",
-        "description": "HTTP 400 unsupported_capability with a capability id, reason, and docs/api-matrix.md#unsupported-official-routes reference."
-      }
-    ]
-  },
-  {
-    "id": "unsupported-post-environments-id-work-workid",
-    "group": "Unsupported official capabilities",
-    "title": "Unsupported official operation",
-    "method": "POST",
-    "path": "/v1/environments/{id}/work/{workId}",
-    "summary": "Deliberately refused after authentication, throttling, and compatibility-header admission; no resource operation is executed.",
-    "response": [
-      {
-        "name": "error",
-        "type": "object",
-        "description": "HTTP 400 unsupported_capability with a capability id, reason, and docs/api-matrix.md#unsupported-official-routes reference."
-      }
-    ]
-  },
-  {
-    "id": "unsupported-post-environments-id-work-workid-ack",
-    "group": "Unsupported official capabilities",
-    "title": "Unsupported official operation",
-    "method": "POST",
-    "path": "/v1/environments/{id}/work/{workId}/ack",
-    "summary": "Deliberately refused after authentication, throttling, and compatibility-header admission; no resource operation is executed.",
-    "response": [
-      {
-        "name": "error",
-        "type": "object",
-        "description": "HTTP 400 unsupported_capability with a capability id, reason, and docs/api-matrix.md#unsupported-official-routes reference."
-      }
-    ]
-  },
-  {
-    "id": "unsupported-post-environments-id-work-workid-heartbeat",
-    "group": "Unsupported official capabilities",
-    "title": "Unsupported official operation",
-    "method": "POST",
-    "path": "/v1/environments/{id}/work/{workId}/heartbeat",
-    "summary": "Deliberately refused after authentication, throttling, and compatibility-header admission; no resource operation is executed.",
-    "response": [
-      {
-        "name": "error",
-        "type": "object",
-        "description": "HTTP 400 unsupported_capability with a capability id, reason, and docs/api-matrix.md#unsupported-official-routes reference."
-      }
-    ]
-  },
-  {
-    "id": "unsupported-post-environments-id-work-workid-stop",
-    "group": "Unsupported official capabilities",
-    "title": "Unsupported official operation",
-    "method": "POST",
-    "path": "/v1/environments/{id}/work/{workId}/stop",
     "summary": "Deliberately refused after authentication, throttling, and compatibility-header admission; no resource operation is executed.",
     "response": [
       {
