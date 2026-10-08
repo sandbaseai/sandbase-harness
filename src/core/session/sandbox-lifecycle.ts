@@ -16,6 +16,7 @@ import {
 } from '@/core/resources/github-materializer.js';
 import { repoSkillFilePath } from '@/core/resources/github-repository.js';
 import { environmentNetworkPolicyOf } from '@/core/config/environment-network.js';
+import { assertSkillPackageName, type SkillPackage } from '@/core/skills/package-files.js';
 
 /** Minimal warn sink so the lifecycle can report capability gaps. */
 export interface SandboxLifecycleLogger {
@@ -62,6 +63,18 @@ export interface MaterializedSessionResources {
 }
 
 export type { MaterializeDeps, GithubRepositoryResource, MaterializeResult };
+export type { SkillPackage, SkillPackageFile } from '@/core/skills/package-files.js';
+
+/** Per-provision inputs the caller resolved before the sandbox exists. */
+export interface ProvisionOptions {
+  /**
+   * Assigned skill packages already read off the host, materialized under
+   * `skills/<name>/` relative to the sandbox workdir — `/workspace/...` in a
+   * container, the session workdir on the local backend — matching where a
+   * self-hosted worker puts the same packages.
+   */
+  skillPackages?: SkillPackage[];
+}
 
 /** A provisioned sandbox plus the backend that produced it. */
 interface BoundSandbox {
@@ -84,6 +97,12 @@ export class SandboxLifecycle {
    * to.
    */
   private readonly repositorySkills = new Map<string, Array<{ mountPath: string; skills: string[] }>>();
+  /**
+   * Sandbox-relative roots the session's assigned skill packages materialized
+   * to, keyed by session. Read by the context builder so the prompt names the
+   * same path the agent's file tools can reach.
+   */
+  private readonly materializedSkills = new Map<string, string[]>();
   /**
    * Backends whose lack of isolation has already been reported.
    *
@@ -124,14 +143,14 @@ export class SandboxLifecycle {
     return provider.provision(sandboxId, envConfig);
   }
 
-  async getOrProvision(session: Session): Promise<SandboxInstance> {
+  async getOrProvision(session: Session, options?: ProvisionOptions): Promise<SandboxInstance> {
     const existing = this.bound.get(session.id);
     if (existing) return existing.sandbox;
 
     const pending = this.provisioning.get(session.id);
     if (pending) return pending;
 
-    const operation = this.provisionAndMaterialize(session);
+    const operation = this.provisionAndMaterialize(session, options);
     this.provisioning.set(session.id, operation);
     try {
       return await operation;
@@ -140,7 +159,7 @@ export class SandboxLifecycle {
     }
   }
 
-  private async provisionAndMaterialize(session: Session): Promise<SandboxInstance> {
+  private async provisionAndMaterialize(session: Session, options?: ProvisionOptions): Promise<SandboxInstance> {
     const envConfig = this.resolveEnvironmentConfig(session);
     const provider = this.resolveProvider(envConfig.sandbox_provider);
     this.reportCapabilityGaps(session, envConfig, provider);
@@ -157,6 +176,7 @@ export class SandboxLifecycle {
 
       await this.materializeFileResources(session, sandbox);
       await this.materializeGithubResources(session, sandbox);
+      await this.materializeSkillPackages(session, sandbox, options?.skillPackages);
       this.bound.set(session.id, { sandbox, provider });
       return sandbox;
     } catch (err) {
@@ -221,6 +241,64 @@ export class SandboxLifecycle {
   }
 
   /**
+   * Write each assigned skill package into the sandbox under
+   * `skills/<name>/`, the same location a self-hosted worker downloads to.
+   *
+   * The relative spelling lands under the sandbox workdir on every backend
+   * that honors it, so a container sees `/workspace/skills/<name>/` while the
+   * local backend sees `<workdir>/skills/<name>/`. A host-executable file gets
+   * its execute bit restored through the sandbox command channel; on a backend
+   * or host where chmod is meaningless (Windows local runs through Git Bash)
+   * a failure is reported rather than silently shipping a script that cannot
+   * run.
+   */
+  private async materializeSkillPackages(
+    session: Session,
+    sandbox: SandboxInstance,
+    packages?: SkillPackage[],
+  ): Promise<void> {
+    if (!packages || packages.length === 0) return;
+    const roots: string[] = [];
+    for (const pkg of packages) {
+      assertSkillPackageName(pkg.name);
+      const root = `skills/${pkg.name}`;
+      for (const file of pkg.files) {
+        await sandbox.writeFile(`${root}/${file.path}`, file.content);
+      }
+      const executables = pkg.files.filter((file) => file.executable);
+      if (executables.length > 0) {
+        const targets = executables.map((file) => `'${root}/${file.path.replace(/'/g, `'\\''`)}'`).join(' ');
+        try {
+          const result = await sandbox.execute(`chmod +x -- ${targets}`);
+          if (result.exitCode !== 0) {
+            this.deps.logger?.warn('skill package executable bits could not be restored', {
+              session_id: session.id,
+              skill: pkg.name,
+              stderr: result.stderr,
+            });
+          }
+        } catch (error) {
+          this.deps.logger?.warn('skill package executable bits could not be restored', {
+            session_id: session.id,
+            skill: pkg.name,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      roots.push(root);
+    }
+    this.materializedSkills.set(session.id, roots);
+  }
+
+  /**
+   * Sandbox-relative roots of the session's materialized skill packages,
+   * empty until provisioning writes them.
+   */
+  materializedSkillPaths(sessionId: string): string[] {
+    return [...(this.materializedSkills.get(sessionId) ?? [])];
+  }
+
+  /**
    * Skill names discovered under a mounted repository's `.claude/skills`.
    *
    * Empty until the session's sandbox has been provisioned, which is the point
@@ -267,6 +345,7 @@ export class SandboxLifecycle {
 
     this.bound.delete(sessionId);
     this.repositorySkills.delete(sessionId);
+    this.materializedSkills.delete(sessionId);
     try {
       await entry.sandbox.cleanup();
     } catch {

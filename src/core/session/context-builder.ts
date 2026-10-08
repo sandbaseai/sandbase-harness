@@ -60,6 +60,12 @@ export interface ContextBuildOptions {
    * backend, where a command runs on the host rather than in the sandbox.
    */
   sandboxProvider?: SandboxProviderType;
+  /**
+   * Sandbox-relative roots the session's assigned skill packages materialized
+   * to (`skills/<name>`), reported so the model knows packaged scripts and
+   * reference files exist on disk beyond the instructions inlined above.
+   */
+  skillPackagePaths?: string[];
 }
 
 export class ContextBuilder {
@@ -91,6 +97,16 @@ export class ContextBuilder {
       sandboxProvider: options?.sandboxProvider,
     });
     if (resources) systemPrompt = `${systemPrompt}\n\n${resources}`;
+    const skillPackagePaths = options?.skillPackagePaths ?? [];
+    if (skillPackagePaths.length > 0) {
+      // The full instructions are already inlined by the skills section; this
+      // block names where the packages live so packaged scripts and reference
+      // files can be read and run with the file tools.
+      systemPrompt = `${systemPrompt}\n\n# Skill Packages\n\n` +
+        `Skill packages are materialized in the session workspace. Read ` +
+        `additional files (scripts, references) under these directories:\n\n` +
+        skillPackagePaths.map((path) => `- \`${path}/\``).join('\n');
+    }
 
     return { systemPrompt, messages };
   }

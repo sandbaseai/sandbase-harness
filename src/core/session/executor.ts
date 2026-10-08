@@ -27,6 +27,7 @@ import { parkedCalls } from './parked-calls.js';
 import { ContextCompactor } from './context-compactor.js';
 import type { CompactionStore } from './compaction-store.js';
 import { parseSkill, type Skill } from '@/core/skills/loader.js';
+import { readSkillPackageDir } from '@/core/skills/package-files.js';
 import type { MemoryProvider } from '@/core/memory/memory-provider.js';
 import type { MemoryMountAdapter } from '@/core/memory/mount-adapter.js';
 import { resolveMemoryBindings } from '@/core/memory/bindings.js';
@@ -309,8 +310,20 @@ export class DefaultSessionExecutor implements SessionExecutor {
           headers: this.modelRequestHeaders(session, agent),
         });
 
-    // 3. Provision sandbox (or reuse the one bound to this session)
-    const sandbox = await this.sandboxLifecycle.getOrProvision(session);
+    // 3. Provision sandbox (or reuse the one bound to this session).
+    // Assigned skill packages are materialized into the sandbox workdir at the
+    // same `skills/<name>/` root a self-hosted worker downloads to, so file and
+    // shell tools reach them on every backend — the `--skill` dirs the engine
+    // gets are host paths a container cannot see. The host read is skipped once
+    // a sandbox is already bound: re-reading deleted package dirs would fail a
+    // turn whose sandbox needs nothing new.
+    const skillPackages = this.sandboxLifecycle.get(session.id)
+      ? []
+      : this.skillPackagesFor(agent).map((pkg) => ({
+        name: pkg.name,
+        files: readSkillPackageDir(pkg.dir),
+      }));
+    const sandbox = await this.sandboxLifecycle.getOrProvision(session, { skillPackages });
 
     // 3a. Handle a tool confirmation (A5): run or deny the pending tool, append
     // its result so the model turn below continues with a paired sequence.
@@ -381,6 +394,7 @@ export class DefaultSessionExecutor implements SessionExecutor {
       {
         repositorySkills,
         sandboxProvider: this.sandboxLifecycle.resolveProviderType(session),
+        skillPackagePaths: this.sandboxLifecycle.materializedSkillPaths(session.id),
       },
     );
 
@@ -606,7 +620,18 @@ export class DefaultSessionExecutor implements SessionExecutor {
     return skills;
   }
 
-  private skillDirsFor(agent: AgentDefinition): string[] {    const root = this.deps.skillsDir;
+  private skillDirsFor(agent: AgentDefinition): string[] {
+    return this.skillPackagesFor(agent).map((pkg) => pkg.dir);
+  }
+
+  /**
+   * Assigned skills resolved to their host package directories, paired with
+   * the sandbox-facing package name. The name is what `skills/<name>/` is
+   * written under, not the host directory name — a version pin resolves to a
+   * `v<n>` storage directory that carries no meaningful name of its own.
+   */
+  private skillPackagesFor(agent: AgentDefinition): Array<{ name: string; dir: string }> {
+    const root = this.deps.skillsDir;
     if (!root) return [];
     const resolvedRoot = resolve(root);
     const managedRoot = this.deps.managedSkillsDir ? resolve(this.deps.managedSkillsDir) : null;
@@ -624,14 +649,14 @@ export class DefaultSessionExecutor implements SessionExecutor {
         if (version?.storage_path && managedRoot) {
           const dir = resolve(version.storage_path);
           if (dir !== managedRoot && !dir.startsWith(`${managedRoot}${sep}`)) return [];
-          return [dir];
+          return [{ name: skill.name, dir }];
         }
         if (!version || version.id !== skill.latest_version || !skill.file) return [];
       }
       if (!skill.file) return [];
       const file = resolve(resolvedRoot, skill.file);
       if (file !== resolvedRoot && !file.startsWith(`${resolvedRoot}${sep}`)) return [];
-      return [dirname(file)];
+      return [{ name: skill.name, dir: dirname(file) }];
     });
   }
 

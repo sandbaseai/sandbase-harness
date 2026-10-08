@@ -197,6 +197,15 @@ Without `version` (or with `version: latest`) the newest uploaded package is
 mounted. A pinned reference mounts that version's stored package; a pin that
 names a deleted or unknown version mounts no skill files at all.
 
+When a session sandbox is provisioned, the assigned skill packages are also
+written into it under `skills/<name>/` relative to the session workdir —
+`/workspace/skills/<name>/` inside a docker container. Packaged scripts keep
+their execute bit where the backend supports it, so a skill that ships a
+`scripts/` directory can be run with the shell tool. The system prompt names
+these roots so the agent knows the files exist beyond the inlined
+instructions. A self-hosted worker materializes the same layout under its own
+workdir.
+
 ## Skill Versions
 
 Every upload that creates a skill also creates its first version, and each
