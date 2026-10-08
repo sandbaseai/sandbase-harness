@@ -67,6 +67,17 @@ export const sessions = {
       placeholder: "Message this session...",
       send: "Send",
       sending: "Sending...",
+      modeLabel: "Send mode",
+      modeReply: "Reply",
+      modeSteer: "Steer",
+      steerHint: "A steer writes to the turn in flight — it does not start a new one.",
+      steerPlaceholder: "Steer the running turn...",
+      sendSteer: "Send steer",
+      steerState: {
+        rejected: "The steer was not delivered — no turn received it.",
+        conflict: "This steer id already carried different text.",
+        outcome_unknown: "The steer may or may not have been delivered. Do not resend it.",
+      },
     },
     timeline: {
       transcript: "Transcript",

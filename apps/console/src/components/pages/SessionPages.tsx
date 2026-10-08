@@ -56,6 +56,7 @@ export function SessionDetail({
   const [messageDraft, setMessageDraft] = useState('');
   const [messageError, setMessageError] = useState('');
   const [sendingMessage, setSendingMessage] = useState(false);
+  const [sendMode, setSendMode] = useState<'message' | 'steer'>('message');
   const [confirmingToolIds, setConfirmingToolIds] = useState<Set<string>>(new Set());
   // Confirmations accepted by the API. Kept forever so a card stays collapsed
   // while the backend is still writing the tool_result (it would otherwise
@@ -126,6 +127,44 @@ export function SessionDetail({
         { content, stream: false },
       );
       setMessageDraft('');
+      await loadEvents({ silent: true });
+      onRefresh();
+    } catch (err) {
+      setMessageError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSendingMessage(false);
+    }
+  };
+
+  /**
+   * A steer is not a turn: it writes the drafted text to the turn in flight
+   * under a fresh idempotency key, and the receipt — not the request — says
+   * whether the engine heard it. `delivered` and `duplicate` both mean the
+   * engine holds the instruction; everything else surfaces the returned
+   * detail, and `outcome_unknown` is deliberately never retried by the client.
+   */
+  const sendSteer = async () => {
+    const text = messageDraft.trim();
+    if (!text || sendingMessage) return;
+    setSendingMessage(true);
+    setMessageError('');
+    try {
+      const response = await postJson<{ accepted: boolean; steer?: { input_id: string; state: string; turn_id?: string; detail?: string } }>(
+        `/v1/sessions/${encodeURIComponent(session.id)}/events`,
+        { events: [{ type: 'user.steer', input_id: crypto.randomUUID(), text }] },
+      );
+      const state = response.steer?.state ?? (response.accepted ? 'delivered' : 'rejected');
+      if (state === 'delivered' || state === 'duplicate') {
+        setMessageDraft('');
+      } else {
+        const fallback =
+          state === 'conflict'
+            ? t('detail.composer.steerState.conflict')
+            : state === 'outcome_unknown'
+              ? t('detail.composer.steerState.outcome_unknown')
+              : t('detail.composer.steerState.rejected');
+        setMessageError(response.steer?.detail ?? fallback);
+      }
       await loadEvents({ silent: true });
       onRefresh();
     } catch (err) {
@@ -207,8 +246,17 @@ export function SessionDetail({
       messageError={messageError}
       sendingMessage={sendingMessage}
       canSendMessage={canSendMessage}
+      sendMode={sendMode}
+      onSendMode={setSendMode}
       onDraft={setMessageDraft}
-      onSend={(event) => void sendMessage(event)}
+      onSend={(event) => {
+        event?.preventDefault();
+        if (sendMode === 'steer' && displayStatus === 'running') {
+          void sendSteer();
+        } else {
+          void sendMessage();
+        }
+      }}
       onNewSession={() => onNewSession(session.agent.id)}
       onAdjustBudget={() => setSettingsOpen(true)}
     />

@@ -4,6 +4,16 @@
 
 ### Added
 
+- While a session's turn is in flight, the session composer now offers a
+  Steer send mode alongside Reply. A steer posts `user.steer` through the
+  events route with a fresh `input_id` idempotency key and the drafted
+  text — writing to the running turn rather than starting a new one — and
+  the returned receipt decides the outcome: `delivered` or `duplicate`
+  clears the draft, while `rejected`, `conflict`, and `outcome_unknown`
+  keep it and surface the returned detail. `outcome_unknown` is never
+  retried automatically, matching the receipt's own guidance. Idle and
+  terminal sessions see no steer affordance.
+
 - The credential vault detail page now offers a Validate row action on
   `mcp_oauth` and `bearer_token` credentials — the two auth types the
   published `mcp_oauth_validate` probe can reach — which posts the live

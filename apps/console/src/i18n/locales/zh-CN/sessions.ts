@@ -67,6 +67,17 @@ export const sessions = {
       placeholder: "向此会话发送消息…",
       send: "发送",
       sending: "发送中…",
+      modeLabel: "发送方式",
+      modeReply: "回复",
+      modeSteer: "转向",
+      steerHint: "转向写入的是正在进行的回合，不会开启新回合。",
+      steerPlaceholder: "转向当前回合…",
+      sendSteer: "发送转向",
+      steerState: {
+        rejected: "转向未送达——没有回合收到它。",
+        conflict: "该转向 id 已携带过不同的文本。",
+        outcome_unknown: "转向可能已送达也可能未送达。请勿重发。",
+      },
     },
     timeline: {
       transcript: "对话记录",

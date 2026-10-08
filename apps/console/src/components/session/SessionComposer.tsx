@@ -1,4 +1,4 @@
-import { Plus, Send } from 'lucide-react';
+import { Navigation, Plus, Send } from 'lucide-react';
 import type { FormEvent } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { SessionDisplayStatus } from './conversation';
@@ -16,6 +16,8 @@ export function SessionComposer({
   messageError,
   sendingMessage,
   canSendMessage,
+  sendMode,
+  onSendMode,
   onDraft,
   onSend,
   onNewSession,
@@ -27,6 +29,8 @@ export function SessionComposer({
   messageError: string;
   sendingMessage: boolean;
   canSendMessage: boolean;
+  sendMode: 'message' | 'steer';
+  onSendMode: (mode: 'message' | 'steer') => void;
   onDraft: (value: string) => void;
   onSend: (event?: FormEvent) => void;
   onNewSession: () => void;
@@ -58,6 +62,21 @@ export function SessionComposer({
           <button className="linkButton" type="button" onClick={onAdjustBudget}>{t('detail.composer.adjustBudget')}</button>
         </div>
       ) : null}
+      {displayStatus === 'running' ? (
+        <div className="segment compactSegment composerSendMode" role="group" aria-label={t('detail.composer.modeLabel')}>
+          <button type="button" className={sendMode === 'message' ? 'active' : ''} onClick={() => onSendMode('message')}>
+            {t('detail.composer.modeReply')}
+          </button>
+          <button type="button" className={sendMode === 'steer' ? 'active' : ''} onClick={() => onSendMode('steer')}>
+            {t('detail.composer.modeSteer')}
+          </button>
+        </div>
+      ) : null}
+      {sendMode === 'steer' && displayStatus === 'running' ? (
+        <div className="sessionComposerHint" role="note">
+          {t('detail.composer.steerHint')}
+        </div>
+      ) : null}
       <textarea
         value={messageDraft}
         onChange={(event) => onDraft(event.target.value)}
@@ -67,13 +86,17 @@ export function SessionComposer({
             onSend();
           }
         }}
-        placeholder={t('detail.composer.placeholder')}
-        aria-label={t('detail.composer.placeholder')}
+        placeholder={sendMode === 'steer' && displayStatus === 'running' ? t('detail.composer.steerPlaceholder') : t('detail.composer.placeholder')}
+        aria-label={sendMode === 'steer' && displayStatus === 'running' ? t('detail.composer.steerPlaceholder') : t('detail.composer.placeholder')}
         disabled={sendingMessage}
       />
       <button className="button primary" type="submit" disabled={!canSendMessage}>
-        <Send size={16} />
-        {sendingMessage ? t('detail.composer.sending') : t('detail.composer.send')}
+        {sendMode === 'steer' && displayStatus === 'running' ? <Navigation size={16} /> : <Send size={16} />}
+        {sendingMessage
+          ? t('detail.composer.sending')
+          : sendMode === 'steer' && displayStatus === 'running'
+            ? t('detail.composer.sendSteer')
+            : t('detail.composer.send')}
       </button>
       {messageError ? <div className="sessionComposerError">{messageError}</div> : null}
     </form>
