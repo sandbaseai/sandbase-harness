@@ -1,4 +1,4 @@
-import { Archive, ChevronDown, Clock, Cloud, Cpu, Monitor, PauseCircle, Settings, Square, Target, Trash2 } from 'lucide-react';
+import { Archive, ChevronDown, Clock, Cloud, Cpu, Monitor, Paperclip, PauseCircle, Settings, Square, Target, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ResourceBadge } from '../Common';
@@ -23,8 +23,8 @@ function statusTone(displayStatus: SessionDisplayStatus): Tone {
 
 /**
  * The session header: breadcrumb, title/status pill, agent and environment
- * badges, and the Actions menu (settings, define outcome, interrupt, archive,
- * delete). While a turn is live the run-state strip below keeps the one
+ * badges, and the Actions menu (settings, define outcome, resources,
+ * interrupt, archive, delete). While a turn is live the run-state strip below keeps the one
  * action that matters — Interrupt — resident instead of buried in the menu.
  */
 export function SessionHero({
@@ -37,6 +37,7 @@ export function SessionHero({
   onOpenAgent,
   onSettings,
   onDefineOutcome,
+  onResources,
   onInterrupt,
   onArchive,
   onDelete,
@@ -50,6 +51,7 @@ export function SessionHero({
   onOpenAgent: (agent: Agent) => void;
   onSettings: () => void;
   onDefineOutcome: () => void;
+  onResources: () => void;
   onInterrupt: () => void;
   onArchive: () => void;
   onDelete: () => void;
@@ -91,6 +93,7 @@ export function SessionHero({
                 {displayStatus !== 'terminated' && displayStatus !== 'archived' ? (
                   <button type="button" onClick={() => { setActionsOpen(false); onDefineOutcome(); }}><Target size={18} />{t('detail.menu.defineOutcome')}</button>
                 ) : null}
+                <button type="button" onClick={() => { setActionsOpen(false); onResources(); }}><Paperclip size={18} />{t('detail.menu.resources')}</button>
                 <button type="button" onClick={() => { setActionsOpen(false); onInterrupt(); }}><Square size={18} />{t('detail.menu.interrupt')}</button>
                 {!session.archived_at ? (
                   <button type="button" onClick={() => { setActionsOpen(false); onArchive(); }}><Archive size={18} />{t('detail.menu.archive')}</button>

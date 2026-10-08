@@ -4,6 +4,17 @@
 
 ### Added
 
+- The session detail page now has a Resources & artifacts dialog that
+  manages the session after creation. It lists the live resource
+  instances from `GET /v1/sessions/{id}/resources` — not the frozen
+  creation-time projection — and supports attaching `file` and
+  `github_repository` resources post-creation (`memory_store` is not
+  offered, matching the route's refusal), detaching any instance, and
+  rotating a GitHub repository's `authorization_token` through the
+  published single-field update on non-terminal sessions. The same
+  dialog lists the session's artifacts from
+  `GET /v1/sessions/{id}/artifacts` with a download link per artifact.
+
 - The create-session modal now accepts the two creation-time fields the
   session API reserved for first contact: an optional USD spend limit that
   serializes to the published `budget` `{type: "limit", max_list_cost:

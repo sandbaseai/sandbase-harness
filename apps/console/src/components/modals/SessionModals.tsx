@@ -1,7 +1,7 @@
-import { ChevronDown, Plus, Shield, Trash2 } from 'lucide-react';
-import { type Dispatch, type FormEvent, type SetStateAction, useMemo, useState } from 'react';
+import { ChevronDown, Download, KeyRound, Plus, Shield, Trash2 } from 'lucide-react';
+import { type Dispatch, type FormEvent, type SetStateAction, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { postJson } from '../../api';
+import { deleteJson, getCursorPage, postJson } from '../../api';
 import { RequiredMark } from '../Common';
 import { ConsoleSelect } from '../console-select';
 import { EquivalentRequestPanel } from '../EquivalentRequestPanel';
@@ -10,7 +10,7 @@ import { Modal } from '../Modal';
 import { MultiResourcePicker, ResourcePicker } from '../ResourcePicker';
 import { environmentKind } from '../pages/EnvironmentPageModel';
 import { formatDateShort } from '../../lib/format';
-import type { ConsoleData, Session, SessionResourceDraft, ViewId } from '../../types';
+import type { ConsoleData, Session, SessionArtifact, SessionResourceDraft, SessionResourceInstance, ViewId } from '../../types';
 
 export function SessionModal({
   data,
@@ -806,6 +806,375 @@ export function DefineOutcomeModal({
           <button className="button primary" type="submit" disabled={saving}>{saving ? t('modal.outcome.defining') : t('modal.outcome.define')}</button>
         </div>
       </form>
+    </Modal>
+  );
+}
+
+/**
+ * Post-creation session resources and artifacts. The live instance listing —
+ * not the creation-time `session.resources` projection — is the source of
+ * truth here: attaches, detaches, and token rotations only ever show up in
+ * `GET /v1/sessions/{id}/resources`. `memory_store` is deliberately not
+ * offered post-creation because the route refuses it, and token rotation —
+ * the only published in-place update — is offered only on non-terminal
+ * sessions for the same reason.
+ */
+export function SessionResourcesModal({
+  session,
+  data,
+  onClose,
+  onChanged,
+}: {
+  session: Session;
+  data: ConsoleData;
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const { t } = useTranslation('sessions');
+  const { t: tCommon } = useTranslation();
+  const [instances, setInstances] = useState<SessionResourceInstance[] | null>(null);
+  const [artifacts, setArtifacts] = useState<SessionArtifact[] | null>(null);
+  const [listError, setListError] = useState('');
+  const [actionError, setActionError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [attachDraft, setAttachDraft] = useState<SessionResourceDraft | null>(null);
+  const [attachMenuOpen, setAttachMenuOpen] = useState(false);
+  const [rotatingId, setRotatingId] = useState<string | null>(null);
+  const [rotateToken, setRotateToken] = useState('');
+
+  const readOnly = session.archived_at !== null;
+  const terminal = readOnly || session.status === 'terminated';
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [resourcesPage, artifactsPage] = await Promise.all([
+          getCursorPage<SessionResourceInstance>(`/v1/sessions/${encodeURIComponent(session.id)}/resources`),
+          getCursorPage<SessionArtifact>(`/v1/sessions/${encodeURIComponent(session.id)}/artifacts`),
+        ]);
+        if (!cancelled) {
+          setInstances(resourcesPage.data);
+          setArtifacts(artifactsPage.data);
+        }
+      } catch (err) {
+        if (!cancelled) setListError(err instanceof Error ? err.message : String(err));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [session.id]);
+
+  const reload = async () => {
+    const [resourcesPage, artifactsPage] = await Promise.all([
+      getCursorPage<SessionResourceInstance>(`/v1/sessions/${encodeURIComponent(session.id)}/resources`),
+      getCursorPage<SessionArtifact>(`/v1/sessions/${encodeURIComponent(session.id)}/artifacts`),
+    ]);
+    setInstances(resourcesPage.data);
+    setArtifacts(artifactsPage.data);
+  };
+
+  const run = async (action: () => Promise<void>) => {
+    setBusy(true);
+    setActionError('');
+    try {
+      await action();
+      await reload();
+      onChanged();
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const instanceLabel = (instance: SessionResourceInstance): string => {
+    if (instance.type === 'file') {
+      return data.files.find((file) => file.id === instance.file_id)?.name ?? instance.file_id ?? instance.id;
+    }
+    if (instance.type === 'github_repository') {
+      return instance.url ?? instance.repository_id ?? instance.id;
+    }
+    return data.memoryStores.find((store) => store.id === instance.memory_store_id)?.name ?? instance.memory_store_id ?? instance.id;
+  };
+
+  const startAttach = (type: 'file' | 'github_repository') => {
+    setAttachMenuOpen(false);
+    setRotatingId(null);
+    setAttachDraft(
+      type === 'file'
+        ? { type: 'file', file_id: '', mount_path: '' }
+        : { type: 'github_repository', url: '', authorization_token: '', checkout: { mode: 'default', value: '' }, mount_path: '' },
+    );
+  };
+
+  const attachReady = attachDraft !== null && (
+    attachDraft.type === 'file'
+      ? attachDraft.file_id.trim() !== '' && attachDraft.mount_path.trim() !== ''
+      : attachDraft.type === 'github_repository' &&
+        attachDraft.url.trim() !== '' && attachDraft.authorization_token.trim() !== '' &&
+        (attachDraft.checkout.mode === 'default' || attachDraft.checkout.value.trim() !== '')
+  );
+
+  return (
+    <Modal title={t('modal.resourcesManager.title')} subtitle={session.title ?? session.id} onClose={onClose} size="wide">
+      {listError ? <div className="banner error inlineBanner">{listError}</div> : null}
+
+      <section className="sessionResourcesSection">
+        <div className="sessionResourcesHead">
+          <h3>{t('modal.resourcesManager.attached')}</h3>
+          {!readOnly ? (
+            <div className="menuWrap resourceAddWrap">
+              <button className="button secondary resourceAddButton" type="button" onClick={() => setAttachMenuOpen((open) => !open)}>
+                <Plus size={18} /> {t('modal.resourcesManager.attach')} <ChevronDown size={16} />
+              </button>
+              {attachMenuOpen ? (
+                <div className="resourceMenu resourceMenuDown">
+                  <button type="button" onClick={() => startAttach('file')}>{t('modal.resources.file')}</button>
+                  <button type="button" onClick={() => startAttach('github_repository')}>{t('modal.resources.repository')}</button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+        {instances === null ? (
+          <p className="mutedLine">{t('modal.resourcesManager.loading')}</p>
+        ) : instances.length === 0 ? (
+          <p className="mutedLine">{t('modal.resourcesManager.empty')}</p>
+        ) : (
+          <ul className="sessionResourcesList">
+            {instances.map((instance) => (
+              <li key={instance.id} className="sessionResourceRow">
+                <div className="sessionResourceMeta">
+                  <strong>{instanceLabel(instance)}</strong>
+                  <span className="sessionResourceBadge">{t(`modal.resourcesManager.type.${instance.type}`)}</span>
+                  {instance.mount_path ? <code>{instance.mount_path}</code> : null}
+                  {instance.type === 'github_repository' && instance.checkout?.type === 'branch' ? (
+                    <span>{t('modal.resourcesManager.checkoutBranch', { value: instance.checkout.name ?? '' })}</span>
+                  ) : null}
+                  {instance.type === 'github_repository' && instance.checkout?.type === 'commit' ? (
+                    <span>{t('modal.resourcesManager.checkoutCommit', { value: instance.checkout.sha ?? '' })}</span>
+                  ) : null}
+                </div>
+                {!readOnly ? (
+                  <div className="sessionResourceActions">
+                    {instance.type === 'github_repository' && !terminal ? (
+                      <button
+                        className="button secondary"
+                        type="button"
+                        disabled={busy}
+                        onClick={() => {
+                          setRotatingId((current) => (current === instance.id ? null : instance.id));
+                          setRotateToken('');
+                        }}
+                      >
+                        <KeyRound size={15} /> {t('modal.resourcesManager.rotate')}
+                      </button>
+                    ) : null}
+                    <button
+                      className="button secondary danger"
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void run(async () => {
+                        await deleteJson(`/v1/sessions/${encodeURIComponent(session.id)}/resources/${encodeURIComponent(instance.id)}`);
+                      })}
+                    >
+                      <Trash2 size={15} /> {t('modal.resourcesManager.detach')}
+                    </button>
+                  </div>
+                ) : null}
+                {rotatingId === instance.id ? (
+                  <form
+                    className="sessionResourceRotate"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      const token = rotateToken.trim();
+                      if (!token) return;
+                      void run(async () => {
+                        await postJson(`/v1/sessions/${encodeURIComponent(session.id)}/resources/${encodeURIComponent(instance.id)}`, { authorization_token: token });
+                        setRotatingId(null);
+                        setRotateToken('');
+                      });
+                    }}
+                  >
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      value={rotateToken}
+                      onChange={(event) => setRotateToken(event.target.value)}
+                      placeholder={t('modal.resources.repoTokenPlaceholder')}
+                      aria-label={t('modal.resourcesManager.rotate')}
+                      required
+                    />
+                    <button className="button primary" type="submit" disabled={busy || !rotateToken.trim()}>
+                      {t('modal.resourcesManager.rotateConfirm')}
+                    </button>
+                  </form>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {attachDraft ? (
+          <form
+            className="resourceEditor"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!attachDraft || !attachReady) return;
+              void run(async () => {
+                await postJson(`/v1/sessions/${encodeURIComponent(session.id)}/resources`, toSessionResourcePayload(attachDraft));
+                setAttachDraft(null);
+              });
+            }}
+          >
+            <div className="sessionResourcesHead">
+              <h3>{attachDraft.type === 'file' ? t('modal.resources.file') : t('modal.resources.repository')}</h3>
+              <button className="iconButton" type="button" onClick={() => setAttachDraft(null)} aria-label={tCommon('actions.cancel')}>
+                <Trash2 size={15} />
+              </button>
+            </div>
+            {attachDraft.type === 'file' ? (
+              <>
+                <ResourcePicker
+                  label={t('modal.resources.fileLabel')}
+                  placeholder={t('modal.resources.filePlaceholder')}
+                  searchPlaceholder={t('modal.resources.fileSearch')}
+                  value={attachDraft.file_id}
+                  onValue={(file_id) => setAttachDraft({ ...attachDraft, file_id })}
+                  options={data.files.map((file) => ({ id: file.id, title: file.name, subtitle: formatDateShort(file.created_at) }))}
+                />
+                <label>
+                  {t('modal.resources.mountPath')} <RequiredMark />
+                  <input
+                    value={attachDraft.mount_path}
+                    onChange={(event) => setAttachDraft({ ...attachDraft, mount_path: event.target.value })}
+                    placeholder="/uploads/myfile.txt"
+                    required
+                  />
+                  <small>{t('modal.resources.mountHelper')}</small>
+                </label>
+              </>
+            ) : null}
+            {attachDraft.type === 'github_repository' ? (
+              <>
+                <label>
+                  {t('modal.resources.repoUrl')} <RequiredMark />
+                  <input
+                    value={attachDraft.url}
+                    onChange={(event) => setAttachDraft({ ...attachDraft, url: event.target.value })}
+                    placeholder={t('modal.resources.repoUrlPlaceholder')}
+                    required
+                  />
+                </label>
+                <label>
+                  {t('modal.resources.repoToken')} <RequiredMark />
+                  <input
+                    type="password"
+                    autoComplete="off"
+                    value={attachDraft.authorization_token}
+                    onChange={(event) => setAttachDraft({ ...attachDraft, authorization_token: event.target.value })}
+                    placeholder={t('modal.resources.repoTokenPlaceholder')}
+                    required
+                  />
+                  <small>{t('modal.resources.repoTokenHelper')}</small>
+                </label>
+                <label className="shortField">
+                  {t('modal.resources.checkout')}
+                  <ConsoleSelect
+                    label={t('modal.resources.checkout')}
+                    value={attachDraft.checkout.mode}
+                    onChange={(mode) => setAttachDraft({ ...attachDraft, checkout: { ...attachDraft.checkout, mode: mode as 'default' | 'branch' | 'commit' } })}
+                    options={[
+                      { value: 'default', label: t('modal.resources.checkoutDefault') },
+                      { value: 'branch', label: t('modal.resources.checkoutBranch') },
+                      { value: 'commit', label: t('modal.resources.checkoutCommit') },
+                    ]}
+                  />
+                </label>
+                {attachDraft.checkout.mode === 'branch' ? (
+                  <label className="shortField">
+                    {t('modal.resources.branchName')} <RequiredMark />
+                    <input
+                      value={attachDraft.checkout.value}
+                      onChange={(event) => setAttachDraft({ ...attachDraft, checkout: { ...attachDraft.checkout, value: event.target.value } })}
+                      placeholder="release-1.2"
+                      required
+                    />
+                  </label>
+                ) : null}
+                {attachDraft.checkout.mode === 'commit' ? (
+                  <label className="shortField">
+                    {t('modal.resources.commitSha')} <RequiredMark />
+                    <input
+                      value={attachDraft.checkout.value}
+                      onChange={(event) => setAttachDraft({ ...attachDraft, checkout: { ...attachDraft.checkout, value: event.target.value } })}
+                      placeholder="9fca646b4a4ce9cdd3e1e8b3cd20e7b7c5e4b0c3"
+                      pattern="[0-9a-fA-F]{7,40}"
+                      title={t('modal.resources.shaTitle')}
+                      required
+                    />
+                    <small>{t('modal.resources.shaHint')}</small>
+                  </label>
+                ) : null}
+                <label>
+                  {t('modal.resources.mountPath')}
+                  <input
+                    value={attachDraft.mount_path}
+                    onChange={(event) => setAttachDraft({ ...attachDraft, mount_path: event.target.value })}
+                    placeholder={t('modal.resources.mountDefault')}
+                  />
+                </label>
+              </>
+            ) : null}
+            <div className="modalActions">
+              <button className="button secondary" type="button" onClick={() => setAttachDraft(null)}>{tCommon('actions.cancel')}</button>
+              <button className="button primary" type="submit" disabled={busy || !attachReady}>
+                {busy ? t('modal.resourcesManager.attaching') : t('modal.resourcesManager.attachSubmit')}
+              </button>
+            </div>
+          </form>
+        ) : null}
+      </section>
+
+      <section className="sessionResourcesSection">
+        <div className="sessionResourcesHead">
+          <h3>{t('modal.resourcesManager.artifacts')}</h3>
+        </div>
+        {artifacts === null ? (
+          <p className="mutedLine">{t('modal.resourcesManager.loading')}</p>
+        ) : artifacts.length === 0 ? (
+          <p className="mutedLine">{t('modal.resourcesManager.noArtifacts')}</p>
+        ) : (
+          <ul className="sessionResourcesList">
+            {artifacts.map((artifact) => (
+              <li key={artifact.id} className="sessionResourceRow">
+                <div className="sessionResourceMeta">
+                  <strong>{artifact.name}</strong>
+                  {artifact.artifact_path ? <code>{artifact.artifact_path}</code> : null}
+                  <span>{formatDateShort(artifact.created_at)}</span>
+                </div>
+                <div className="sessionResourceActions">
+                  <a
+                    className="button secondary"
+                    href={`/v1/sessions/${encodeURIComponent(session.id)}/artifacts/${encodeURIComponent(artifact.id)}/content`}
+                    download={artifact.name}
+                    aria-label={t('modal.resourcesManager.download')}
+                  >
+                    <Download size={15} /> {t('modal.resourcesManager.download')}
+                  </a>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {actionError ? <div className="banner error inlineBanner">{actionError}</div> : null}
+      <div className="modalActions">
+        <button className="button secondary" type="button" onClick={onClose}>{tCommon('actions.close')}</button>
+      </div>
     </Modal>
   );
 }

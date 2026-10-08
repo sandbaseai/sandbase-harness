@@ -1321,6 +1321,91 @@
   background: var(--inset);
 }
 
+.resourceMenuDown {
+  bottom: auto;
+  top: calc(100% + 4px);
+}
+
+.sessionResourcesSection {
+  display: grid;
+  gap: 12px;
+  padding-bottom: 20px;
+}
+
+.sessionResourcesSection + .sessionResourcesSection {
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+}
+
+.sessionResourcesHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sessionResourcesHead h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.sessionResourcesList {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sessionResourceRow {
+  display: grid;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-card);
+  background: var(--inset);
+}
+
+.sessionResourceMeta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  color: var(--fg-muted);
+  font-size: 13px;
+}
+
+.sessionResourceMeta strong {
+  color: var(--fg);
+  font-size: 13.5px;
+}
+
+.sessionResourceMeta code {
+  font-size: 12px;
+}
+
+.sessionResourceBadge {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: 11.5px;
+}
+
+.sessionResourceActions {
+  display: flex;
+  gap: 8px;
+}
+
+.sessionResourceRotate {
+  display: flex;
+  gap: 8px;
+}
+
+.sessionResourceRotate input {
+  flex: 1;
+}
+
 .resourcePicker {
   position: relative;
   display: grid;

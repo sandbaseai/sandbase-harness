@@ -186,6 +186,42 @@ export type SessionResourceDraft =
   | { type: 'github_repository'; url: string; authorization_token: string; checkout: { mode: 'default' | 'branch' | 'commit'; value: string }; mount_path: string }
   | { type: 'memory_store'; memory_store_id: string; access: 'read_write' | 'read_only'; instructions: string };
 
+/**
+ * A live resource instance as `GET /v1/sessions/{id}/resources` projects it —
+ * secrets stripped server-side, per-type fields spread at the top level.
+ */
+export type SessionResourceInstance = {
+  id: string;
+  type: 'file' | 'github_repository' | 'memory_store';
+  mount_path?: string;
+  created_at: string;
+  updated_at: string;
+  file_id?: string;
+  url?: string;
+  repository_id?: string;
+  checkout?: { type: string; name?: string; sha?: string };
+  memory_store_id?: string;
+  access?: 'read_write' | 'read_only';
+  instructions?: string;
+};
+
+/** An artifact row from `GET /v1/sessions/{id}/artifacts` — a file resource with `role: 'artifact'`. */
+export type SessionArtifact = {
+  id: string;
+  type: 'file';
+  name: string;
+  media_type: string;
+  size_bytes: number;
+  role: string;
+  session_id: string | null;
+  artifact_path: string | null;
+  status: string;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+  archived_at: string | null;
+};
+
 export type WorkspaceFile = {
   id: string;
   type: 'file';

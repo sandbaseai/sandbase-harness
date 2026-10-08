@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { deleteJson, postJson } from '../../api';
 import { StatusDot, type Tone } from '../console-ui';
 import { ConfirmDeleteModal } from '../DangerZone';
-import { DefineOutcomeModal, SessionSettingsModal } from '../modals/SessionModals';
+import { DefineOutcomeModal, SessionResourcesModal, SessionSettingsModal } from '../modals/SessionModals';
 import { SessionComposer } from '../session/SessionComposer';
 import { SessionHero } from '../session/SessionHero';
 import { SessionTimeline } from '../session/SessionTimeline';
@@ -51,6 +51,7 @@ export function SessionDetail({
   const { t } = useTranslation('sessions');
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [defineOutcomeOpen, setDefineOutcomeOpen] = useState(false);
+  const [resourcesOpen, setResourcesOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [actionError, setActionError] = useState('');
   const [messageDraft, setMessageDraft] = useState('');
@@ -226,6 +227,7 @@ export function SessionDetail({
         onOpenAgent={onOpenAgent}
         onSettings={() => setSettingsOpen(true)}
         onDefineOutcome={() => setDefineOutcomeOpen(true)}
+        onResources={() => setResourcesOpen(true)}
         onInterrupt={() => void interrupt()}
         onArchive={() => void archive()}
         onDelete={() => setDeleteConfirmOpen(true)}
@@ -279,6 +281,15 @@ export function SessionDetail({
             await loadEvents({ silent: true });
             onRefresh();
           }}
+        />
+      ) : null}
+
+      {resourcesOpen ? (
+        <SessionResourcesModal
+          session={session}
+          data={data}
+          onClose={() => setResourcesOpen(false)}
+          onChanged={onRefresh}
         />
       ) : null}
 
