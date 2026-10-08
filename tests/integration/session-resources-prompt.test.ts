@@ -288,8 +288,10 @@ describe('session resource paths in the system prompt', () => {
     // A backend that cannot reach the canonical root no longer produces a
     // misleading announcement — naming a path the mount will never reach — because
     // the session is refused before a turn, and therefore before any prompt,
-    // exists. The rendering rule this case used to cover (canonical spelling only,
-    // no shell spelling) is pinned where it is reachable, in
+    // exists. Docker serves a file resource, so the resource declared here is a
+    // repository, which stays refused on docker until its materialization is
+    // exercised there. The rendering rule this case used to cover (canonical
+    // spelling only, no shell spelling) is pinned where it is reachable, in
     // `tests/unit/session-resource-prompt.test.ts`; the admission decision, the
     // status, and the code are pinned in
     // `tests/integration/resource-admission-refusal.test.ts`.
@@ -297,11 +299,15 @@ describe('session resource paths in the system prompt', () => {
     addDockerEnvironment('env_docker');
     makeRuntime({ providers: [localProvider, dockerStub(writes)] });
 
-    const fileId = await uploadFile('notes.txt', 'attached bytes');
     const refused = await post('/v1/sessions', {
       agent: 'agent_assistant',
       environment_id: 'env_docker',
-      resources: [{ type: 'file', file_id: fileId, mount_path: '/notes/input.txt' }],
+      resources: [{
+        type: 'github_repository',
+        url: 'https://github.com/example/widget',
+        authorization_token: 'ghp_prompt_token',
+        mount_path: '/workspace/widget',
+      }],
     });
 
     expect(refused.status, JSON.stringify(refused.body)).toBe(400);

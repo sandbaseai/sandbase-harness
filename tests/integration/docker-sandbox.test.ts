@@ -84,6 +84,23 @@ describe('DockerSandboxProvider', () => {
     expect(() => dockerWorkspacePath('/etc/passwd')).toThrow(/inside \/workspace/);
   });
 
+  it('serves the canonical in-sandbox roots as literal container paths', () => {
+    // A container's filesystem is the sandbox, so a published absolute path is
+    // the path the bytes land at — the same spelling the resource contract and
+    // the agent's instructions name.
+    expect(dockerWorkspacePath('/mnt/session/uploads/notes/input.txt'))
+      .toBe('/mnt/session/uploads/notes/input.txt');
+    expect(dockerWorkspacePath('/mnt/session/outputs/report.md'))
+      .toBe('/mnt/session/outputs/report.md');
+    expect(dockerWorkspacePath('/workspace/widget')).toBe('/workspace/widget');
+    expect(dockerWorkspacePath('/mnt/session')).toBe('/mnt/session');
+    // The boundary is whole-segment: a lookalike prefix and a `..` that climbs
+    // out of a canonical root stay refused.
+    expect(() => dockerWorkspacePath('/mnt/session/../../etc/passwd')).toThrow();
+    expect(() => dockerWorkspacePath('/mnt/sessionx/file')).toThrow(/inside \/workspace/);
+    expect(() => dockerWorkspacePath('/mnt/other')).toThrow(/inside \/workspace/);
+  });
+
   const localImage = isDockerAvailable() ? findLocalImage() : undefined;
   const dockerTests = localImage ? describe : describe.skip;
   dockerTests('with a running Docker daemon + cached image', () => {
@@ -110,6 +127,16 @@ describe('DockerSandboxProvider', () => {
 
         const files = await sandbox.listFiles('.');
         expect(files).toContain('test.txt');
+
+        // A mounted file resource lands at its canonical absolute path inside
+        // the container — the same spelling the agent's instructions publish.
+        await sandbox.writeFile('/mnt/session/uploads/notes/input.txt', 'mounted bytes');
+        const mounted = await sandbox.execute('cat /mnt/session/uploads/notes/input.txt');
+        expect(mounted.exitCode).toBe(0);
+        expect(mounted.stdout.trim()).toBe('mounted bytes');
+        expect(await sandbox.readFile('/mnt/session/uploads/notes/input.txt')).toBe('mounted bytes');
+        expect(await sandbox.listFiles('/mnt/session/uploads'))
+          .toContain('mnt/session/uploads/notes/input.txt');
       } finally {
         await sandbox.cleanup();
         rmSync(tmpDir, { recursive: true, force: true });

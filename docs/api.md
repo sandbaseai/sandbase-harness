@@ -784,14 +784,16 @@ A `file` and a `github_repository` resource are both materialized at provisionin
 into the canonical roots the runtime reserves for them
 (`/mnt/session/uploads/...` and `/workspace/<repo>`). The `local` backend maps
 those roots into the session's sandbox directory, so on a local session the
-resource is written where the resource says it is. The other shipped backends do
-not serve those roots, so the runtime does not accept the session at all: `docker`
-refuses every absolute
-path, `kubernetes` resolves an absolute path against its own `/workspace` and so
-refuses the upload root (and its acceptance of the repository root was never
-exercised against a cluster), and a `self_hosted` worker resolves the path inside
-its own root, which the runtime can neither verify nor enforce. A
-session that declares either resource on one of those three is refused when it is
+resource is written where the resource says it is; on `docker` the container's
+filesystem is the sandbox, so the canonical path is the real path and a file
+resource lands verbatim. The backends that cannot serve the mount are refused at
+creation instead: `docker` accepts both roots but its repository materialization
+has not been exercised, `kubernetes` resolves an absolute path against its own
+`/workspace` and so refuses the upload root (and its acceptance of the
+repository root was never exercised against a cluster), and a `self_hosted`
+worker resolves the path inside its own root, which the runtime can neither
+verify nor enforce. A
+session that declares a resource its backend cannot serve is refused when it is
 created, with `resource_not_mountable` and `400`, and nothing is created — no
 session row, no resource instance, no event — so the failure names the backend
 and the resource instead of surfacing at provisioning. The same refusal applies to

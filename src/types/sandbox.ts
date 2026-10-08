@@ -160,10 +160,11 @@ export interface SandboxInstance {
    *
    * Each backend honours that spelling to the extent its own confinement allows,
    * so a canonical path is not portable: the local backend maps the canonical
-   * roots into its sandbox directory, docker refuses every absolute path,
-   * kubernetes accepts a path under its `/workspace` and refuses the upload root,
-   * and a self-hosted worker decides for itself. The relative spelling is the one
-   * every backend accepts.
+   * roots into its sandbox directory, docker serves them verbatim inside the
+   * container and refuses any other absolute path, kubernetes accepts a path
+   * under its `/workspace` and refuses the upload root, and a self-hosted
+   * worker decides for itself. The relative spelling is the one every backend
+   * accepts.
    */
   writeFile(path: string, content: string | Buffer): Promise<void>;
 

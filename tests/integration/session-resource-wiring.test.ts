@@ -378,41 +378,39 @@ describe('session resource wiring at the composition root', () => {
     expect(prompt).toContain('# Available Skills');
   });
 
-  it('rejects the canonical file mount root in the provider path checks', () => {
+  it('serves the canonical file mount root on docker, while kubernetes refuses it', () => {
     // Why the admission decision in
-    // `tests/integration/resource-admission-refusal.test.ts` refuses a file
-    // resource on these backends: the path functions they actually call cannot
-    // take the canonical root.
-    //
-    // The local backend reaches the canonical roots
+    // `tests/integration/resource-admission-refusal.test.ts` admits a file
+    // resource on docker and still refuses one on kubernetes: a container's
+    // filesystem is the sandbox, so a canonical absolute path is a real path
+    // inside it and `dockerWorkspacePath` passes it through verbatim, while
+    // kubernetes resolves an absolute path against its own `/workspace`, which
+    // leaves the upload root outside it. The local backend reaches the
+    // canonical roots by mapping them into its sandbox directory
     // (`tests/integration/local-canonical-roots.test.ts` drives the same paths
-    // through the real provider). These two do not: docker resolves every path
-    // relative to its own `/workspace` and refuses an absolute one, and
-    // kubernetes resolves an absolute path against `/workspace`, which leaves the
-    // upload root outside it. Both are the functions the providers actually call
-    // (`tests/integration/docker-sandbox.test.ts` and the kubernetes suites drive
-    // them through a session), and both are pure, so the refusal is pinned without
-    // a daemon or a reachable cluster. If either starts accepting the root, this
-    // fails and the refusal table in `src/core/resources/resource-mountability.ts`
-    // has to be revisited.
-    expect(() => dockerWorkspacePath('/mnt/session/uploads/notes/input.txt'))
-      .toThrow('Docker sandbox paths must stay inside /workspace');
+    // through the real provider). Both functions are the ones the providers
+    // actually call (`tests/integration/docker-sandbox.test.ts` and the
+    // kubernetes suites drive them through a session), and both are pure, so
+    // the boundary is pinned without a daemon or a reachable cluster. If
+    // docker stops serving the root, or kubernetes starts, this fails and the
+    // refusal table in `src/core/resources/resource-mountability.ts` has to be
+    // revisited.
+    expect(dockerWorkspacePath('/mnt/session/uploads/notes/input.txt'))
+      .toBe('/mnt/session/uploads/notes/input.txt');
     expect(() => resolveWorkspacePath('/mnt/session/uploads/notes/input.txt'))
       .toThrow('Path escapes sandbox workspace');
   });
 
-  it('rejects the canonical repository mount root on docker, while kubernetes accepts it', () => {
-    // The repository half of the same decision: the materializer copies its tree
-    // through the sandbox at the mount path the route resolved, so a backend that
-    // will not take `/workspace/...` cannot mount a repository there. Docker does
-    // not; kubernetes resolves it inside its own `/workspace` and does accept it.
-    // Both backends are still refused at creation, because accepting the
-    // repository root is not serving a session's resources — kubernetes refuses the
-    // upload root, and no cluster was available to exercise either root — so this
-    // case records the provider facts the refusal rests on rather than a
-    // capability gap.
-    expect(() => dockerWorkspacePath('/workspace/widget'))
+  it('confines docker to the canonical roots and refuses every other absolute path', () => {
+    // The pass-through is bounded: an absolute path outside the published
+    // roots is still a refusal, and a `..` that climbs out of a root names a
+    // path the runtime never published, so both stay refused rather than
+    // retargeted.
+    expect(dockerWorkspacePath('/workspace/widget')).toBe('/workspace/widget');
+    expect(dockerWorkspacePath('/workspace')).toBe('/workspace');
+    expect(() => dockerWorkspacePath('/etc/passwd'))
       .toThrow('Docker sandbox paths must stay inside /workspace');
+    expect(() => dockerWorkspacePath('/mnt/session/../../etc/passwd')).toThrow();
     expect(resolveWorkspacePath('/workspace/widget')).toBe('/workspace/widget');
   });
 });
