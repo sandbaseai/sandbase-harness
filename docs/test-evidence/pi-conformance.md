@@ -20,14 +20,25 @@ a model turn used the expected trust, skill, or resume behavior.
 
 ## Real Pi provider gate
 
-The host had no `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `MINIMAX_API_KEY`, or
-`SANDBASE_PI_API_KEY` configured at verification time. Therefore a real
-non-production model turn proving Pi project trust, `AGENTS.md` loading,
-explicit `--skill` behavior, provider usage, and three-turn Pi resume was not
-run. This is an external credential blocker, not a passing claim. The exact
-next safe command, after a temporary non-production credential is supplied, is
-to run the deterministic controlled test plus a fresh workspace walkthrough
-with Pi `0.84.4`, then record only redacted observations here.
+Verified 2026-10-08 on the Windows host with Pi `0.84.4` and a configured
+`openai_compatible` model whose API key lives in a managed secret (only
+`$SANDBASE_PI_API_KEY` reaches the child). A session created with
+`loop_engine.provider: "pi"` completed two turns on one persistent RPC child:
+
+- turn 1 issued `agent.tool_use` (`bash`) and `agent.tool_result`, and the
+  model's reply correctly described the managed work directory as containing
+  only the runtime-written `AGENTS.md`;
+- turn 2, sent to the same session, answered a question about the first turn —
+  proving the child and its session file persist between prompts;
+- the log shows `span.model_request_*`, `turn_complete`, `session.usage`, and
+  `session.status_idle` — no `pi_rpc_outcome_unknown` and no `write EPIPE`,
+  the failure that previously terminated every Windows Pi session at the first
+  command write (fixed in #878).
+
+Not yet exercised against the real CLI: resume after a runtime restart
+(`pi_session_state` rebind), explicit `--skill` forwarding, and the managed
+`always_ask` gate extension. Those paths remain covered only by the
+deterministic controlled tests above.
 
 No credentials, personal paths, or provider diagnostics are stored in this
 repository.

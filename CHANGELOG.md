@@ -147,6 +147,15 @@
 
 ### Fixed
 
+- `loop_engine.provider: "pi"` sessions now run on Windows. The launcher
+  resolved npm's `pi.cmd` shim to its neighbouring `pi.ps1` and spawned it
+  through `powershell -Command`, whose argument forwarder severs piped stdin;
+  the RPC child saw stdin at EOF, exited its command loop, and the first
+  `get_commands` write failed `write EPIPE`, terminating every Pi session as
+  `pi_rpc_outcome_unknown`. The launcher now reads the `.cmd` shim for the
+  `%~dp0%` entry it wraps and spawns that `cli.js` through Node directly,
+  keeping the PowerShell path only as a fallback for shims that do not match
+  the npm layout.
 - Attaching a memory store no longer disables the `bash` tool. The published contract leaves a `read_write` mount unguarded and refuses only shell commands that name a path inside a `read_only` mount — the tool layer now enforces exactly that instead of refusing every command while a mount is attached. Shell commands can never persist into `memory_records` regardless, so a session can compute and persist memories at once.
 - A tool call the model SDK refused before execution — an input failing the tool's schema validation is the observed case — now persists a paired `agent.tool_result` carrying `is_error: true` instead of leaving an orphan `agent.tool_use` that looked forever parked. The SDK feeds its `tool-error` output back to the model itself; the runtime was simply not recording it, which made retry loops invisible in the event log and on the stream.
 - A `tool_result` produced by a refused or failed tool execution now carries `is_error: true` in its content block and the row's `is_error` column. Tool errors used to be persisted as unmarked `Error: ...` text, so a memory-mount refusal, a missing file, a non-zero shell exit, or a refused `web_fetch` was indistinguishable from a success without string-matching the content. The model sees the same text as before — only the persisted event gains the flag — and an MCP result the server marked `isError` is flagged the same way.
