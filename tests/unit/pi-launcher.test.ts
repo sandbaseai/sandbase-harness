@@ -496,6 +496,7 @@ describe('Pi launcher', () => {
     directories.push(directory);
     const command = join(directory, 'pi.cmd');
     const entry = join(directory, 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist', 'bundle', 'cli.js');
+    const normalize = (path: string) => path.replace(/[\\/]+/g, '/');
     writeFileSync(command, [
       '@ECHO off',
       'SETLOCAL',
@@ -506,11 +507,14 @@ describe('Pi launcher', () => {
       command,
       platform: 'win32',
       environment: { SystemRoot: 'C:\\Windows' },
-      fileExists: (path) => path === entry,
+      // The launcher resolves shim entries with win32 path semantics on every
+      // host platform, so compare with separators normalized.
+      fileExists: (path) => normalize(path) === normalize(entry),
     });
 
     expect(invocation.file).toBe(process.execPath);
-    expect(invocation.args).toEqual([entry, '--mode', 'rpc']);
+    expect(normalize(invocation.args[0]!)).toBe(normalize(entry));
+    expect(invocation.args.slice(1)).toEqual(['--mode', 'rpc']);
   });
 
   it('falls back to the PowerShell shim when the npm shim entry is not readable', () => {
