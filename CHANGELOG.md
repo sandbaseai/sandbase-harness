@@ -4,6 +4,14 @@
 
 ### Added
 
+- The outcomes page now edits a definition in place. Each row and card
+  gains an Edit action that opens the stored name, objective, criteria
+  list, pass threshold, description, and `active`/`disabled` status, and
+  submits them through `PUT /v1/outcomes/{id}` — where `pass_threshold`
+  continues to travel as the top-level field the route folds into the
+  outcome's metadata. Update failures render inside the dialog instead
+  of discarding the draft.
+
 - The webhooks page now edits subscriptions in place. Each row's Edit
   action opens the endpoint's current fields — url, name, the grouped
   official event catalog, description — plus a status selector that maps
