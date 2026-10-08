@@ -34,8 +34,30 @@ export function SessionModal({
   const [vaultIds, setVaultIds] = useState<Set<string>>(new Set());
   const [resources, setResources] = useState<SessionResourceDraft[]>([]);
   const [resourceMenuOpen, setResourceMenuOpen] = useState(false);
+  const [budget, setBudget] = useState('');
+  const [outcomeDescription, setOutcomeDescription] = useState('');
+  const [outcomeRubric, setOutcomeRubric] = useState('');
+  const [outcomeMaxIterations, setOutcomeMaxIterations] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+
+  // The published budget is cents written as a string; the field takes a
+  // dollar amount. `undefined` omits the key, `null` marks "typed but not a
+  // valid amount" so submit can refuse instead of sending a broken shape.
+  const budgetCents = useMemo(() => {
+    const trimmed = budget.trim();
+    if (!trimmed) return undefined;
+    if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) return null;
+    const cents = Math.round(Number(trimmed) * 100);
+    return cents > 0 ? String(cents) : null;
+  }, [budget]);
+
+  // An outcome needs both halves — a description to work toward and a rubric
+  // to grade against. Sending one without the other would be rejected by the
+  // API anyway, so the submit check below catches it first.
+  const outcomeEntered = Boolean(outcomeDescription.trim() || outcomeRubric.trim() || outcomeMaxIterations.trim());
+  const outcomeComplete = Boolean(outcomeDescription.trim() && outcomeRubric.trim());
+  const outcomeMax = outcomeMaxIterations.trim() ? Number(outcomeMaxIterations) : undefined;
 
   // One body object feeds both the submit below and the equivalent-request
   // panel — the panel is only honest if it cannot drift from what is sent.
@@ -44,9 +66,18 @@ export function SessionModal({
     environment_id: environment,
     title: title || undefined,
     ...(engine ? { loop_engine: engine } : {}),
+    ...(budgetCents ? { budget: { type: 'limit', max_list_cost: { amount: budgetCents, currency: 'USD' } } } : {}),
+    ...(outcomeComplete ? {
+      initial_events: [{
+        type: 'user.define_outcome',
+        description: outcomeDescription.trim(),
+        rubric: { type: 'text', content: outcomeRubric.trim() },
+        ...(outcomeMax !== undefined ? { max_iterations: outcomeMax } : {}),
+      }],
+    } : {}),
     resources: resources.map(toSessionResourcePayload),
     vault_ids: Array.from(vaultIds),
-  }), [agent, environment, engine, title, resources, vaultIds]);
+  }), [agent, environment, engine, title, budgetCents, outcomeComplete, outcomeDescription, outcomeRubric, outcomeMax, resources, vaultIds]);
 
   // Only engines the runtime can execute are offered; roadmap adapters carry
   // status 'unavailable' and stay out of the picker entirely.
@@ -65,6 +96,18 @@ export function SessionModal({
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
+    if (budgetCents === null) {
+      setError(t('modal.limits.errorBudget'));
+      return;
+    }
+    if (outcomeEntered && !outcomeComplete) {
+      setError(t('modal.limits.errorOutcomeIncomplete'));
+      return;
+    }
+    if (outcomeComplete && outcomeMax !== undefined && (!Number.isInteger(outcomeMax) || outcomeMax < 1 || outcomeMax > 20)) {
+      setError(t('modal.outcome.errorMaxIterations'));
+      return;
+    }
     setSaving(true);
     setError('');
     try {
@@ -187,6 +230,60 @@ export function SessionModal({
                   </div>
                 ) : null}
               </div>
+            </section>
+
+            <section className="sessionSectionCard">
+              <div className="sessionSectionHeader">
+                <span className="sessionSectionNumber">4</span>
+                <div><h3>{t('modal.limits.title')}</h3><p>{t('modal.limits.hint')}</p></div>
+              </div>
+              <label className="sessionField">
+                <span>{t('modal.limits.budget')} <small className="optionalPill">{t('modal.details.optional')}</small></span>
+                <input
+                  value={budget}
+                  onChange={(event) => setBudget(event.target.value)}
+                  inputMode="decimal"
+                  placeholder={t('modal.limits.budgetPlaceholder')}
+                  aria-label={t('modal.limits.budget')}
+                />
+                <small>{t('modal.limits.budgetHint')}</small>
+              </label>
+              <label className="sessionField">
+                <span>{t('modal.limits.outcomeDescription')} <small className="optionalPill">{t('modal.details.optional')}</small></span>
+                <textarea
+                  value={outcomeDescription}
+                  onChange={(event) => setOutcomeDescription(event.target.value)}
+                  rows={2}
+                  placeholder={t('modal.limits.outcomeDescriptionPlaceholder')}
+                  aria-label={t('modal.limits.outcomeDescription')}
+                />
+              </label>
+              {outcomeEntered ? (
+                <>
+                  <label className="sessionField">
+                    <span>{t('modal.limits.outcomeRubric')} <small className="optionalPill">{t('modal.details.optional')}</small></span>
+                    <textarea
+                      value={outcomeRubric}
+                      onChange={(event) => setOutcomeRubric(event.target.value)}
+                      rows={3}
+                      spellCheck={false}
+                      placeholder={t('modal.limits.outcomeRubricPlaceholder')}
+                      aria-label={t('modal.limits.outcomeRubric')}
+                    />
+                    <small>{t('modal.limits.outcomeRubricHint')}</small>
+                  </label>
+                  <label className="sessionField">
+                    <span>{t('modal.outcome.maxIterations')} <small className="optionalPill">{t('modal.outcome.maxIterationsOptional')}</small></span>
+                    <input
+                      value={outcomeMaxIterations}
+                      onChange={(event) => setOutcomeMaxIterations(event.target.value)}
+                      inputMode="numeric"
+                      placeholder="3"
+                      aria-label={t('modal.outcome.maxIterations')}
+                    />
+                  </label>
+                </>
+              ) : null}
             </section>
         </div>
 

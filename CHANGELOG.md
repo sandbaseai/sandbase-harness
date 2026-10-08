@@ -4,6 +4,18 @@
 
 ### Added
 
+- The create-session modal now accepts the two creation-time fields the
+  session API reserved for first contact: an optional USD spend limit that
+  serializes to the published `budget` `{type: "limit", max_list_cost:
+  {amount: cents, currency: "USD"}}` shape, and an optional initial outcome
+  (description plus inline text rubric, with the bounded `max_iterations`)
+  that serializes to `initial_events: [{type: "user.define_outcome", ...}]`
+  so the outcome can gate the very first turn instead of being declared
+  after the session already ran. A malformed amount and a half-filled
+  outcome block submit with a local error rather than sending a shape the
+  API would refuse, and both fields flow through the shared create body so
+  the equivalent-request panel shows exactly what is sent.
+
 - The credential vault detail page now offers a Validate row action on
   `mcp_oauth` and `bearer_token` credentials — the two auth types the
   published `mcp_oauth_validate` probe can reach — which posts the live

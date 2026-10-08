@@ -224,6 +224,91 @@ describe('the interactive Console harness', () => {
     });
   });
 
+  describe('limits and initial outcome', () => {
+    async function pickAgentAndEnvironment(user: ReturnType<typeof userEvent.setup>) {
+      await user.click(screen.getAllByRole('button', { name: /select an agent/i })[0]);
+      await user.click(screen.getByRole('option', { name: /echo agent/i }));
+      await user.click(screen.getAllByRole('button', { name: /select an environment/i })[0]);
+      await user.click(screen.getByRole('option', { name: /local/i }));
+    }
+
+    it('serializes the dollar budget to the published cents shape', async () => {
+      const user = userEvent.setup();
+      onApiRequest(() => ({ id: 'sess_new', type: 'session' }));
+
+      renderConsole(
+        <SessionModal data={data} onClose={() => {}} onSaved={() => {}} onNavigate={() => {}} />,
+      );
+
+      await pickAgentAndEnvironment(user);
+      await user.type(screen.getByLabelText(/spend limit/i), '5.00');
+      await user.click(screen.getByRole('button', { name: /create session/i }));
+
+      const create = apiRequests().find((request) => request.path === '/v1/sessions');
+      expect(create?.body).toMatchObject({
+        budget: { type: 'limit', max_list_cost: { amount: '500', currency: 'USD' } },
+      });
+      expect(create?.body).not.toHaveProperty('initial_events');
+    });
+
+    it('sends an initial user.define_outcome when description and rubric are filled', async () => {
+      const user = userEvent.setup();
+      onApiRequest(() => ({ id: 'sess_new', type: 'session' }));
+
+      renderConsole(
+        <SessionModal data={data} onClose={() => {}} onSaved={() => {}} onNavigate={() => {}} />,
+      );
+
+      await pickAgentAndEnvironment(user);
+      await user.type(screen.getByLabelText(/initial outcome/i), 'Ship the migration');
+      await user.type(screen.getByLabelText(/^rubric$/i), 'All tests pass');
+      await user.type(screen.getByLabelText(/max iterations/i), '5');
+      await user.click(screen.getByRole('button', { name: /create session/i }));
+
+      const create = apiRequests().find((request) => request.path === '/v1/sessions');
+      expect(create?.body).toMatchObject({
+        initial_events: [{
+          type: 'user.define_outcome',
+          description: 'Ship the migration',
+          rubric: { type: 'text', content: 'All tests pass' },
+          max_iterations: 5,
+        }],
+      });
+    });
+
+    it('refuses to submit a malformed budget', async () => {
+      const user = userEvent.setup();
+      onApiRequest(() => ({ id: 'sess_new', type: 'session' }));
+
+      renderConsole(
+        <SessionModal data={data} onClose={() => {}} onSaved={() => {}} onNavigate={() => {}} />,
+      );
+
+      await pickAgentAndEnvironment(user);
+      await user.type(screen.getByLabelText(/spend limit/i), 'abc');
+      await user.click(screen.getByRole('button', { name: /create session/i }));
+
+      expect(apiRequests().find((request) => request.path === '/v1/sessions')).toBeUndefined();
+      expect(screen.getByText(/valid dollar amount/i)).toBeDefined();
+    });
+
+    it('refuses to submit a half-filled outcome', async () => {
+      const user = userEvent.setup();
+      onApiRequest(() => ({ id: 'sess_new', type: 'session' }));
+
+      renderConsole(
+        <SessionModal data={data} onClose={() => {}} onSaved={() => {}} onNavigate={() => {}} />,
+      );
+
+      await pickAgentAndEnvironment(user);
+      await user.type(screen.getByLabelText(/initial outcome/i), 'Ship the migration');
+      await user.click(screen.getByRole('button', { name: /create session/i }));
+
+      expect(apiRequests().find((request) => request.path === '/v1/sessions')).toBeUndefined();
+      expect(screen.getByText(/both a description and a rubric/i)).toBeDefined();
+    });
+  });
+
   it('shows the checkout value input only after the operator picks a mode', async () => {
     const user = userEvent.setup();
     onApiRequest(() => ({ id: 'sess_new', type: 'session' }));
