@@ -11,6 +11,7 @@ export function ConfirmDeleteModal({
   subject,
   consequence,
   confirmLabel,
+  verb,
   onClose,
   onConfirm,
 }: {
@@ -20,6 +21,12 @@ export function ConfirmDeleteModal({
   /** Plain-language consequence, e.g. "Sessions that already ran keep their history." */
   consequence: string;
   confirmLabel?: string;
+  /**
+   * The verb the sentence leads with — "Archive" for routes whose DELETE is
+   * archival rather than physical removal, so the confirmation never promises
+   * an effect the API does not have.
+   */
+  verb?: string;
   onClose: () => void;
   /** Return a promise that resolves when the delete completes; rejections render inline. */
   onConfirm: () => Promise<void>;
@@ -44,7 +51,7 @@ export function ConfirmDeleteModal({
       <div className="modalForm">
         {error ? <div className="banner error inlineBanner" role="alert">{error}</div> : null}
         <p className="modalBody">
-          Delete <strong>{subject}</strong>? {consequence}
+          {verb ?? 'Delete'} <strong>{subject}</strong>? {consequence}
         </p>
         <div className="modalActions">
           <button className="secondaryButton" type="button" onClick={onClose} disabled={busy}>Cancel</button>

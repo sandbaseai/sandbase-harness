@@ -30,6 +30,12 @@ export const skills = {
     versions: "Versions",
     latest: "Latest",
     noVersions: "No versions",
+    deleteSkill: "Delete skill",
+    deleteSkillTitle: "Delete skill",
+    deleteSkillConsequence: "Permanently deletes the skill and its stored package files.",
+    deleteVersion: "Delete version",
+    deleteVersionTitle: "Delete version",
+    deleteVersionConsequence: "Permanently deletes this version's files; the newest remaining version becomes latest.",
   },
   create: {
     title: "Create skill",

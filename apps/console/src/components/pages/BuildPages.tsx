@@ -1,8 +1,9 @@
 import { ChangeEvent, DragEvent, FormEvent, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, Download, FileText, Plus, Trash2, Upload, X, Zap } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { postForm } from '../../api';
+import { deleteJson, postForm } from '../../api';
 import type { ConsoleData, Skill, WorkspaceFile } from '../../types';
+import { ConfirmDeleteModal } from '../DangerZone';
 import { EmptyState, PageBody, PageHeader } from '../console-ui';
 import { ListToolbar, listSummary, SearchField } from '../list-ui';
 import { ConsoleSelect } from '../console-select';
@@ -103,7 +104,17 @@ export function Skills({ data, onRefresh }: { data: ConsoleData; onRefresh: () =
             <EmptyState icon={Zap} title={t('view.noSkills')} />
           )}
 
-          {selected ? <SkillDetailsDrawer skill={selected} onClose={() => setSelectedId(null)} /> : null}
+          {selected ? (
+            <SkillDetailsDrawer
+              skill={selected}
+              onClose={() => setSelectedId(null)}
+              onChanged={onRefresh}
+              onDeleted={() => {
+                setSelectedId(null);
+                onRefresh();
+              }}
+            />
+          ) : null}
         </div>
       </PageBody>
 
@@ -120,8 +131,13 @@ export function Skills({ data, onRefresh }: { data: ConsoleData; onRefresh: () =
   );
 }
 
-function SkillDetailsDrawer({ skill, onClose }: { skill: Skill; onClose: () => void }) {
+function SkillDetailsDrawer({ skill, onClose, onChanged, onDeleted }: { skill: Skill; onClose: () => void; onChanged: () => void; onDeleted: () => void }) {
   const { t } = useTranslation('skills');
+  const [deleteSkillOpen, setDeleteSkillOpen] = useState(false);
+  const [deletingVersionId, setDeletingVersionId] = useState<string | null>(null);
+  // Built-in skills ship with the catalog; the route refuses their deletion,
+  // so the drawer never offers the affordance for them.
+  const deletable = skill.source === 'custom';
   return (
     <aside className="skillDrawer">
       <div className="drawerHeader">
@@ -160,12 +176,55 @@ function SkillDetailsDrawer({ skill, onClose }: { skill: Skill; onClose: () => v
                 <code>{version.id}</code>
                 <small>{formatDateShort(version.created_at)}</small>
                 {version.latest ? <b>{t('detail.latest')}</b> : null}
+                {deletable ? (
+                  <button
+                    className="icon-button"
+                    type="button"
+                    onClick={() => setDeletingVersionId(version.id)}
+                    title={t('detail.deleteVersion')}
+                    aria-label={t('detail.deleteVersion')}
+                  >
+                    <Trash2 size={14} aria-hidden="true" />
+                  </button>
+                ) : null}
               </div>
             ))}
             {skill.versions.length === 0 ? <div className="emptyInline">{t('detail.noVersions')}</div> : null}
           </div>
         </div>
+        {deletable ? (
+          <div className="drawerActions">
+            <button className="button outline danger" type="button" onClick={() => setDeleteSkillOpen(true)}>
+              <Trash2 size={14} aria-hidden="true" /> {t('detail.deleteSkill')}
+            </button>
+          </div>
+        ) : null}
       </div>
+      {deleteSkillOpen ? (
+        <ConfirmDeleteModal
+          title={t('detail.deleteSkillTitle')}
+          subject={skillDisplayName(skill)}
+          consequence={t('detail.deleteSkillConsequence')}
+          onClose={() => setDeleteSkillOpen(false)}
+          onConfirm={async () => {
+            await deleteJson(`/v1/skills/${encodeURIComponent(skill.id)}`);
+            onDeleted();
+          }}
+        />
+      ) : null}
+      {deletingVersionId ? (
+        <ConfirmDeleteModal
+          title={t('detail.deleteVersionTitle')}
+          subject={deletingVersionId}
+          consequence={t('detail.deleteVersionConsequence')}
+          onClose={() => setDeletingVersionId(null)}
+          onConfirm={async () => {
+            await deleteJson(`/v1/skills/${encodeURIComponent(skill.id)}/versions/${encodeURIComponent(deletingVersionId)}`);
+            setDeletingVersionId(null);
+            onChanged();
+          }}
+        />
+      ) : null}
     </aside>
   );
 }
@@ -309,6 +368,7 @@ export function Files({ data, onRefresh }: { data: ConsoleData; onRefresh: () =>
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
+  const [archiving, setArchiving] = useState<WorkspaceFile | null>(null);
   const files = useMemo(() => [...data.files].sort((a, b) => b.created_at.localeCompare(a.created_at)), [data.files]);
 
   const uploadFiles = async (fileList: FileList | null) => {
@@ -384,6 +444,9 @@ export function Files({ data, onRefresh }: { data: ConsoleData; onRefresh: () =>
                       <a className="icon-button" href={`/v1/files/${encodeURIComponent(file.id)}/content`} download={file.name} title={t('view.download')} aria-label={t('view.download')}>
                         <Download size={15} aria-hidden="true" />
                       </a>
+                      <button className="icon-button" type="button" onClick={() => setArchiving(file)} title={t('view.archive')} aria-label={t('view.archive')}>
+                        <Trash2 size={15} aria-hidden="true" />
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -394,6 +457,20 @@ export function Files({ data, onRefresh }: { data: ConsoleData; onRefresh: () =>
           <EmptyState icon={FileText} title={t('view.noFiles')} />
         )}
       </PageBody>
+      {archiving ? (
+        <ConfirmDeleteModal
+          title={t('view.archiveTitle')}
+          subject={archiving.name}
+          consequence={t('view.archiveConsequence')}
+          verb={t('view.archiveVerb')}
+          onClose={() => setArchiving(null)}
+          onConfirm={async () => {
+            await deleteJson(`/v1/files/${encodeURIComponent(archiving.id)}`);
+            setArchiving(null);
+            onRefresh();
+          }}
+        />
+      ) : null}
     </section>
   );
 }

@@ -4,6 +4,17 @@
 
 ### Added
 
+- The Build surfaces now expose the published deletion routes. Files
+  gain an Archive action per row that confirms before calling
+  `DELETE /v1/files/{id}` — the published file-delete is archival, so
+  the confirmation names the verb Archive rather than promising physical
+  removal; a new `verb` option on the shared confirmation dialog carries
+  that distinction. The skill drawer gains Delete skill for custom
+  skills — built-in skills are refused by the route, so they never see
+  the affordance — and a per-version Delete that calls
+  `DELETE /v1/skills/{id}/versions/{vid}`, where the route's
+  last-version 409 surfaces inside the dialog like any other refusal.
+
 - The webhooks page now edits subscriptions in place. Each row's Edit
   action opens the endpoint's current fields — url, name, the grouped
   official event catalog, description — plus a status selector that maps

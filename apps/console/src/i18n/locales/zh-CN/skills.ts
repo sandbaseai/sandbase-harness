@@ -30,6 +30,12 @@ export const skills = {
     versions: "版本",
     latest: "最新",
     noVersions: "无版本",
+    deleteSkill: "删除技能",
+    deleteSkillTitle: "删除技能",
+    deleteSkillConsequence: "永久删除该技能及其已存储的包文件。",
+    deleteVersion: "删除版本",
+    deleteVersionTitle: "删除版本",
+    deleteVersionConsequence: "永久删除此版本的文件；剩余最新版本将成为最新版本。",
   },
   create: {
     title: "创建技能",

@@ -89,7 +89,7 @@
 .skillVersionRow {
   min-height: 48px;
   display: grid;
-  grid-template-columns: minmax(110px, auto) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(110px, auto) minmax(0, 1fr) auto auto;
   gap: 12px;
   align-items: center;
   padding: 0 12px;
@@ -110,6 +110,13 @@
   background: var(--accent-tint);
   color: var(--accent);
   font-size: 12px;
+}
+.drawerActions {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-soft);
+  display: flex;
+  justify-content: flex-end;
 }
 .skillUploadDropzone {
   min-height: 148px;

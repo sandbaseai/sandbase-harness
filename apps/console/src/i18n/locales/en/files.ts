@@ -11,6 +11,10 @@ export const files = {
       actions: "Actions",
     },
     download: "Download file",
+    archive: "Archive file",
+    archiveTitle: "Archive file",
+    archiveVerb: "Archive",
+    archiveConsequence: "The file is archived and no longer appears in listings.",
     noFiles: "No files",
   },
 } as const;
