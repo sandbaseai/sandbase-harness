@@ -1,11 +1,11 @@
 # CMA Contract — files
 
 Contract area: `/v1/files` and file session resources.
-Status: `supported` on the `local` backend — the Files API, the mount-path form,
-the reader the provisioning pass calls, the write itself, and the announcement of
-the mount path in the agent's instructions are implemented, and a session whose
-Environment selects a backend that cannot serve the canonical root (`docker`,
-`kubernetes`, `self_hosted`) is refused when it is created with
+Status: `supported` on the `local` and `docker` backends — the Files API, the
+mount-path form, the reader the provisioning pass calls, the write itself, and
+the announcement of the mount path in the agent's instructions are implemented,
+and a session whose Environment selects a backend that cannot serve the
+canonical root (`kubernetes`, `self_hosted`) is refused when it is created with
 `resource_not_mountable`. See §4.
 Source: `src/core/session/file-mount-path.ts`,
 `src/core/session/session-resource-prompt.ts`,
@@ -83,9 +83,11 @@ Mounting is composed and blocked by the container backends:
   rewritten, so inside a command the file is named by its sandbox-relative
   spelling, and the system prompt's `# Session Resources` section names both
   spellings for the agent (`tests/integration/session-resources-prompt.test.ts`).
-  The container backends do not map anything: `docker` refuses an absolute path at
-  all and Kubernetes refuses anything outside `/workspace`. A session on one of
-  those is not served — it is **refused when it is created**, with
+  On `docker` the container's filesystem is the sandbox, so a canonical absolute
+  path is a real path inside it and the same write lands verbatim
+  (`dockerWorkspacePath` serves `/workspace` and `/mnt/session` and refuses any
+  other absolute spelling). Kubernetes refuses anything outside `/workspace`,
+  so a session on it is not served — it is **refused when it is created**, with
   `resource_not_mountable`, before any session row, resource instance, or event is
   written, so the caller learns which backend refused and why instead of meeting
   the path error at provisioning. `self_hosted` is refused the same way, on the
@@ -94,12 +96,12 @@ Mounting is composed and blocked by the container backends:
   operator's process decides where the bytes land and the runtime can neither
   verify nor enforce that it is the canonical root (measured in
   `tests/integration/resource-admission-refusal.test.ts`).
-  Being refused is not being served, so this capability's scope is the `local`
-  backend, and it is recorded as `supported` for that scope.
+  This capability's scope is the `local` and `docker` backends, and it is
+  recorded as `supported` for that scope.
   `tests/integration/resource-admission-refusal.test.ts` drives the refusal
   through both creation entry points and the append route;
-  `tests/integration/session-resource-wiring.test.ts` still pins the container
-  path checks the refusal is built on.
+  `tests/integration/session-resource-wiring.test.ts` pins the container path
+  boundary the refusal is built on.
 
 ## 3. Alignment
 
@@ -118,7 +120,7 @@ spelling and, on the local backend, the shell-usable one.
 | Mount root | SandBase mounts under its own sandbox root layout. The published contract specifies a logical path, not a host directory. |
 | What a scoped listing contains | `scope_id` selects files whose recorded session is that session. A file created directly through `POST /v1/files` records no session, so it appears in the unscoped listing and in **no** scoped one — it is not attributed to a session that did not create it. The published contract describes session outputs; it does not state where a session-less upload should appear, so the choice is to leave it unattributed rather than guess an owner. |
 | The listing excludes `role = 'artifact'` | Rows written with `role = 'artifact'` are outside this listing in both scoped and unscoped form. That predates the scope parameter and is unchanged by it; recorded here because a caller reasoning about "every file for this session" should know the listing is not the whole table. |
-| Backends that cannot serve the mount root | The mount path is derived and validated, the reader is wired, and the local backend writes the bytes at `/mnt/session/uploads` and announces the path. `docker` rejects that root as outside its own workspace root, Kubernetes rejects anything under `/mnt`, and for a `self_hosted` worker the runtime cannot hold the operator's process to the root (the worker maps an absolute path into its own directory). Rather than serving them, the runtime refuses a session that declares a file resource on one of them at creation, with `resource_not_mountable`, and records the supported scope as `local`. |
+| Backends that cannot serve the mount root | The mount path is derived and validated, the reader is wired, and the local and docker backends write the bytes at `/mnt/session/uploads` and announce the path — on docker the canonical path is a real path inside the container. Kubernetes rejects anything under `/mnt`, and for a `self_hosted` worker the runtime cannot hold the operator's process to the root (the worker maps an absolute path into its own directory). Rather than serving them, the runtime refuses a session that declares a file resource on one of them at creation, with `resource_not_mountable`, and records the supported scope as `local` and `docker`. |
 
 ## 5. Reason for the difference
 
@@ -201,9 +203,9 @@ the provisioning pass calls, and the announcement of the mount path in the agent
 instructions are implemented and covered by tests, and on the local backend the
 bytes are written at the canonical `/mnt/session/uploads` root, read back from it,
 and named to the agent in both the canonical and the shell-usable spelling. A
-backend that cannot serve that root (`docker`, `kubernetes`, `self_hosted`) is not
+backend that cannot serve that root (`kubernetes`, `self_hosted`) is not
 served either: a session whose Environment selects one of them is refused when it
 is created, with `resource_not_mountable`, and leaves nothing behind. That refusal
-is what the `local` scope in this entry means — no claim is made that those
-backends can mount a file. The mount-path entry is `supported` on its own, because
+is what the `local` and `docker` scope in this entry means — no claim is made
+that the refused backends can mount a file. The mount-path entry is `supported` on its own, because
 path derivation and validation are complete and tested.

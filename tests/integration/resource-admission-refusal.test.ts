@@ -2,9 +2,11 @@
  * A session whose backend cannot mount its resources is refused when it is created.
  *
  * `local` maps the canonical roots (`/mnt/session/uploads`, `/workspace`) into its
- * sandbox directory. `docker` refuses every absolute in-sandbox path, and
- * `kubernetes` resolves an absolute path inside its own `/workspace` and so refuses
- * the upload root. `self_hosted` is refused on a different ground: its worker maps
+ * sandbox directory, and `docker` serves them verbatim inside the container — a
+ * file resource mounts on both. `kubernetes` resolves an absolute path inside
+ * its own `/workspace` and so refuses the upload root, and `docker` still
+ * refuses a repository because its materialization has not been exercised on a
+ * container. `self_hosted` is refused on a different ground: its worker maps
  * an absolute path into its own root, so the operator's process decides where the
  * bytes land and the runtime cannot hold it to the canonical roots — the last case
  * here records that measurement so the stated reason is evidence rather than an
@@ -203,23 +205,32 @@ describe('resource admission against the session backend', () => {
 
   it('refuses POST /v1/sessions on a backend that cannot mount a file, and stores nothing', async () => {
     const fileId = await uploadFile('notes.txt', 'attached bytes');
-    const created = await createSession('env_docker', [{ ...FILE_RESOURCE, file_id: fileId }]);
+    const created = await createSession('env_kubernetes', [{ ...FILE_RESOURCE, file_id: fileId }]);
 
     expect(created.status).toBe(400);
     expect(created.body.error.type).toBe('invalid_request_error');
     expect(created.body.error.code).toBe('resource_not_mountable');
-    expect(created.body.error.message).toContain('docker');
+    expect(created.body.error.message).toContain('kubernetes');
     expect(created.body.error.message).toContain('file');
     // Nothing was created: the refusal precedes the insert, so there is no
     // session to clean up and no half-admitted mount to explain later.
     expect(counts()).toEqual({ sessions: 0, instances: 0, events: 0 });
   });
 
-  it('refuses a repository resource the same way', async () => {
+  it('admits a file resource on docker, whose container holds the canonical root', async () => {
+    const fileId = await uploadFile('notes.txt', 'attached bytes');
+    const created = await createSession('env_docker', [{ ...FILE_RESOURCE, file_id: fileId }]);
+
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    expect(counts()).toEqual({ sessions: 1, instances: 1, events: 0 });
+  });
+
+  it('still refuses a repository resource on docker', async () => {
     const created = await createSession('env_docker', [REPO_RESOURCE]);
     expect(created.status).toBe(400);
     expect(created.body.error.code).toBe('resource_not_mountable');
     expect(created.body.error.message).toContain('github_repository');
+    expect(created.body.error.message).toContain('docker');
     expect(counts()).toEqual({ sessions: 0, instances: 0, events: 0 });
     // The caller's write-only token is not echoed back with the refusal.
     expect(JSON.stringify(created.body)).not.toContain('ghp_admission_token');
@@ -241,7 +252,7 @@ describe('resource admission against the session backend', () => {
     // resources are read from.
     const run = await post('/v1/runs', {
       agent: 'agent_assistant',
-      environment_id: 'env_docker',
+      environment_id: 'env_kubernetes',
       input: [{ type: 'text', text: 'go' }],
       session: { resources: [{ ...FILE_RESOURCE, file_id: fileId }] },
       response_mode: 'async',
@@ -256,7 +267,7 @@ describe('resource admission against the session backend', () => {
     const fileId = await uploadFile('notes.txt', 'attached bytes');
     const run = await post('/v1/runs', {
       agent: 'agent_assistant',
-      environment_id: 'env_docker',
+      environment_id: 'env_kubernetes',
       input: [{ type: 'text', text: 'go' }],
       session: { resources: [{ ...FILE_RESOURCE, file_id: fileId }] },
       response_mode: 'sse',
@@ -271,9 +282,9 @@ describe('resource admission against the session backend', () => {
   });
 
   it('refuses attaching a resource to an existing session on such a backend', async () => {
-    // A session with no resources is admitted on docker: there is nothing to
-    // mount yet, so nothing is refused yet.
-    const created = await createSession('env_docker', []);
+    // A session with no resources is admitted on kubernetes: there is nothing
+    // to mount yet, so nothing is refused yet.
+    const created = await createSession('env_kubernetes', []);
     expect(created.status, JSON.stringify(created.body)).toBe(201);
     const sessionId = created.body.id as string;
     expect(counts()).toEqual({ sessions: 1, instances: 0, events: 0 });

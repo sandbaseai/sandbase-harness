@@ -12,8 +12,9 @@
  * way to connect to the environment they chose. The answer belongs at admission,
  * before any record is written, and it has to say which backend refused and why.
  *
- * The backends named below are the ones this runtime ships that cannot serve the
- * canonical roots, each for its own reason. A backend this module does not name
+ * The backends named below are the ones this runtime ships that cannot serve a
+ * canonical root for a given resource type, each for its own reason — a backend
+ * may serve one resource and not the other. A backend this module does not name
  * keeps its previous behaviour: the runtime cannot know what a backend it does
  * not ship serves, and refusing on a guess would reject a provider that works.
  */
@@ -27,14 +28,18 @@ export const SANDBOX_MOUNTED_RESOURCE_TYPES = ['file', 'github_repository'] as c
 export type SandboxMountedResourceType = (typeof SANDBOX_MOUNTED_RESOURCE_TYPES)[number];
 
 /**
- * Why a shipped backend cannot serve the canonical roots.
+ * Why a shipped backend cannot serve a resource type at the canonical roots.
  *
  * Each entry is the reason the refusal is not a policy choice: the backend
- * cannot be held to the path the runtime publishes. `kubernetes` is listed even
- * though it accepts `/workspace/<repo>`, because it refuses the upload root and
- * its acceptance of the repository root was never exercised against a cluster —
- * a backend that can serve one of the two resources is not a backend that can
- * serve a session's resources.
+ * cannot be held to the path the runtime publishes. The map is keyed by
+ * backend and then resource type, because a backend that serves one canonical
+ * root may still not serve the other — `docker` takes both roots verbatim
+ * inside the container, so it mounts a file, but its repository
+ * materialization has not been exercised and stays refused. `kubernetes`
+ * resolves an absolute path inside its own `/workspace` and refuses the
+ * upload root, and its acceptance of the repository root was never exercised
+ * against a cluster — a backend that can serve one of the two resources is
+ * not a backend that can serve a session's resources.
  *
  * `self_hosted` is listed on the same "not the runtime's to promise" reasoning,
  * not because its worker refuses the path. The shipped worker maps an absolute
@@ -46,14 +51,37 @@ export type SandboxMountedResourceType = (typeof SANDBOX_MOUNTED_RESOURCE_TYPES)
  * that measurement next to the refusal, so the wording is evidence rather than
  * an assumption.
  *
- * A `Map` rather than an object literal: a provider name is caller-supplied
+ * `Map`s rather than object literals: a provider name is caller-supplied
  * configuration, and `'toString' in {}` is true, which would turn an unknown
  * name into a refusal naming `Object.prototype.toString`.
  */
-const UNSERVING_BACKENDS = new Map<string, string>([
-  ['docker', 'it refuses every absolute in-sandbox path, so the mount would fail at provisioning'],
-  ['kubernetes', 'it resolves an absolute path inside its own /workspace and refuses the upload root, and its repository root was never verified against a cluster'],
-  ['self_hosted', 'the worker maps the path into its own root, which the runtime cannot hold to the canonical roots'],
+const UNSERVING_BACKENDS = new Map<string, ReadonlyMap<SandboxMountedResourceType, string>>([
+  [
+    'docker',
+    new Map<SandboxMountedResourceType, string>([
+      [
+        'github_repository',
+        'its repository materialization — a host-side clone copied in file by file — has not been exercised against a container, so the mount cannot be promised',
+      ],
+    ]),
+  ],
+  [
+    'kubernetes',
+    new Map<SandboxMountedResourceType, string>([
+      ['file', 'it resolves an absolute path inside its own /workspace and refuses the upload root'],
+      [
+        'github_repository',
+        'it resolves an absolute path inside its own /workspace and refuses the upload root, and its repository root was never verified against a cluster',
+      ],
+    ]),
+  ],
+  [
+    'self_hosted',
+    new Map<SandboxMountedResourceType, string>([
+      ['file', 'the worker maps the path into its own root, which the runtime cannot hold to the canonical roots'],
+      ['github_repository', 'the worker maps the path into its own root, which the runtime cannot hold to the canonical roots'],
+    ]),
+  ],
 ]);
 
 /** A resource declaration as it reaches this module, from a request or a stored row. */
@@ -69,7 +97,8 @@ export function unmountableResourceTypes(
   resources: ReadonlyArray<DeclaredResource> | undefined,
   sandboxProvider: string | undefined,
 ): SandboxMountedResourceType[] {
-  if (!sandboxProvider || !UNSERVING_BACKENDS.has(sandboxProvider)) return [];
+  const unserving = sandboxProvider ? UNSERVING_BACKENDS.get(sandboxProvider) : undefined;
+  if (!unserving) return [];
 
   const declared = new Set(
     (resources ?? [])
@@ -77,7 +106,7 @@ export function unmountableResourceTypes(
       .filter((type): type is SandboxMountedResourceType =>
         SANDBOX_MOUNTED_RESOURCE_TYPES.includes(type as SandboxMountedResourceType)),
   );
-  return SANDBOX_MOUNTED_RESOURCE_TYPES.filter((type) => declared.has(type));
+  return SANDBOX_MOUNTED_RESOURCE_TYPES.filter((type) => declared.has(type) && unserving.has(type));
 }
 
 /** Attach the code to a refusal, the way the other admission refusals do. */
@@ -89,10 +118,17 @@ export function resourceNotMountableError(
   const many = resourceTypes.length > 1;
   const subject = many ? `${names} resources` : `a ${names} resource`;
   const without = many ? 'without those resources' : 'without that resource';
+  const reasons = [
+    ...new Set(
+      resourceTypes
+        .map((type) => UNSERVING_BACKENDS.get(sandboxProvider)?.get(type))
+        .filter((reason): reason is string => Boolean(reason)),
+    ),
+  ].join('; ');
   const error = new Error(
     `A session cannot mount ${subject} on the ${sandboxProvider} sandbox backend: `
-    + `${UNSERVING_BACKENDS.get(sandboxProvider)}. Use an environment whose sandbox_provider can serve `
-    + `the canonical roots (local does), or create the session ${without}.`,
+    + `${reasons}. Use an environment whose sandbox_provider can serve the canonical roots `
+    + `(local serves both resources, docker serves files), or create the session ${without}.`,
   ) as Error & { code: string };
   error.code = RESOURCE_NOT_MOUNTABLE_CODE;
   return error;

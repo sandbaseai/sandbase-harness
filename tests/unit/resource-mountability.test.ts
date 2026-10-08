@@ -7,9 +7,11 @@
  * them, and the session has to be refused when it is created rather than
  * accepted and then failed at provisioning.
  *
- * The opposite direction is asserted just as deliberately. `local` serves both,
- * and a backend this runtime does not ship is left alone: refusing on a guess
- * would reject a provider that works.
+ * The opposite direction is asserted just as deliberately. `local` serves both
+ * and `docker` takes both roots verbatim inside the container — so it serves a
+ * file, while its repository materialization stays refused until that path is
+ * exercised — and a backend this runtime does not ship is left alone: refusing
+ * on a guess would reject a provider that works.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -26,7 +28,11 @@ const REPO = { type: 'github_repository', url: 'https://github.com/example/widge
 
 describe('resource mountability', () => {
   it('names only the resource types a backend cannot serve', () => {
-    expect(unmountableResourceTypes([FILE], 'docker')).toEqual(['file']);
+    // `docker` serves the upload root verbatim, so only the repository stays
+    // refused on it — the refusal is per type, not per backend.
+    expect(unmountableResourceTypes([FILE], 'docker')).toEqual([]);
+    expect(unmountableResourceTypes([REPO], 'docker')).toEqual(['github_repository']);
+    expect(unmountableResourceTypes([FILE, REPO], 'docker')).toEqual(['github_repository']);
     expect(unmountableResourceTypes([REPO], 'kubernetes')).toEqual(['github_repository']);
     // Both, in the order the runtime materializes them, when both are declared.
     expect(unmountableResourceTypes([REPO, FILE], 'self_hosted')).toEqual(['file', 'github_repository']);
@@ -34,8 +40,10 @@ describe('resource mountability', () => {
   });
 
   it('leaves a backend that can serve the canonical roots alone', () => {
-    // `local` maps both canonical roots into its sandbox directory.
+    // `local` maps both canonical roots into its sandbox directory, and a
+    // container holds them verbatim.
     expect(unmountableResourceTypes([FILE, REPO], 'local')).toEqual([]);
+    expect(unmountableResourceTypes([FILE], 'docker')).toEqual([]);
     // No resolved backend is not a refusal: the caller has nothing to change yet.
     expect(unmountableResourceTypes([FILE, REPO], undefined)).toEqual([]);
     // A backend this runtime does not ship keeps its previous behaviour.
@@ -59,7 +67,7 @@ describe('resource mountability', () => {
   it('throws the dedicated code, naming the backend and the resource', () => {
     let thrown: unknown;
     try {
-      assertResourcesMountable([FILE], 'docker');
+      assertResourcesMountable([FILE], 'kubernetes');
     } catch (error) {
       thrown = error;
     }
@@ -68,9 +76,9 @@ describe('resource mountability', () => {
     expect(error.code).toBe(RESOURCE_NOT_MOUNTABLE_CODE);
     // The message has to be actionable: which backend refused, what it refuses,
     // and what the caller can do instead.
-    expect(error.message).toContain('docker');
+    expect(error.message).toContain('kubernetes');
     expect(error.message).toContain('a file resource');
-    expect(error.message).toContain('absolute in-sandbox path');
+    expect(error.message).toContain('upload root');
     expect(error.message).toContain('local');
 
     // The plural reads as a sentence rather than a list of words.
@@ -91,6 +99,7 @@ describe('resource mountability', () => {
 
   it('returns instead of throwing where the backend serves the resource', () => {
     expect(() => assertResourcesMountable([FILE, REPO], 'local')).not.toThrow();
+    expect(() => assertResourcesMountable([FILE], 'docker')).not.toThrow();
     expect(() => assertResourcesMountable([FILE], undefined)).not.toThrow();
     expect(() => assertResourcesMountable([{ type: 'memory_store' }], 'docker')).not.toThrow();
     expect(() => assertResourcesMountable(undefined, 'docker')).not.toThrow();

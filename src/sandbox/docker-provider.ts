@@ -24,6 +24,7 @@ import {
   type ExecResult,
 } from '@/types/sandbox.js';
 import { withAgentIdentity } from './agent-identity.js';
+import { canonicalRootRelativePath } from './local-provider.js';
 import { EgressProxy } from '@/core/net/egress-proxy.js';
 import {
   environmentEgressAllowlist,
@@ -354,11 +355,15 @@ class DockerSandboxInstance implements SandboxInstance {
     const target = dockerWorkspacePath(path);
     const r = await this.execute(`find ${shellQuote(target)} -type f`);
     if (r.exitCode !== 0) return [];
+    // `find` answers with absolute container paths. Entries under the
+    // workspace are reported relative to it; every other listing target is a
+    // canonical root, whose entries drop the leading separator to land in the
+    // same sandbox-root-relative spelling the in-process providers use.
     return r.stdout
       .split('\n')
       .map((l) => l.trim())
       .filter(Boolean)
-      .map((l) => (l.startsWith(WORKDIR + '/') ? l.slice(WORKDIR.length + 1) : l));
+      .map((l) => (l.startsWith(WORKDIR + '/') ? l.slice(WORKDIR.length + 1) : l.replace(/^\/+/, '')));
   }
 
   async cleanup(): Promise<void> {
@@ -368,9 +373,19 @@ class DockerSandboxInstance implements SandboxInstance {
 }
 
 export function dockerWorkspacePath(path: string): string {
+  if (posix.isAbsolute(path)) {
+    // A canonical absolute path names the sandbox's own interior, and a
+    // container's filesystem is the sandbox: `/mnt/session/uploads/x` is
+    // literally that path inside the container, matching the layout the
+    // runtime publishes. `canonicalRootRelativePath` also rejects a `..` that
+    // climbs out of its root, so the accepted set is exactly the roots.
+    const canonical = canonicalRootRelativePath(path);
+    if (canonical !== undefined) return `/${canonical}`;
+    throw new Error('Docker sandbox paths must stay inside /workspace or a canonical mount root');
+  }
   const parts = path.split(/[\\/]+/).filter(Boolean);
-  if (posix.isAbsolute(path) || parts.some((part) => part === '..')) {
-    throw new Error('Docker sandbox paths must stay inside /workspace');
+  if (parts.some((part) => part === '..')) {
+    throw new Error('Docker sandbox paths must stay inside /workspace or a canonical mount root');
   }
   const normalized = posix.normalize(parts.join('/'));
   if (!normalized || normalized === '.') return WORKDIR;

@@ -360,17 +360,19 @@ file is readable inside the session at `/mnt/session/uploads/notes.txt` (a comma
 the agent runs names the same file by its sandbox-relative spelling,
 `mnt/session/uploads/notes.txt`). On the default `local` backend each session gets
 a directory under the workspace data directory, so the same bytes are at
-`<data-dir>/sandbox/<session_id>/mnt/session/uploads/notes.txt`. The agent is told
+`<data-dir>/sandbox/<session_id>/mnt/session/uploads/notes.txt`; on `docker` the
+container's filesystem is the sandbox, so the canonical path is the real path and
+the bytes land there verbatim. The agent is told
 where the file landed: a session with a file or repository resource carries a
 `# Session Resources` section in its system prompt naming both spellings on the
 `local` backend, so it does not have to guess the path. See
 [Mounting a file into a session](api.md#mounting-a-file-into-a-session). The other
-shipped backends do not serve that root — `docker` refuses every absolute path,
-`kubernetes` was never exercised against a cluster, and a `self_hosted` worker
-resolves the path inside its own root — so the runtime refuses the session rather
+shipped backends do not serve that root — `kubernetes` was never exercised
+against a cluster, and a `self_hosted` worker resolves the path inside its own
+root — so the runtime refuses the session rather
 than accepting a mount it cannot account for: creating it answers `400` with
-`resource_not_mountable` and writes nothing, so use a `local` environment or
-create the session without the resource.
+`resource_not_mountable` and writes nothing, so use a `local` or `docker`
+environment or create the session without the resource.
 
 ## Attach A Memory Store
 
