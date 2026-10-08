@@ -158,6 +158,7 @@ export const operations = {
       create: "Create outcome",
       evaluate: "Evaluate",
       evaluating: "Evaluating…",
+      edit: "Edit",
     },
     columns: { id: "ID", name: "Name", objective: "Objective", criteria: "Criteria", threshold: "Threshold", status: "Status", updated: "Updated", action: "Action" },
     criteriaCount_other: "{{n}} criteria",
@@ -184,6 +185,15 @@ export const operations = {
       submit: "Create outcome",
       submitting: "Creating…",
       failed: "Could not create outcome",
+    },
+    edit: {
+      title: "Edit outcome",
+      status: "Status",
+      statusActive: "Active",
+      statusDisabled: "Disabled",
+      submit: "Save outcome",
+      submitting: "Saving…",
+      failed: "Could not update outcome",
     },
   },
 } as const;

@@ -34,13 +34,14 @@ import {
 } from './support/render';
 import { ResourceModal } from '../../../apps/console/src/components/modals/ResourceModals';
 import { EnvironmentDetail } from '../../../apps/console/src/components/pages/EnvironmentPages';
-import { ScheduledDeploymentsPage, WebhooksPage } from '../../../apps/console/src/components/pages/OperationsPages';
+import { OutcomesPage, ScheduledDeploymentsPage, WebhooksPage } from '../../../apps/console/src/components/pages/OperationsPages';
 import { MemoryStoreDetail } from '../../../apps/console/src/components/pages/MemoryPages';
 import { CredentialVaultDetail } from '../../../apps/console/src/components/pages/CredentialPages';
 import type {
   ConsoleData,
   Environment,
   MemoryStore,
+  Outcome,
   ScheduledDeployment,
   Vault,
   Webhook,
@@ -155,6 +156,22 @@ const vault: Vault = {
   archived_at: null,
 };
 
+const outcome: Outcome = {
+  id: 'out_1',
+  type: 'outcome',
+  name: 'Quality gate',
+  description: 'Deployment-quality response',
+  objective: 'Reply covers every open item',
+  criteria: ['mentions each item', 'no placeholders'],
+  pass_threshold: 0.8,
+  evaluator: 'deterministic',
+  metadata: {},
+  status: 'active',
+  created_at: now,
+  updated_at: now,
+  archived_at: null,
+};
+
 const data = {
   agents: [{
     id: 'agent_echo',
@@ -183,7 +200,7 @@ const data = {
   templates: [],
   webhooks: [webhook],
   scheduledDeployments: [deployment],
-  outcomes: [],
+  outcomes: [outcome],
   runtime: null,
   workspace: null,
   settings: {
@@ -737,5 +754,58 @@ describe('the credential vault page', () => {
         auth: { type: 'static_bearer', token: 'secret-token' },
       });
     });
+  });
+});
+
+describe('the outcomes page', () => {
+  beforeEach(resetApi);
+  afterEach(resetApi);
+
+  it('puts the stored fields back through the published update route', async () => {
+    const user = userEvent.setup();
+    onApiRequest(() => outcome);
+    renderConsole(<OutcomesPage data={data} onRefresh={() => {}} />);
+
+    // Desktop row and mobile card each render an Edit control — take the first.
+    await user.click(screen.getAllByRole('button', { name: /^edit$/i })[0]);
+    const dialog = await screen.findByRole('dialog', { name: /edit outcome/i });
+    expect((within(dialog).getByLabelText(/^name/i) as HTMLInputElement).value).toBe('Quality gate');
+    expect((within(dialog).getByLabelText(/objective/i) as HTMLTextAreaElement).value).toBe('Reply covers every open item');
+    expect((within(dialog).getByLabelText(/criteria/i) as HTMLTextAreaElement).value).toBe('mentions each item\nno placeholders');
+
+    await user.clear(within(dialog).getByLabelText(/^name/i));
+    await user.type(within(dialog).getByLabelText(/^name/i), 'Stricter gate');
+    await user.clear(within(dialog).getByLabelText(/pass threshold/i));
+    await user.type(within(dialog).getByLabelText(/pass threshold/i), '0.9');
+    await user.click(within(dialog).getByRole('button', { name: /save outcome/i }));
+
+    await waitFor(() => {
+      const request = apiRequests().find((item) => item.method === 'PUT' && item.path === '/v1/outcomes/out_1');
+      expect(request).toBeDefined();
+      expect(request?.body).toMatchObject({
+        name: 'Stricter gate',
+        objective: 'Reply covers every open item',
+        description: 'Deployment-quality response',
+        criteria: ['mentions each item', 'no placeholders'],
+        pass_threshold: 0.9,
+        status: 'active',
+      });
+    });
+  });
+
+  it('surfaces an update refusal inside the edit dialog', async () => {
+    const user = userEvent.setup();
+    onApiRequest((request) => {
+      if (request.method === 'PUT') return new Error('Outcome not found');
+      return outcome;
+    });
+    renderConsole(<OutcomesPage data={data} onRefresh={() => {}} />);
+
+    await user.click(screen.getAllByRole('button', { name: /^edit$/i })[0]);
+    const dialog = await screen.findByRole('dialog', { name: /edit outcome/i });
+    await user.click(within(dialog).getByRole('button', { name: /save outcome/i }));
+
+    await waitFor(() => expect(within(dialog).getByText(/outcome not found/i)).toBeDefined());
+    expect(screen.getByRole('dialog', { name: /edit outcome/i })).toBeDefined();
   });
 });

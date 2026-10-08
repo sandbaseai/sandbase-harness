@@ -38,6 +38,16 @@ export type Agent = {
   version: number;
   /** Resolved multiagent roster — always `null`; no runtime can populate it yet. */
   multiagent: null;
+  /**
+   * Server-side turn cap. A local extension absent from the published
+   * contract; the projection omits the key entirely when no cap is set.
+   */
+  max_turns?: number;
+  /**
+   * Write-only local extension: the projection never echoes it, so the
+   * Console can only send a new boolean — never read the stored one back.
+   */
+  enable_general_subagent?: boolean;
   created_at: string | null;
   updated_at: string | null;
   archived_at: string | null;

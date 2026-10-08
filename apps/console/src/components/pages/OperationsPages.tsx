@@ -385,6 +385,7 @@ export function OutcomesPage({ data, onRefresh }: OperationsPageProps) {
   const [selectedSessionId, setSelectedSessionId] = useState(latestSessionId);
   const [evaluatingId, setEvaluatingId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [editing, setEditing] = useState<Outcome | null>(null);
   const [message, setMessage] = useState('');
 
   useEffect(() => {
@@ -473,9 +474,14 @@ export function OutcomesPage({ data, onRefresh }: OperationsPageProps) {
                     <td><StatusDot tone={statusTone(outcome.status)} label={outcome.status} /></td>
                     <td>{formatDateShort(outcome.updated_at)}</td>
                     <td className="actionsCol">
-                      <button className="button ghost" type="button" onClick={() => void evaluateOutcome(outcome)} disabled={evaluatingId === outcome.id || outcome.status !== 'active' || !selectedSessionId}>
-                        <CheckCircle2 size={14} aria-hidden="true" /> {evaluatingId === outcome.id ? t('outcomes.actions.evaluating') : t('outcomes.actions.evaluate')}
-                      </button>
+                      <div className="rowActionGroup">
+                        <button className="button ghost" type="button" onClick={() => void evaluateOutcome(outcome)} disabled={evaluatingId === outcome.id || outcome.status !== 'active' || !selectedSessionId}>
+                          <CheckCircle2 size={14} aria-hidden="true" /> {evaluatingId === outcome.id ? t('outcomes.actions.evaluating') : t('outcomes.actions.evaluate')}
+                        </button>
+                        <button className="button ghost" type="button" onClick={() => setEditing(outcome)}>
+                          <Pencil size={14} aria-hidden="true" /> {t('outcomes.actions.edit')}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -494,9 +500,14 @@ export function OutcomesPage({ data, onRefresh }: OperationsPageProps) {
                 <span>{t('outcomes.thresholdBadge', { pct: Math.round((outcome.pass_threshold ?? 0.75) * 100), evaluator: outcome.evaluator ?? 'deterministic' })}</span>
                 <StatusDot tone={statusTone(outcome.status)} label={outcome.status} />
               </span>
-              <button className="button ghost" type="button" onClick={() => void evaluateOutcome(outcome)} disabled={evaluatingId === outcome.id || outcome.status !== 'active' || !selectedSessionId}>
-                <CheckCircle2 size={14} aria-hidden="true" /> {evaluatingId === outcome.id ? t('outcomes.actions.evaluating') : t('outcomes.actions.evaluate')}
-              </button>
+              <span className="rowActionGroup">
+                <button className="button ghost" type="button" onClick={() => void evaluateOutcome(outcome)} disabled={evaluatingId === outcome.id || outcome.status !== 'active' || !selectedSessionId}>
+                  <CheckCircle2 size={14} aria-hidden="true" /> {evaluatingId === outcome.id ? t('outcomes.actions.evaluating') : t('outcomes.actions.evaluate')}
+                </button>
+                <button className="button ghost" type="button" onClick={() => setEditing(outcome)}>
+                  <Pencil size={14} aria-hidden="true" /> {t('outcomes.actions.edit')}
+                </button>
+              </span>
             </article>
           ))}
           {data.outcomes.length === 0 ? empty : null}
@@ -508,6 +519,16 @@ export function OutcomesPage({ data, onRefresh }: OperationsPageProps) {
           onClose={() => setCreateOpen(false)}
           onSaved={() => {
             setCreateOpen(false);
+            onRefresh();
+          }}
+        />
+      ) : null}
+      {editing ? (
+        <OutcomeEditModal
+          outcome={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
             onRefresh();
           }}
         />
@@ -1294,6 +1315,89 @@ function OutcomeCreateModal({ onClose, onSaved }: { onClose: () => void; onSaved
         <div className="modalActions">
           <button className="button outline" type="button" onClick={onClose}>{t('outcomes.create.cancel')}</button>
           <button className="button primary" type="submit" disabled={saving || !name.trim() || !objective.trim()}>{saving ? t('outcomes.create.submitting') : t('outcomes.create.submit')}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/**
+ * Edit an outcome definition through `PUT /v1/outcomes/{id}`. The route
+ * stores `pass_threshold` and `evaluator` inside the metadata column but
+ * accepts them as top-level fields, so the dialog submits the same flat
+ * shape the create route takes.
+ */
+function OutcomeEditModal({ outcome, onClose, onSaved }: { outcome: Outcome; onClose: () => void; onSaved: () => void }) {
+  const { t } = useTranslation('operations');
+  const [name, setName] = useState(outcome.name);
+  const [objective, setObjective] = useState(outcome.objective);
+  const [criteria, setCriteria] = useState(outcome.criteria.map((item) => String(item)).join('\n'));
+  const [threshold, setThreshold] = useState(String(outcome.pass_threshold ?? 0.8));
+  const [description, setDescription] = useState(outcome.description);
+  const [status, setStatus] = useState(outcome.status === 'disabled' ? 'disabled' : 'active');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      await putJson<Outcome>(`/v1/outcomes/${encodeURIComponent(outcome.id)}`, {
+        name,
+        objective,
+        description,
+        criteria: splitLines(criteria),
+        pass_threshold: Number(threshold),
+        status,
+      });
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('outcomes.edit.failed'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title={t('outcomes.edit.title')} subtitle={outcome.id} onClose={onClose}>
+      <form className="modalForm operationCreateForm" onSubmit={submit}>
+        {error ? <div className="banner error inlineBanner">{error}</div> : null}
+        <label className="editField">
+          {t('outcomes.create.name')} <RequiredMark />
+          <input value={name} onChange={(event) => setName(event.target.value)} placeholder={t('outcomes.create.namePlaceholder')} required />
+        </label>
+        <label className="editField">
+          {t('outcomes.create.objective')} <RequiredMark />
+          <textarea value={objective} onChange={(event) => setObjective(event.target.value)} rows={3} required />
+        </label>
+        <label className="editField">
+          {t('outcomes.create.criteria')}
+          <textarea value={criteria} onChange={(event) => setCriteria(event.target.value)} rows={4} placeholder={t('outcomes.create.criteriaPlaceholder')} />
+        </label>
+        <label className="editField">
+          {t('outcomes.create.threshold')}
+          <input value={threshold} onChange={(event) => setThreshold(event.target.value)} inputMode="decimal" />
+        </label>
+        <label className="editField">
+          {t('outcomes.create.description')}
+          <textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={3} />
+        </label>
+        <div className="editField">
+          <span>{t('outcomes.edit.status')}</span>
+          <ConsoleSelect
+            label={t('outcomes.edit.status')}
+            value={status}
+            onChange={setStatus}
+            options={[
+              { value: 'active', label: t('outcomes.edit.statusActive') },
+              { value: 'disabled', label: t('outcomes.edit.statusDisabled') },
+            ]}
+          />
+        </div>
+        <div className="modalActions">
+          <button className="button outline" type="button" onClick={onClose}>{t('outcomes.create.cancel')}</button>
+          <button className="button primary" type="submit" disabled={saving || !name.trim() || !objective.trim()}>{saving ? t('outcomes.edit.submitting') : t('outcomes.edit.submit')}</button>
         </div>
       </form>
     </Modal>

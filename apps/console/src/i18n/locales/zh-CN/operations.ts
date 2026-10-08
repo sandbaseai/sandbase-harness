@@ -158,6 +158,7 @@ export const operations = {
       create: "新建结果",
       evaluate: "评估",
       evaluating: "评估中…",
+      edit: "编辑",
     },
     columns: { id: "ID", name: "名称", objective: "目标", criteria: "标准", threshold: "阈值", status: "状态", updated: "更新时间", action: "操作" },
     criteriaCount_other: "{{n}} 条标准",
@@ -184,6 +185,15 @@ export const operations = {
       submit: "创建结果",
       submitting: "创建中…",
       failed: "无法创建结果",
+    },
+    edit: {
+      title: "编辑结果",
+      status: "状态",
+      statusActive: "活跃",
+      statusDisabled: "停用",
+      submit: "保存结果",
+      submitting: "保存中…",
+      failed: "无法更新结果",
     },
   },
 } as const;

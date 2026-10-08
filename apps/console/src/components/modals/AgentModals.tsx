@@ -28,6 +28,19 @@ export type AgentDraft = {
   tools?: AgentToolset[];
   skills?: SkillRef[];
   metadata?: Record<string, unknown>;
+  /**
+   * Turn cap as typed: a string mid-edit (so "12a" can render instead of
+   * snapping to NaN), a number once it parses, undefined when unset.
+   * `agentDefinitionObject` normalizes; `validateAgentDraft` refuses the
+   * out-of-range and non-integer cases the schema bounds (1–1000).
+   */
+  max_turns?: number | string;
+  /**
+   * The one-level sub-agent switch. Write-only on the API — the projection
+   * never echoes it — so the draft only carries a boolean once the operator
+   * has chosen one; `undefined` means "leave the stored value alone".
+   */
+  enable_general_subagent?: boolean;
 };
 
 type McpRow = { id: string; name: string; url: string; rest: Record<string, unknown>; origName: string };
@@ -109,7 +122,7 @@ export function agentDefinitionObject(
   customToolRows: CustomToolRow[],
   metadataRows: KvRow[],
 ): Record<string, unknown> {
-  const { name, description, model, model_config, system, mcp_servers, tools, skills, metadata, ...extras } = draft as AgentDraft & Record<string, unknown>;
+  const { name, description, model, model_config, system, mcp_servers, tools, skills, metadata, max_turns, enable_general_subagent, ...extras } = draft as AgentDraft & Record<string, unknown>;
 
   const toolsets: AgentToolset[] = [];
   const builtin = builtinToolsetOf(tools);
@@ -136,6 +149,13 @@ export function agentDefinitionObject(
     if (row.key.trim()) metadataObj[row.key.trim()] = row.value;
   }
 
+  // The field is typed as text so a mid-edit string like "12a" stays visible;
+  // only a parseable value reaches the wire — anything else surfaces through
+  // `validateAgentDraft` as a blocking issue instead of a malformed request.
+  const maxTurns = typeof max_turns === 'string'
+    ? (max_turns.trim() ? Number(max_turns) : undefined)
+    : max_turns;
+
   return {
     ...extras,
     name,
@@ -147,6 +167,8 @@ export function agentDefinitionObject(
     tools: toolsets.length ? toolsets : [{ type: 'agent_toolset_20260401' }],
     skills: skills ?? [],
     metadata: metadataObj,
+    ...(maxTurns !== undefined ? { max_turns: maxTurns } : {}),
+    ...(enable_general_subagent !== undefined ? { enable_general_subagent } : {}),
   };
 }
 
@@ -305,6 +327,43 @@ function AgentDefinitionForm({
             placeholder={t('modal.basics.systemPlaceholder')}
           />
         </FieldRow>
+        <div className="fieldGrid">
+          <FieldRow
+            label={t('modal.basics.maxTurns')}
+            optional={t('modal.basics.optional')}
+            helper={t('modal.basics.maxTurnsHint')}
+          >
+            <input
+              id={`${idPrefix}-max-turns`}
+              value={draft.max_turns === undefined ? '' : String(draft.max_turns)}
+              inputMode="numeric"
+              placeholder={t('modal.basics.maxTurnsPlaceholder')}
+              onChange={(event) => {
+                const value = event.target.value;
+                setDraft({ ...draft, max_turns: value === '' ? undefined : value });
+              }}
+            />
+          </FieldRow>
+          <FieldRow
+            label={t('modal.basics.subagent')}
+            optional={t('modal.basics.optional')}
+            helper={t('modal.basics.subagentHint')}
+          >
+            <ConsoleSelect
+              label={t('modal.basics.subagent')}
+              value={draft.enable_general_subagent === undefined ? '' : String(draft.enable_general_subagent)}
+              onChange={(value) => setDraft({
+                ...draft,
+                enable_general_subagent: value === '' ? undefined : value === 'true',
+              })}
+              options={[
+                { value: '', label: t('modal.basics.subagentUnset') },
+                { value: 'true', label: t('modal.basics.subagentEnabled') },
+                { value: 'false', label: t('modal.basics.subagentDisabled') },
+              ]}
+            />
+          </FieldRow>
+        </div>
       </SectionCard>
 
       <SectionCard n={3} title={t('modal.tools.title')} hint={t('modal.tools.hint')}>
@@ -636,7 +695,16 @@ export function AgentEditModal({ agent, initialDraft, data, onClose, onSaved }: 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const definition = useMemo(() => agentDefinitionObject(draft, mcpRows, customToolRows, metadataRows), [draft, mcpRows, customToolRows, metadataRows]);
+  const definition = useMemo(() => {
+    const body = agentDefinitionObject(draft, mcpRows, customToolRows, metadataRows);
+    // On the partial-update route an absent `max_turns` keeps the stored cap,
+    // so clearing a field that visibly held one needs the explicit null the
+    // update schema accepts — the same body the preview drawer then shows.
+    if (agent.max_turns !== undefined && body.max_turns === undefined) {
+      body.max_turns = null;
+    }
+    return body;
+  }, [draft, mcpRows, customToolRows, metadataRows, agent.max_turns]);
   const previewText = useMemo(() => serializeDraft(definition, format), [definition, format]);
   const checks = useAgentDraftChecks(draft, mcpRows, customToolRows, metadataRows, 'edit-agent');
   const issues = useMemo(() => validateAgentDraft(definition), [definition]);
@@ -748,5 +816,10 @@ function agentDraftFromApi(agent: Agent): AgentDraft {
     tools: agent.tools,
     skills: agent.skills,
     metadata: agent.metadata ?? {},
+    ...(agent.max_turns !== undefined ? { max_turns: agent.max_turns } : {}),
+    // The projection never echoes the sub-agent flag, so there is nothing to
+    // prefill — the control stays on "keep stored value" until the operator
+    // picks a side, and the partial update leaves the field alone.
+    ...(agent.enable_general_subagent !== undefined ? { enable_general_subagent: agent.enable_general_subagent } : {}),
   };
 }

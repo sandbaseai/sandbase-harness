@@ -153,6 +153,34 @@ describe('Console custom tool declarations', () => {
   });
 });
 
+describe('Console execution controls', () => {
+  const base = { name: 'A', model: 'm', system: 's' };
+
+  it('emits max_turns and the sub-agent flag only when the form carries them', () => {
+    // Untouched fields stay out of the body so the partial update leaves the
+    // stored values alone — that omission is the "keep stored" semantic.
+    expect(agentDefinitionObject(base, [], [], [])).not.toHaveProperty('max_turns');
+    expect(agentDefinitionObject(base, [], [], [])).not.toHaveProperty('enable_general_subagent');
+
+    const definition = agentDefinitionObject({ ...base, max_turns: 25, enable_general_subagent: true }, [], [], []);
+    expect(definition.max_turns).toBe(25);
+    expect(definition.enable_general_subagent).toBe(true);
+  });
+
+  it('normalizes the typed turn-cap text and drops an emptied field', () => {
+    expect(agentDefinitionObject({ ...base, max_turns: '30' }, [], [], []).max_turns).toBe(30);
+    expect(agentDefinitionObject({ ...base, max_turns: '' }, [], [], [])).not.toHaveProperty('max_turns');
+  });
+
+  it('blocks out-of-range turn caps before the request leaves', () => {
+    for (const value of [0, 1001, 2.5, NaN, '12a']) {
+      const definition = agentDefinitionObject({ ...base, max_turns: value }, [], [], []);
+      expect(validateAgentDraft(definition).some((issue) => issue.includes('max_turns'))).toBe(true);
+    }
+    expect(validateAgentDraft(agentDefinitionObject({ ...base, max_turns: 1000 }, [], [], []))).toEqual([]);
+  });
+});
+
 describe('Console model profile save rule', () => {
   it('sends the profile exactly when the server would have returned one', () => {
     // The server's projection omits the ordinary case; the form must agree, or a

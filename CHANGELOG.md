@@ -4,6 +4,13 @@
 
 ### Added
 
+- The agent create/edit forms now expose the two execution controls the
+  published agent schema already accepts: a turn cap that serializes as
+  `max_turns` (blank clears a stored cap on update by sending `null`) and an
+  enable-the-general-subagent toggle serialized as
+  `enable_general_subagent`. The form validates the cap is an integer in
+  1-1000 before the request leaves, and the agent version diff lists the
+  cap between revisions.
 - The scheduled deployments page now manages a schedule after creation.
   Each deployment row and card offers Pause/Resume through the dedicated
   `POST /v1/scheduled-deployments/{id}/pause|unpause` routes, an Edit
@@ -17,6 +24,14 @@
   schedule and its run history while keeping materialized sessions.
   Update and delete failures surface inside the dialogs instead of
   closing them.
+
+- The outcomes page now edits a definition in place. Each row and card
+  gains an Edit action that opens the stored name, objective, criteria
+  list, pass threshold, description, and `active`/`disabled` status, and
+  submits them through `PUT /v1/outcomes/{id}` — where `pass_threshold`
+  continues to travel as the top-level field the route folds into the
+  outcome's metadata. Update failures render inside the dialog instead
+  of discarding the draft.
 
 - The Build surfaces now expose the published deletion routes. Files
   gain an Archive action per row that confirms before calling
