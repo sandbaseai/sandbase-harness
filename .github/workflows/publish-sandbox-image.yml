@@ -1,0 +1,64 @@
+name: Publish Sandbox Image
+
+on:
+  release:
+    types: [published]
+  # Manual runs let the sandbox toolchain be refreshed between runtime
+  # releases; they only move the `latest` tag since no release tag exists.
+  workflow_dispatch:
+
+permissions: read-all
+
+jobs:
+  publish:
+    name: Publish multi-platform session sandbox image
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      attestations: write
+      artifact-metadata: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-qemu-action@v4
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image metadata
+        id: metadata
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/sandbaseai/sandbase-harness-sandbox
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest
+
+      - name: Build and push image
+        id: push
+        uses: docker/build-push-action@v7
+        with:
+          context: docker/sandbox-image
+          file: docker/sandbox-image/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Attest image provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: ghcr.io/sandbaseai/sandbase-harness-sandbox
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true

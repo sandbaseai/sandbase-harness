@@ -103,6 +103,14 @@ volumes:
 For stronger isolation, run Docker-backed sandboxes only on hosts where the
 container runtime and permissions are explicitly managed.
 
+A reference session-sandbox image is published at
+`ghcr.io/sandbaseai/sandbase-harness-sandbox`. It approximates the published
+cloud sandbox toolchain (Ubuntu 24.04, Python 3.12, Node 22, git, jq,
+ripgrep, build tools, ffmpeg, ImageMagick, SQLite/PostgreSQL/Redis installed
+but not running) and can be selected per Environment through `config.image`.
+See `docker/sandbox-image/` for the Dockerfile, the mid-size exclusions, and
+a local build command.
+
 ## Kubernetes
 
 Push the same source-built image to your registry, then use a `Deployment` for
