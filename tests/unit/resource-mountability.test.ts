@@ -8,10 +8,9 @@
  * accepted and then failed at provisioning.
  *
  * The opposite direction is asserted just as deliberately. `local` serves both
- * and `docker` takes both roots verbatim inside the container — so it serves a
- * file, while its repository materialization stays refused until that path is
- * exercised — and a backend this runtime does not ship is left alone: refusing
- * on a guess would reject a provider that works.
+ * and `docker` takes both roots verbatim inside the container — files and
+ * repositories alike — and a backend this runtime does not ship is left alone:
+ * refusing on a guess would reject a provider that works.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -28,11 +27,9 @@ const REPO = { type: 'github_repository', url: 'https://github.com/example/widge
 
 describe('resource mountability', () => {
   it('names only the resource types a backend cannot serve', () => {
-    // `docker` serves the upload root verbatim, so only the repository stays
-    // refused on it — the refusal is per type, not per backend.
-    expect(unmountableResourceTypes([FILE], 'docker')).toEqual([]);
-    expect(unmountableResourceTypes([REPO], 'docker')).toEqual(['github_repository']);
-    expect(unmountableResourceTypes([FILE, REPO], 'docker')).toEqual(['github_repository']);
+    // `docker` serves both roots verbatim inside the container, so nothing is
+    // refused on it; kubernetes and self_hosted keep their per-type refusals.
+    expect(unmountableResourceTypes([FILE, REPO], 'docker')).toEqual([]);
     expect(unmountableResourceTypes([REPO], 'kubernetes')).toEqual(['github_repository']);
     // Both, in the order the runtime materializes them, when both are declared.
     expect(unmountableResourceTypes([REPO, FILE], 'self_hosted')).toEqual(['file', 'github_repository']);
@@ -43,7 +40,7 @@ describe('resource mountability', () => {
     // `local` maps both canonical roots into its sandbox directory, and a
     // container holds them verbatim.
     expect(unmountableResourceTypes([FILE, REPO], 'local')).toEqual([]);
-    expect(unmountableResourceTypes([FILE], 'docker')).toEqual([]);
+    expect(unmountableResourceTypes([FILE, REPO], 'docker')).toEqual([]);
     // No resolved backend is not a refusal: the caller has nothing to change yet.
     expect(unmountableResourceTypes([FILE, REPO], undefined)).toEqual([]);
     // A backend this runtime does not ship keeps its previous behaviour.

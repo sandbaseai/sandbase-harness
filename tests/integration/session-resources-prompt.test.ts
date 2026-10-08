@@ -58,10 +58,10 @@ class PromptStrategy implements AgentStrategy {
   }
 }
 
-/** A container backend, recorded rather than run: no daemon is involved. */
-function dockerStub(writes: string[]): SandboxProvider {
+/** A backend, recorded rather than run: no daemon or cluster is involved. */
+function recordingStub(type: SandboxProviderType, writes: string[]): SandboxProvider {
   return {
-    type: 'docker',
+    type,
     capabilities: sandboxCapabilities(),
     async provision(sessionId: string): Promise<SandboxInstance> {
       return {
@@ -75,6 +75,8 @@ function dockerStub(writes: string[]): SandboxProvider {
     },
   };
 }
+
+const dockerStub = (writes: string[]) => recordingStub('docker', writes);
 
 const SKILL_MARKDOWN = [
   '---',
@@ -172,6 +174,12 @@ describe('session resource paths in the system prompt', () => {
   function addDockerEnvironment(id: string) {
     db.exec(`INSERT INTO environments (id, name, config) VALUES ('${id}', 'docker', '{"sandbox_provider":"docker","timeout":300}')`);
     environmentProviders[id] = 'docker';
+  }
+
+  /** An Environment row naming a backend that still refuses mounted resources. */
+  function addSelfHostedEnvironment(id: string) {
+    db.exec(`INSERT INTO environments (id, name, config) VALUES ('${id}', 'self_hosted', '{"sandbox_provider":"self_hosted","timeout":300}')`);
+    environmentProviders[id] = 'self_hosted';
   }
 
   async function post(path: string, body: unknown) {
@@ -288,20 +296,20 @@ describe('session resource paths in the system prompt', () => {
     // A backend that cannot reach the canonical root no longer produces a
     // misleading announcement — naming a path the mount will never reach — because
     // the session is refused before a turn, and therefore before any prompt,
-    // exists. Docker serves a file resource, so the resource declared here is a
-    // repository, which stays refused on docker until its materialization is
-    // exercised there. The rendering rule this case used to cover (canonical
-    // spelling only, no shell spelling) is pinned where it is reachable, in
+    // exists. Docker serves both mounted resource types, so the refusing
+    // backend here is self_hosted, whose worker maps the path into its own
+    // root. The rendering rule this case used to cover (canonical spelling
+    // only, no shell spelling) is pinned where it is reachable, in
     // `tests/unit/session-resource-prompt.test.ts`; the admission decision, the
     // status, and the code are pinned in
     // `tests/integration/resource-admission-refusal.test.ts`.
     const writes: string[] = [];
-    addDockerEnvironment('env_docker');
-    makeRuntime({ providers: [localProvider, dockerStub(writes)] });
+    addSelfHostedEnvironment('env_self_hosted');
+    makeRuntime({ providers: [localProvider, recordingStub('self_hosted', writes)] });
 
     const refused = await post('/v1/sessions', {
       agent: 'agent_assistant',
-      environment_id: 'env_docker',
+      environment_id: 'env_self_hosted',
       resources: [{
         type: 'github_repository',
         url: 'https://github.com/example/widget',

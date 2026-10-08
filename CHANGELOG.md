@@ -15,6 +15,16 @@
   dialog lists the session's artifacts from
   `GET /v1/sessions/{id}/artifacts` with a download link per artifact.
 
+- While a session's turn is in flight, the session composer now offers a
+  Steer send mode alongside Reply. A steer posts `user.steer` through the
+  events route with a fresh `input_id` idempotency key and the drafted
+  text — writing to the running turn rather than starting a new one — and
+  the returned receipt decides the outcome: `delivered` or `duplicate`
+  clears the draft, while `rejected`, `conflict`, and `outcome_unknown`
+  keep it and surface the returned detail. `outcome_unknown` is never
+  retried automatically, matching the receipt's own guidance. Idle and
+  terminal sessions see no steer affordance.
+
 - The create-session modal now accepts the two creation-time fields the
   session API reserved for first contact: an optional USD spend limit that
   serializes to the published `budget` `{type: "limit", max_list_cost:

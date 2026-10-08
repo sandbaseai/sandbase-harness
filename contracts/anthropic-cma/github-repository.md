@@ -3,10 +3,11 @@
 Contract area: the `github_repository` session resource — cloning a repository
 into the sandbox, checking out a ref, discovering the skills it ships, and
 keeping the access token out of everything the model can read. Status:
-`supported` on the `local` backend, see §7 — the wiring is in place, the local
-backend mounts the canonical root, the repository, its checkout, and its mount
+`supported` on the `local` and `docker` backends, see §7 — the wiring is in
+place, both backends mount the canonical root, the repository, its checkout,
+and its mount
 path are named in the agent's instructions, and a session whose Environment
-selects a backend that cannot serve that root (`docker`, `kubernetes`,
+selects a backend that cannot serve that root (`kubernetes`,
 `self_hosted`) is refused when it is created with `resource_not_mountable`.
 Source: `src/core/resources/github-materializer.ts`,
 `src/core/resources/github-runtime.ts`,
@@ -152,7 +153,11 @@ directory, so a repository attached to a local session is cloned, checked out,
 and readable at the mount path, and its `.claude/skills` are read back out of the
 same tree (see §6 for exactly what the
 `tests/integration/local-canonical-roots.test.ts` case does and does not stand
-in for). `docker` refuses the absolute path outright, Kubernetes resolves an
+in for). `docker` serves the canonical path verbatim — the container's
+filesystem is the sandbox, so the host-side clone is copied in file by file to
+`/workspace/<repo>` inside the container and is readable at the same spelling
+(`tests/integration/github-materialization-real.test.ts` drives this against a
+real container). Kubernetes resolves an
 absolute path against its own `/workspace` (so it accepts this mount, but its
 acceptance was never exercised against a cluster), and for a `self_hosted` worker
 the path is the operator's process to interpret: the worker maps an absolute path
@@ -167,10 +172,11 @@ refused and why instead of meeting the failure at provisioning
 checkout are named in the agent's instructions, in the canonical spelling and —
 on the local backend — the shell-usable one
 (`src/core/session/session-resource-prompt.ts`). That is why the entry is
-`supported` for the `local` backend, which is the scope it states. §4 records the
+`supported` for the `local` and `docker` backends, which is the scope it
+states. §4 records the
 backend differences, `tests/integration/resource-admission-refusal.test.ts`
 drives the refusal, and `tests/integration/session-resource-wiring.test.ts` pins
-the docker path check the refusal rests on.
+the container path boundary the refusal rests on.
 
 ## 3. Alignment
 
@@ -178,15 +184,16 @@ Aligned for: the resource being declarable per session, the URL grammar and
 ref handling, the token never being model-visible or persisted, the identity
 freeze being refused at the route, the discovered skills reaching the
 instruction boundary, the mount path being announced to the agent with the URL,
-checkout, and shell-usable spelling, and the mount itself on the local backend.
-Not aligned for `docker`, `kubernetes`, or `self_hosted`: those are refused at
+checkout, and shell-usable spelling, and the mount itself on the local and
+docker backends.
+Not aligned for `kubernetes` or `self_hosted`: those are refused at
 creation rather than served, so no claim is made that they mount a repository.
 
 ## 4. Differences
 
 | Difference | Detail |
 | --- | --- |
-| Backends that cannot serve the mount root | The materializer is implemented, tested, and injected by the composition root, so a session with a `github_repository` resource reaches it. On the local backend it mounts at the canonical `/workspace/<repo>` root. `docker` serves the canonical roots verbatim inside the container, but its repository materialization — a host-side clone copied in file by file — was never exercised against a container, `kubernetes` resolves the path against its own `/workspace` but was never exercised against a cluster, and a `self_hosted` worker interprets the path inside its own root — the runtime cannot hold that process to the canonical root. A session on one of the three is refused at creation with `resource_not_mountable` rather than accepted and failed at provisioning, so the supported scope is `local`. |
+| Backends that cannot serve the mount root | The materializer is implemented, tested, and injected by the composition root, so a session with a `github_repository` resource reaches it. On the local backend it mounts at the canonical `/workspace/<repo>` root, and on docker the host-side clone is copied into the container at the same path, which `tests/integration/github-materialization-real.test.ts` exercises against a real container. `kubernetes` resolves the path against its own `/workspace` but was never exercised against a cluster, and a `self_hosted` worker interprets the path inside its own root — the runtime cannot hold that process to the canonical root. A session on one of those two is refused at creation with `resource_not_mountable` rather than accepted and failed at provisioning, so the supported scope is `local` and `docker`. |
 | Repository skills reach the prompt only as text | `discoveredRepositorySkills` has a caller now, and each discovered `SKILL.md` is read out of the sandbox into the system prompt. Pi's `--skill` flag is not given a directory for them: skill packages live inside the guest filesystem and Pi takes host paths, so a Pi session reads them from the prompt rather than loading them as packages. |
 | Dead identity helper | `mountIdentityChanged` implements the freeze decision and is unit-tested, while the route enforces the same rule through a field allowlist. The rule a caller observes is enforced; the helper is not the enforcement point. |
 | URL grammar | Only `https://github.com/<owner>/<repo>` is accepted. A self-hosted GitHub Enterprise host, an SSH remote, and a `.git` suffix are rejected rather than silently normalized. |
@@ -199,18 +206,19 @@ creation rather than served, so no claim is made that they mount a repository.
 
 - **The remaining difference is a backend limitation, not a design.** The
   materializer is fully written, covered at both the decision and the host layer,
-  and injected by the composition root; on the local backend a caller can mount a
+  and injected by the composition root; on the local and docker backends a
+  caller can mount a
   repository, read it at the published path, and see the path, URL, and checkout
   named in the agent's instructions. What a caller cannot do is mount one on
-  docker (the canonical path now passes through, but the host-clone-to-container
-  copy was never exercised against a container), on Kubernetes (its
-  acceptance of `/workspace` was never exercised against a cluster), or on a
+  Kubernetes (its acceptance of `/workspace` was never exercised against a
+  cluster) or on a
   `self_hosted` worker (which maps the path into its own root, so the canonical
-  root is not the runtime's to promise). Those three are refused at
+  root is not the runtime's to promise). Those two are refused at
   creation with `resource_not_mountable` instead of being accepted and failed at
   provisioning, so a caller learns immediately which backend cannot serve the
   resource. Being refused is not being served, so the entry states the `local`
-  scope it is `supported` for rather than implying every backend serves it. A
+  and `docker` scope it is `supported` for rather than implying every backend
+  serves it. A
   backend that starts serving the canonical roots is a backend change plus the
   refusal list in `src/core/resources/resource-mountability.ts`, not a prose
   change.
@@ -314,9 +322,10 @@ creation rather than served, so no claim is made that they mount a repository.
   `github_repository` resource is accepted, and the token is absent from the
   response, the session detail, and the stored row.
 
-**What these tests do not cover:** no test completes a mount on docker, because
-the write is refused before the tree lands — the backend difference recorded in §2
-— and the kubernetes path is unexercised (no cluster in CI). The admission
+**What these tests do not cover:** the kubernetes path is unexercised (no
+cluster in CI). Docker mounts are covered: `github-materialization-real.test.ts`
+drives the materializer against a real provisioned container and reads the tree
+back at the canonical path. The admission
 refusal is covered for every backend the runtime ships, because it is a decision
 made before any sandbox is reached; what is not covered is a successful mount
 there. No test drives the production
@@ -339,13 +348,13 @@ exercised by tests at the decision layer, the host layer, through
 `SandboxLifecycle` with an injected dependency, and on the real local backend; the
 composition root injects it, discovered repository skills reach the context
 builder, the mount path, checkout, and URL are named in the agent's instructions,
-and the identity freeze is enforced by the resource route. The other shipped
-backends do not serve the canonical root, and the runtime no longer pretends they
-do: a session that attaches this resource on one of them — `docker` serves the
-path but its repository materialization was never exercised against a
-container, kubernetes was never exercised against a cluster, and a
+and the identity freeze is enforced by the resource route. The backends that
+cannot serve the canonical root are refused rather than silently accepted: a
+session that attaches this resource on one of them — kubernetes was never
+exercised against a cluster, and a
 `self_hosted` worker resolves the path inside its own root — is refused when it is
 created,
-with `resource_not_mountable`, and leaves nothing behind. That refusal is what the
-`local` scope in this entry means. The cache-key scope, the URL grammar, and the
+with `resource_not_mountable`, and leaves nothing behind. That refusal is what
+the `local` and `docker` scope in this entry means. The cache-key scope, the URL
+grammar, and the
 mount identity rule are documented deviations, recorded in §4.

@@ -786,9 +786,10 @@ into the canonical roots the runtime reserves for them
 those roots into the session's sandbox directory, so on a local session the
 resource is written where the resource says it is; on `docker` the container's
 filesystem is the sandbox, so the canonical path is the real path and a file
-resource lands verbatim. The backends that cannot serve the mount are refused at
-creation instead: `docker` accepts both roots but its repository materialization
-has not been exercised, `kubernetes` resolves an absolute path against its own
+resource lands verbatim, and a repository clone is copied into the container
+under `/workspace/<repo>` the same way. The backends that cannot serve the
+mount are refused at
+creation instead: `kubernetes` resolves an absolute path against its own
 `/workspace` and so refuses the upload root (and its acceptance of the
 repository root was never exercised against a cluster), and a `self_hosted`
 worker resolves the path inside its own root, which the runtime can neither
@@ -1291,7 +1292,7 @@ The optional `session` object applies session fields at creation: `title`,
 `resources`, `vault_ids`, and `metadata`. A `file` or `github_repository` in
 `session.resources` is admitted on the same terms as session creation, so a run on
 an environment whose `sandbox_provider` cannot serve the canonical mount roots
-(`docker`, `kubernetes`, `self_hosted`) is refused with `400` and code
+(`kubernetes`, `self_hosted`) is refused with `400` and code
 `resource_not_mountable` before the session row exists.
 
 A refusal that happens before a turn starts is answered with its own status
@@ -1685,9 +1686,10 @@ backend (see [Session Resources](#session-resources) below). The backend it name
 is the one recorded when the session's sandbox was provisioned, so editing an
 Environment's `sandbox_provider` after a session is bound does not change what
 that session's instructions say: the sandbox in hand is the one serving it.
-The container backends still do not mount it: `docker` rejects an absolute path
-outright and `kubernetes` rejects anything outside `/workspace`. A session that
-attaches a file resource on one of those, or on a `self_hosted` worker (which
+On `docker` the container's filesystem is the sandbox, so the canonical path is
+the real path and the mount lands verbatim; `kubernetes` rejects anything
+outside `/workspace`. A session that
+attaches a file resource on `kubernetes`, or on a `self_hosted` worker (which
 resolves the path inside its own root), is refused
 when it is created with `resource_not_mountable` and `400`, before any record
 exists, instead of being accepted and failing at provisioning
@@ -1774,7 +1776,7 @@ instance in the same call, so it appears in the list above immediately and can
 be addressed by id; attaching one to an existing session uses the `POST` route.
 A `file` or `github_repository` resource is materialized at a canonical absolute
 in-sandbox path, so a session whose Environment selects a backend that cannot
-serve that path (`docker`, `kubernetes`, `self_hosted`) is refused with `400` and
+serve that path (`kubernetes`, `self_hosted`) is refused with `400` and
 code `resource_not_mountable` — at creation, and on the `POST` route above — and
 nothing is written: no session row, no resource instance, no event. The message
 names the backend, the resource type, and the alternative, so the caller does not

@@ -33,13 +33,11 @@ export type SandboxMountedResourceType = (typeof SANDBOX_MOUNTED_RESOURCE_TYPES)
  * Each entry is the reason the refusal is not a policy choice: the backend
  * cannot be held to the path the runtime publishes. The map is keyed by
  * backend and then resource type, because a backend that serves one canonical
- * root may still not serve the other — `docker` takes both roots verbatim
- * inside the container, so it mounts a file, but its repository
- * materialization has not been exercised and stays refused. `kubernetes`
- * resolves an absolute path inside its own `/workspace` and refuses the
- * upload root, and its acceptance of the repository root was never exercised
- * against a cluster — a backend that can serve one of the two resources is
- * not a backend that can serve a session's resources.
+ * root may still not serve the other. `kubernetes` resolves an absolute path
+ * inside its own `/workspace` and refuses the upload root, and its
+ * acceptance of the repository root was never exercised against a cluster —
+ * a backend that can serve one of the two resources is not a backend that
+ * can serve a session's resources.
  *
  * `self_hosted` is listed on the same "not the runtime's to promise" reasoning,
  * not because its worker refuses the path. The shipped worker maps an absolute
@@ -56,15 +54,6 @@ export type SandboxMountedResourceType = (typeof SANDBOX_MOUNTED_RESOURCE_TYPES)
  * name into a refusal naming `Object.prototype.toString`.
  */
 const UNSERVING_BACKENDS = new Map<string, ReadonlyMap<SandboxMountedResourceType, string>>([
-  [
-    'docker',
-    new Map<SandboxMountedResourceType, string>([
-      [
-        'github_repository',
-        'its repository materialization — a host-side clone copied in file by file — has not been exercised against a container, so the mount cannot be promised',
-      ],
-    ]),
-  ],
   [
     'kubernetes',
     new Map<SandboxMountedResourceType, string>([
@@ -128,7 +117,7 @@ export function resourceNotMountableError(
   const error = new Error(
     `A session cannot mount ${subject} on the ${sandboxProvider} sandbox backend: `
     + `${reasons}. Use an environment whose sandbox_provider can serve the canonical roots `
-    + `(local serves both resources, docker serves files), or create the session ${without}.`,
+    + `(local and docker serve both resources), or create the session ${without}.`,
   ) as Error & { code: string };
   error.code = RESOURCE_NOT_MOUNTABLE_CODE;
   return error;

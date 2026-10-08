@@ -2,11 +2,10 @@
  * A session whose backend cannot mount its resources is refused when it is created.
  *
  * `local` maps the canonical roots (`/mnt/session/uploads`, `/workspace`) into its
- * sandbox directory, and `docker` serves them verbatim inside the container — a
- * file resource mounts on both. `kubernetes` resolves an absolute path inside
- * its own `/workspace` and so refuses the upload root, and `docker` still
- * refuses a repository because its materialization has not been exercised on a
- * container. `self_hosted` is refused on a different ground: its worker maps
+ * sandbox directory, and `docker` serves them verbatim inside the container —
+ * a file or repository resource mounts on both. `kubernetes` resolves an
+ * absolute path inside its own `/workspace` and so refuses the upload root.
+ * `self_hosted` is refused on a different ground: its worker maps
  * an absolute path into its own root, so the operator's process decides where the
  * bytes land and the runtime cannot hold it to the canonical roots — the last case
  * here records that measurement so the stated reason is evidence rather than an
@@ -225,14 +224,11 @@ describe('resource admission against the session backend', () => {
     expect(counts()).toEqual({ sessions: 1, instances: 1, events: 0 });
   });
 
-  it('still refuses a repository resource on docker', async () => {
+  it('admits a repository resource on docker, whose container holds the mount root', async () => {
     const created = await createSession('env_docker', [REPO_RESOURCE]);
-    expect(created.status).toBe(400);
-    expect(created.body.error.code).toBe('resource_not_mountable');
-    expect(created.body.error.message).toContain('github_repository');
-    expect(created.body.error.message).toContain('docker');
-    expect(counts()).toEqual({ sessions: 0, instances: 0, events: 0 });
-    // The caller's write-only token is not echoed back with the refusal.
+    expect(created.status, JSON.stringify(created.body)).toBe(201);
+    expect(counts()).toEqual({ sessions: 1, instances: 1, events: 0 });
+    // The caller's write-only token is not echoed back on the accept path either.
     expect(JSON.stringify(created.body)).not.toContain('ghp_admission_token');
   });
 

@@ -22,6 +22,7 @@ import { join, relative } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { cloneArgs, gitAuthEnv, materializeGithubRepository, type MaterializeDeps } from '@/core/resources/github-materializer.js';
 import { createGithubMaterializeDeps, createGithubMaterializer } from '@/core/resources/github-runtime.js';
+import { DockerSandboxProvider, isDockerAvailable } from '@/sandbox/docker-provider.js';
 import type { SandboxInstance } from '@/types/sandbox.js';
 
 /** Whether git is on PATH; the whole suite is meaningless without it. */
@@ -324,5 +325,106 @@ describe.skipIf(!hasGit)('github host primitives (real git + real filesystem)', 
     expect(cloneDirs[0]).toContain('tmp-');
     expect(existsSync(cloneDirs[0]!)).toBe(false);
     expect(readdirSync(join(cacheRoot, 'github-repositories'))).toEqual([]);
+  });
+});
+
+/**
+ * A locally cached image able to host a session container. The provider's
+ * provision overrides the entrypoint with `sleep`, so the image must carry
+ * one; each candidate gets a sub-second probe rather than a name allowlist,
+ * matching `tests/integration/docker-sandbox.test.ts`.
+ */
+function findLocalImage(): string | undefined {
+  try {
+    const r = spawnSync('docker', ['images', '--format', '{{.Repository}}:{{.Tag}}'], {
+      encoding: 'utf-8',
+      timeout: 5000,
+    });
+    if (r.status !== 0) return undefined;
+    const images = r.stdout
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l && !l.includes('<none>') && !l.includes(':<none>'));
+    for (const image of images) {
+      const probe = spawnSync(
+        'docker',
+        ['run', '--rm', '--entrypoint', 'sleep', image, '0'],
+        { stdio: 'ignore', timeout: 15_000 },
+      );
+      if (probe.status === 0) return image;
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const dockerImage = hasGit && isDockerAvailable() ? findLocalImage() : undefined;
+const dockerMountSuite = dockerImage ? describe : describe.skip;
+
+/**
+ * The materializer's sandbox-side half against a real container. The host
+ * layer above proves the clone with real git; this proves the copy lands at
+ * the canonical mount path inside a container's filesystem — the boundary the
+ * admission table used to refuse outright.
+ */
+dockerMountSuite('github materialization into a real docker sandbox', { timeout: 180_000 }, () => {
+  let root: string;
+  let repoPath: string;
+  let sandbox: SandboxInstance;
+
+  beforeEach(async () => {
+    root = mkdtempSync(join(tmpdir(), 'ma-github-docker-'));
+    ({ repoPath } = createFixtureRepo(root));
+    sandbox = await new DockerSandboxProvider().provision('sess_repo_mount_test', {
+      name: 'docker',
+      sandbox_provider: 'docker',
+      timeout: 60,
+      image: dockerImage,
+    });
+  }, 120_000);
+
+  afterEach(async () => {
+    await sandbox?.cleanup();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('copies the clone into the container at the canonical mount path', async () => {
+    const deps = createGithubMaterializeDeps({ cacheRoot: join(root, 'cache') });
+    const runGit: MaterializeDeps['runGit'] = (args, opts) =>
+      deps.runGit(
+        args.map((arg) => (arg === 'https://github.com/acme/widget' ? fileUrl(repoPath) : arg)),
+        opts,
+      );
+
+    const result = await materializeGithubRepository(
+      {
+        type: 'github_repository',
+        url: 'https://github.com/acme/widget',
+        repository: 'acme/widget',
+        mount_path: '/workspace/widget',
+        authorization_token: 'ghp_localfixturetoken0123456789',
+      },
+      sandbox,
+      { ...deps, runGit },
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.mountPath).toBe('/workspace/widget');
+    expect(result.skills).toEqual(['code-review']);
+
+    // The tree landed inside the container at the canonical spelling — the
+    // same path the file tools and the agent's instructions name. Byte-exact
+    // equality is not asserted: the host git may translate line endings on
+    // checkout (autocrlf), which is the fixture's platform, not the mount's.
+    expect(await sandbox.readFile('/workspace/widget/README.md')).toContain('# widget');
+    expect(await sandbox.readFile('/workspace/widget/.claude/skills/code-review/SKILL.md'))
+      .toContain('name: code-review');
+    // `listFiles` reports workspace entries relative to `/workspace`.
+    expect(await sandbox.listFiles('/workspace/widget')).toContain('widget/src/index.ts');
+    const listed = await sandbox.execute('ls /workspace/widget/src/nested');
+    expect(listed.exitCode).toBe(0);
+    expect(listed.stdout).toContain('deep.ts');
   });
 });
