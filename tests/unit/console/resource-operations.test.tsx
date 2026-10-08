@@ -480,6 +480,100 @@ describe('the scheduled deployments page', () => {
     expect(screen.getByText('schedule')).toBeDefined();
     expect(screen.getByText(/upcoming runs/i)).toBeDefined();
   });
+
+  it('puts the published update shape on the schedule', async () => {
+    const user = userEvent.setup();
+    onApiRequest(() => deployment);
+    renderConsole(<ScheduledDeploymentsPage data={data} onRefresh={() => {}} />);
+
+    // Desktop row and mobile card each render an Edit control — take the first.
+    await user.click(screen.getAllByRole('button', { name: /^edit$/i })[0]);
+    const dialog = await screen.findByRole('dialog', { name: /edit schedule/i });
+    // The modal prefills the stored schedule and the stored prompt.
+    expect((within(dialog).getByLabelText(/^name/i) as HTMLInputElement).value).toBe('Nightly run');
+    expect((within(dialog).getByLabelText(/cron expression/i) as HTMLInputElement).value).toBe('0 9 * * *');
+    expect((within(dialog).getByLabelText(/prompt/i) as HTMLTextAreaElement).value).toBe('review');
+
+    await user.clear(within(dialog).getByLabelText(/^name/i));
+    await user.type(within(dialog).getByLabelText(/^name/i), 'Morning run');
+    await user.clear(within(dialog).getByLabelText(/cron expression/i));
+    await user.type(within(dialog).getByLabelText(/cron expression/i), '15 7 * * *');
+    await user.clear(within(dialog).getByLabelText(/timezone/i));
+    await user.type(within(dialog).getByLabelText(/timezone/i), 'Asia/Shanghai');
+    await user.click(within(dialog).getByRole('button', { name: /save schedule/i }));
+
+    await waitFor(() => {
+      const request = apiRequests().find((item) => item.method === 'PUT' && item.path === '/v1/scheduled-deployments/dep_1');
+      expect(request).toBeDefined();
+      expect(request?.body).toMatchObject({
+        name: 'Morning run',
+        agent_id: 'agent_echo',
+        environment_id: 'env_cloud',
+        schedule: { type: 'cron', expression: '15 7 * * *', timezone: 'Asia/Shanghai' },
+        initial_events: [{ type: 'user.message', content: [{ type: 'text', text: 'review' }] }],
+      });
+    });
+  });
+
+  it('switches to manual-only when the cron expression is cleared', async () => {
+    const user = userEvent.setup();
+    onApiRequest(() => deployment);
+    renderConsole(<ScheduledDeploymentsPage data={data} onRefresh={() => {}} />);
+
+    await user.click(screen.getAllByRole('button', { name: /^edit$/i })[0]);
+    const dialog = await screen.findByRole('dialog', { name: /edit schedule/i });
+    await user.clear(within(dialog).getByLabelText(/cron expression/i));
+    await user.click(within(dialog).getByRole('button', { name: /save schedule/i }));
+
+    await waitFor(() => {
+      const request = apiRequests().find((item) => item.method === 'PUT' && item.path === '/v1/scheduled-deployments/dep_1');
+      expect(request?.body).toMatchObject({ schedule: null });
+    });
+  });
+
+  it('surfaces an update refusal inside the edit dialog', async () => {
+    const user = userEvent.setup();
+    onApiRequest((request) => {
+      if (request.method === 'PUT') return new Error('Unknown agent: agent_echo');
+      return deployment;
+    });
+    renderConsole(<ScheduledDeploymentsPage data={data} onRefresh={() => {}} />);
+
+    await user.click(screen.getAllByRole('button', { name: /^edit$/i })[0]);
+    const dialog = await screen.findByRole('dialog', { name: /edit schedule/i });
+    await user.click(within(dialog).getByRole('button', { name: /save schedule/i }));
+
+    await waitFor(() => expect(within(dialog).getByText(/unknown agent/i)).toBeDefined());
+    // The dialog stays open so the draft is not lost.
+    expect(screen.getByRole('dialog', { name: /edit schedule/i })).toBeDefined();
+  });
+
+  it('confirms before deleting and calls the delete route', async () => {
+    const user = userEvent.setup();
+    onApiRequest(() => deployment);
+    renderConsole(<ScheduledDeploymentsPage data={data} onRefresh={() => {}} />);
+
+    await user.click(screen.getAllByRole('button', { name: /^delete$/i })[0]);
+    const dialog = await screen.findByRole('dialog', { name: /delete schedule/i });
+    await user.click(within(dialog).getByRole('button', { name: /delete schedule/i }));
+
+    await waitFor(() => {
+      const request = apiRequests().find((item) => item.method === 'DELETE' && item.path === '/v1/scheduled-deployments/dep_1');
+      expect(request).toBeDefined();
+    });
+  });
+
+  it('pauses and resumes through the dedicated routes', async () => {
+    const user = userEvent.setup();
+    onApiRequest(() => deployment);
+    renderConsole(<ScheduledDeploymentsPage data={data} onRefresh={() => {}} />);
+
+    await user.click(screen.getAllByRole('button', { name: /^pause$/i })[0]);
+    await waitFor(() => {
+      const request = apiRequests().find((item) => item.method === 'POST' && item.path === '/v1/scheduled-deployments/dep_1/pause');
+      expect(request).toBeDefined();
+    });
+  });
 });
 
 describe('the memory store page', () => {

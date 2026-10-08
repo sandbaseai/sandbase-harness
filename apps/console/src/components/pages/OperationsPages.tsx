@@ -1,9 +1,10 @@
-import { Activity, CalendarClock, CheckCircle2, ChevronDown, ChevronRight, KeyRound, Pencil, Play, Plus, RadioTower, Send } from 'lucide-react';
+import { Activity, CalendarClock, CheckCircle2, ChevronDown, ChevronRight, KeyRound, Pause, Pencil, Play, Plus, RadioTower, Send, Trash2 } from 'lucide-react';
 import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from 'react';
 import { Trans, useTranslation } from 'react-i18next';
-import { getJson, postJson, putJson } from '../../api';
+import { deleteJson, getJson, postJson, putJson } from '../../api';
 import type { ConsoleData, DeploymentRun, Outcome, ScheduledDeployment, Session, Webhook, WebhookDelivery } from '../../types';
 import { RequiredMark } from '../Common';
+import { ConfirmDeleteModal } from '../DangerZone';
 import { Modal } from '../Modal';
 import { ConsoleSelect } from '../console-select';
 import { EmptyState, Kpi, KpiStrip, PageBody, PageHeader, StatusDot, type Tone } from '../console-ui';
@@ -190,6 +191,9 @@ export function ScheduledDeploymentsPage({ data, onRefresh }: OperationsPageProp
   const [runningId, setRunningId] = useState<string | null>(null);
   const [runningDue, setRunningDue] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
+  const [editing, setEditing] = useState<ScheduledDeployment | null>(null);
+  const [deleting, setDeleting] = useState<ScheduledDeployment | null>(null);
+  const [pausingId, setPausingId] = useState<string | null>(null);
   const [runsId, setRunsId] = useState<string | null>(null);
   const [message, setMessage] = useState('');
 
@@ -222,6 +226,22 @@ export function ScheduledDeploymentsPage({ data, onRefresh }: OperationsPageProp
       setMessage(err instanceof Error ? err.message : t('scheduled.notice.runDueFailed'));
     } finally {
       setRunningDue(false);
+    }
+  };
+
+  // Pause/unpause are dedicated routes rather than a status field on the
+  // update verb — they publish the pause transition event the published
+  // vocabulary assigns to them.
+  const togglePause = async (schedule: ScheduledDeployment) => {
+    setPausingId(schedule.id);
+    setMessage('');
+    try {
+      await postJson(`/v1/scheduled-deployments/${encodeURIComponent(schedule.id)}/${schedule.status === 'paused' ? 'unpause' : 'pause'}`, {});
+      onRefresh();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : t('scheduled.notice.pauseFailed'));
+    } finally {
+      setPausingId(null);
     }
   };
 
@@ -281,6 +301,10 @@ export function ScheduledDeploymentsPage({ data, onRefresh }: OperationsPageProp
                     expanded={runsId === schedule.id}
                     onToggleRuns={() => setRunsId((current) => current === schedule.id ? null : schedule.id)}
                     onRun={runSchedule}
+                    pausingId={pausingId}
+                    onTogglePause={togglePause}
+                    onEdit={() => setEditing(schedule)}
+                    onDelete={() => setDeleting(schedule)}
                   />
                 ))}
               </tbody>
@@ -301,6 +325,15 @@ export function ScheduledDeploymentsPage({ data, onRefresh }: OperationsPageProp
               <button className="button ghost" type="button" onClick={() => void runSchedule(schedule)} disabled={runningId === schedule.id || schedule.status !== 'active'}>
                 <Play size={14} aria-hidden="true" /> {runningId === schedule.id ? t('scheduled.actions.running') : t('scheduled.actions.runNow')}
               </button>
+              <button className="button ghost" type="button" onClick={() => void togglePause(schedule)} disabled={pausingId === schedule.id}>
+                <Pause size={14} aria-hidden="true" /> {schedule.status === 'paused' ? t('scheduled.actions.resume') : t('scheduled.actions.pause')}
+              </button>
+              <button className="button ghost" type="button" onClick={() => setEditing(schedule)}>
+                <Pencil size={14} aria-hidden="true" /> {t('scheduled.actions.edit')}
+              </button>
+              <button className="button ghost" type="button" onClick={() => setDeleting(schedule)}>
+                <Trash2 size={14} aria-hidden="true" /> {t('scheduled.actions.delete')}
+              </button>
             </article>
           ))}
           {data.scheduledDeployments.length === 0 ? empty : null}
@@ -313,6 +346,30 @@ export function ScheduledDeploymentsPage({ data, onRefresh }: OperationsPageProp
           onClose={() => setCreateOpen(false)}
           onSaved={() => {
             setCreateOpen(false);
+            onRefresh();
+          }}
+        />
+      ) : null}
+      {editing ? (
+        <ScheduledDeploymentEditModal
+          data={data}
+          deployment={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            onRefresh();
+          }}
+        />
+      ) : null}
+      {deleting ? (
+        <ConfirmDeleteModal
+          title={t('scheduled.delete.title')}
+          subject={deleting.name || deleting.id}
+          consequence={t('scheduled.delete.consequence')}
+          onClose={() => setDeleting(null)}
+          onConfirm={async () => {
+            await deleteJson(`/v1/scheduled-deployments/${encodeURIComponent(deleting.id)}`);
+            setDeleting(null);
             onRefresh();
           }}
         />
@@ -463,14 +520,22 @@ function ScheduleRow({
   schedule,
   runningId,
   expanded,
+  pausingId,
   onToggleRuns,
   onRun,
+  onTogglePause,
+  onEdit,
+  onDelete,
 }: {
   schedule: ScheduledDeployment;
   runningId: string | null;
   expanded: boolean;
+  pausingId: string | null;
   onToggleRuns: () => void;
   onRun: (schedule: ScheduledDeployment) => void;
+  onTogglePause: (schedule: ScheduledDeployment) => void;
+  onEdit: () => void;
+  onDelete: () => void;
 }) {
   const { t } = useTranslation('operations');
   return (
@@ -490,6 +555,15 @@ function ScheduleRow({
             </button>
             <button className="button ghost" type="button" onClick={() => onRun(schedule)} disabled={runningId === schedule.id || schedule.status !== 'active'}>
               <Play size={14} aria-hidden="true" /> {runningId === schedule.id ? t('scheduled.actions.running') : t('scheduled.actions.runNow')}
+            </button>
+            <button className="button ghost" type="button" onClick={() => onTogglePause(schedule)} disabled={pausingId === schedule.id}>
+              <Pause size={14} aria-hidden="true" /> {schedule.status === 'paused' ? t('scheduled.actions.resume') : t('scheduled.actions.pause')}
+            </button>
+            <button className="button ghost" type="button" onClick={onEdit}>
+              <Pencil size={14} aria-hidden="true" /> {t('scheduled.actions.edit')}
+            </button>
+            <button className="button ghost" type="button" onClick={onDelete}>
+              <Trash2 size={14} aria-hidden="true" /> {t('scheduled.actions.delete')}
             </button>
           </div>
         </td>
@@ -1031,6 +1105,131 @@ function ScheduledDeploymentCreateModal({ data, onClose, onSaved }: { data: Cons
         <div className="modalActions">
           <button className="button outline" type="button" onClick={onClose}>{t('scheduled.create.cancel')}</button>
           <button className="button primary" type="submit" disabled={saving || !name.trim() || !agentId || !expression.trim() || !timezone.trim() || !prompt.trim()}>{saving ? t('scheduled.create.submitting') : t('scheduled.create.submit')}</button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
+/** Pull the editable prompt text out of a stored `user.message` initial event. */
+function deploymentPrompt(initialEvents: unknown[]): string {
+  const first = initialEvents.find(
+    (event): event is { type: string; content: Array<{ type: string; text?: string }> } =>
+      typeof event === 'object' && event !== null && (event as { type?: string }).type === 'user.message'
+        && Array.isArray((event as { content?: unknown }).content),
+  );
+  return first?.content.find((block) => block.type === 'text')?.text ?? '';
+}
+
+/**
+ * Edit a scheduled deployment through the published update verb. An empty
+ * cron expression sends `schedule: null` — the published path back to a
+ * manual-only deployment — while a filled one submits the cron object the
+ * create route accepts. The prompt edits the first `user.message` initial
+ * event; deployments whose initial events hold other shapes keep them by
+ * omission.
+ */
+function ScheduledDeploymentEditModal({
+  data,
+  deployment,
+  onClose,
+  onSaved,
+}: {
+  data: ConsoleData;
+  deployment: ScheduledDeployment;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { t } = useTranslation('operations');
+  const [name, setName] = useState(deployment.name);
+  const [description, setDescription] = useState(deployment.description ?? '');
+  const [agentId, setAgentId] = useState(deployment.agent.id);
+  const [environmentId, setEnvironmentId] = useState(deployment.environment_id ?? 'env_default');
+  const [expression, setExpression] = useState(deployment.schedule?.expression ?? '');
+  const [timezone, setTimezone] = useState(deployment.schedule?.timezone ?? (Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'));
+  const [prompt, setPrompt] = useState(() => deploymentPrompt(deployment.initial_events));
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    setError('');
+    try {
+      const body: Record<string, unknown> = {
+        name,
+        description,
+        agent_id: agentId,
+        environment_id: environmentId || 'env_default',
+        schedule: expression.trim()
+          ? { type: 'cron', expression: expression.trim(), timezone: timezone.trim() || 'UTC' }
+          : null,
+      };
+      if (prompt.trim()) {
+        body.initial_events = [{ type: 'user.message', content: [{ type: 'text', text: prompt }] }];
+      }
+      await putJson<ScheduledDeployment>(`/v1/scheduled-deployments/${encodeURIComponent(deployment.id)}`, body);
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('scheduled.edit.failed'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title={t('scheduled.edit.title')} subtitle={deployment.id} onClose={onClose}>
+      <form className="modalForm operationCreateForm" onSubmit={submit}>
+        {error ? <div className="banner error inlineBanner">{error}</div> : null}
+        <label className="editField">
+          {t('scheduled.create.name')} <RequiredMark />
+          <input value={name} onChange={(event) => setName(event.target.value)} placeholder={t('scheduled.create.namePlaceholder')} required />
+        </label>
+        <label className="editField">
+          {t('scheduled.create.description')}
+          <input value={description} onChange={(event) => setDescription(event.target.value)} />
+        </label>
+        <div className="editField">
+          <span>{t('scheduled.create.agent')} <RequiredMark /></span>
+          <ConsoleSelect
+            label={t('scheduled.create.agent')}
+            value={agentId}
+            onChange={setAgentId}
+            options={data.agents.length === 0
+              ? [{ value: '', label: t('scheduled.create.noAgents') }]
+              : data.agents.map((agent) => ({ value: agent.id, label: agent.name }))}
+          />
+        </div>
+        <div className="editField">
+          <span>{t('scheduled.create.environment')} <RequiredMark /></span>
+          <ConsoleSelect
+            label={t('scheduled.create.environment')}
+            value={environmentId}
+            onChange={setEnvironmentId}
+            options={[
+              { value: 'env_default', label: t('scheduled.create.defaultEnvironment') },
+              ...data.environments.map((environment) => ({ value: environment.id, label: environment.name })),
+            ]}
+          />
+        </div>
+        <label className="editField">
+          {t('scheduled.edit.cron')}
+          <input value={expression} onChange={(event) => setExpression(event.target.value)} placeholder={t('scheduled.create.cronPlaceholder')} />
+          <small>{t('scheduled.edit.cronHint')}</small>
+        </label>
+        <label className="editField">
+          {t('scheduled.create.timezone')} <RequiredMark />
+          <input value={timezone} onChange={(event) => setTimezone(event.target.value)} placeholder={t('scheduled.create.timezonePlaceholder')} required />
+          <small>{t('scheduled.create.timezoneHint')}</small>
+        </label>
+        <label className="editField">
+          {t('scheduled.create.prompt')}
+          <textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={5} spellCheck={false} placeholder={t('scheduled.create.promptPlaceholder')} />
+          <small>{t('scheduled.edit.promptHint')}</small>
+        </label>
+        <div className="modalActions">
+          <button className="button outline" type="button" onClick={onClose}>{t('scheduled.create.cancel')}</button>
+          <button className="button primary" type="submit" disabled={saving || !name.trim() || !agentId || !timezone.trim()}>{saving ? t('scheduled.edit.submitting') : t('scheduled.edit.submit')}</button>
         </div>
       </form>
     </Modal>
