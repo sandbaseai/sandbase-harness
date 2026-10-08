@@ -105,6 +105,7 @@ export function diffAgentVersions(base: Agent, next: Agent): AgentFieldDiff[] {
     { field: 'description', label: 'Description', base: base.description ?? '', next: next.description ?? '' },
     { field: 'model', label: 'Model', base: base.model, next: next.model },
     { field: 'model_config', label: 'Model config', base: modelSpeed(base), next: modelSpeed(next) },
+    { field: 'max_turns', label: 'Max turns', base: base.max_turns === undefined ? '' : String(base.max_turns), next: next.max_turns === undefined ? '' : String(next.max_turns) },
     { field: 'system', label: 'System prompt', base: base.system, next: next.system },
     { field: 'tools', label: 'Tools', base: agentToolList(base).join('\n'), next: agentToolList(next).join('\n') },
     { field: 'skills', label: 'Skills', base: agentSkillList(base).join('\n'), next: agentSkillList(next).join('\n') },
@@ -177,6 +178,13 @@ export function validateAgentDraft(draft: unknown): string[] {
   }
   if (draft.mcp_servers !== undefined && !Array.isArray(draft.mcp_servers)) {
     issues.push('mcp_servers must be a list.');
+  }
+  // The published bound: a positive integer no larger than 1000.
+  if (draft.max_turns !== undefined && (!Number.isInteger(draft.max_turns) || (draft.max_turns as number) < 1 || (draft.max_turns as number) > 1000)) {
+    issues.push('max_turns must be an integer between 1 and 1000.');
+  }
+  if (draft.enable_general_subagent !== undefined && typeof draft.enable_general_subagent !== 'boolean') {
+    issues.push('enable_general_subagent must be true or false.');
   }
   if (draft.metadata !== undefined) {
     if (!isPlainObject(draft.metadata)) {

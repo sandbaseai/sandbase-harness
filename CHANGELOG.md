@@ -4,6 +4,13 @@
 
 ### Added
 
+- The agent create/edit forms now expose the two execution controls the
+  published agent schema already accepts: a turn cap that serializes as
+  `max_turns` (blank clears a stored cap on update by sending `null`) and an
+  enable-the-general-subagent toggle serialized as
+  `enable_general_subagent`. The form validates the cap is an integer in
+  1-1000 before the request leaves, and the agent version diff lists the
+  cap between revisions.
 - The scheduled deployments page now manages a schedule after creation.
   Each deployment row and card offers Pause/Resume through the dedicated
   `POST /v1/scheduled-deployments/{id}/pause|unpause` routes, an Edit
