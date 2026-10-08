@@ -59,8 +59,9 @@ that passes cancels the child (`timed_out`); Pi cancellation becomes `cancelled`
 
 Pi must be installed and discoverable as `pi`; the Settings test reports a
 missing CLI and a turn fails explicitly if it cannot be launched. On Windows,
-the npm `pi.cmd` shim is invoked through its neighbouring `pi.ps1` script with
-a fixed PowerShell argument forwarder, rather than a shell command string.
+the npm `pi.cmd` shim is read for the entry script it wraps and the real
+`cli.js` is spawned through Node directly — a shell or PowerShell forwarder
+between the runtime and the child severs piped stdin, which kills RPC mode.
 
 The adapter now holds a cross-runtime lease beside the managed session file for
 this entire child lifetime. A live owner returns a retryable `pi_session_busy`

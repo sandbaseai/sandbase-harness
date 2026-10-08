@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import type { Readable, Writable } from 'node:stream';
-import { chmodSync, existsSync, lstatSync, mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { delimiter, dirname, extname, join, resolve, sep, win32 } from 'node:path';
 import { referencedEnvVars, resolveEnvVarsFrom } from '@/core/config/env-resolver.js';
@@ -233,9 +233,32 @@ export interface PiInvocationOptions {
 }
 
 /**
+ * Extracts the real entry script from an npm `.cmd` shim.
+ *
+ * The shim runs `node "%dp0%\node_modules\<pkg>\...\cli.js" %*`, so the entry
+ * path can be read instead of re-derived from the package layout — this keeps
+ * working when the package name or its dist layout changes.
+ */
+function npmShimEntryPoint(cmdPath: string): string | null {
+  let text: string;
+  try {
+    text = readFileSync(cmdPath, 'utf8');
+  } catch {
+    return null;
+  }
+  const match = /%~?[dD][pP]0%[\\/]?([^\s"']+?\.js)\b/.exec(text);
+  if (!match) return null;
+  return win32.resolve(win32.dirname(cmdPath), match[1]);
+}
+
+/**
  * Resolves Pi's executable invocation without invoking a shell. npm's Windows
- * shim is a .cmd file, but direct .cmd spawning is fragile; run its adjacent
- * PowerShell script through a fixed -Command expression that forwards @args.
+ * shim is a .cmd file; run its extracted entry script through `node` directly,
+ * because wrapping the adjacent `pi.ps1` in `powershell -Command` severs piped
+ * stdin (`$input` binds to the command pipeline, not the process stream), and a
+ * Pi child that sees stdin at EOF exits its RPC loop — the runtime's first
+ * command then fails with EPIPE. A shim that does not match the npm layout
+ * falls back to the PowerShell script.
  */
 export function piInvocationFor(
   piArgs: string[],
@@ -252,6 +275,11 @@ export function piInvocationFor(
 
   if (platform !== 'win32' || extname(executable).toLowerCase() !== '.cmd') {
     return { file: executable, args: [...commandArgs, ...piArgs] };
+  }
+
+  const entry = npmShimEntryPoint(executable);
+  if (entry && fileExists(entry)) {
+    return { file: process.execPath, args: [entry, ...commandArgs, ...piArgs] };
   }
 
   const ps1 = win32.join(win32.dirname(executable), `${win32.basename(executable, '.cmd')}.ps1`);
@@ -1081,7 +1109,9 @@ function resolveWindowsCommand(
   if (!pathValue) return command;
   const candidates = extname(command)
     ? [command]
-    : [command, `${command}.cmd`, `${command}.exe`];
+    // The bare name resolves to npm's POSIX sh script, which Windows cannot
+    // execute — check executable extensions first, then the bare name.
+    : [`${command}.cmd`, `${command}.exe`, command];
   for (const directory of pathValue.split(delimiter)) {
     if (!directory) continue;
     for (const candidate of candidates) {

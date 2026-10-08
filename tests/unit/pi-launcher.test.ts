@@ -491,7 +491,29 @@ describe('Pi launcher', () => {
     expect(existsSync(cli.resultPath)).toBe(false);
   });
 
-  it('uses the neighbouring PowerShell shim for a Windows npm pi.cmd executable', () => {
+  it('spawns the npm pi.cmd shim entry through node directly on Windows', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'ma-pi-shim-'));
+    directories.push(directory);
+    const command = join(directory, 'pi.cmd');
+    const entry = join(directory, 'node_modules', '@earendil-works', 'pi-coding-agent', 'dist', 'bundle', 'cli.js');
+    writeFileSync(command, [
+      '@ECHO off',
+      'SETLOCAL',
+      'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\@earendil-works\\pi-coding-agent\\dist\\bundle\\cli.js" %*',
+    ].join('\r\n'));
+
+    const invocation = piInvocationFor(['--mode', 'rpc'], {
+      command,
+      platform: 'win32',
+      environment: { SystemRoot: 'C:\\Windows' },
+      fileExists: (path) => path === entry,
+    });
+
+    expect(invocation.file).toBe(process.execPath);
+    expect(invocation.args).toEqual([entry, '--mode', 'rpc']);
+  });
+
+  it('falls back to the PowerShell shim when the npm shim entry is not readable', () => {
     const command = 'C:\\npm\\pi.cmd';
     const shim = 'C:\\npm\\pi.ps1';
     const invocation = piInvocationFor(['-p', '--mode', 'json', '--session', 'C:\\data\\pi-sessions\\sess_1.jsonl'], {
