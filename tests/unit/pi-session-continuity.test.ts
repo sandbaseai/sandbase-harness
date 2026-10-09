@@ -15,7 +15,11 @@ import { PiLauncher } from '@/strategy/pi-launcher.js';
 
 const directories: string[] = [];
 afterEach(() => {
-  for (const directory of directories.splice(0)) rmSync(directory, { recursive: true, force: true });
+  // A Pi child that is still exiting can hold files in the directory on
+  // Windows; retry briefly instead of failing the next test on EPERM.
+  for (const directory of directories.splice(0)) {
+    rmSync(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  }
 });
 
 function setup() {
@@ -184,8 +188,12 @@ process.stdin.on('end', () => {
       database: value.db,
       command: process.execPath,
       commandArgs: [script],
-      timeoutMs: 2_000,
-      cleanupTimeoutMs: 100,
+      // Generous budgets: under a loaded Windows process table the spawn alone
+      // can approach 2s, and taskkill /T tree teardown can outlast a 100ms
+      // deadline. Neither timer binds on the happy path — the fixture exits on
+      // its own ~100ms after the prompt.
+      timeoutMs: 15_000,
+      cleanupTimeoutMs: process.platform === 'win32' ? 10_000 : 1_000,
     });
     const request = {
       sessionId: value.session,
