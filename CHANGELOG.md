@@ -299,6 +299,16 @@
 
 ### Fixed
 
+- The Console no longer presents or pins the retired pre-`cloud`-binding
+  defaults. The environment create dialog and the hosting-type picker now
+  describe `cloud` as Docker with the published reference image instead of
+  the workspace default backend; the docker image field defaults to blank
+  (the provider's reference image applies) rather than pre-filling
+  `node:22-slim`, and creating or editing a Docker environment no longer
+  writes `image: "node:22-slim"` when the field is left empty. The
+  docker image placeholders, the readonly image fallback on the detail
+  page, and both locales name the reference image.
+
 - `loop_engine.provider: "pi"` sessions now run on Windows. The launcher
   resolved npm's `pi.cmd` shim to its neighbouring `pi.ps1` and spawned it
   through `powershell -Command`, whose argument forwarder severs piped stdin;

@@ -40,7 +40,7 @@ export function CloudEnvironment({ environment }: { environment: Environment }) 
         <div className="readonlyFields">
           <ReadonlyField label={t('detail.execution.fields.hostingType')} value={t(`kind.${declaredHostingType(environment)}`)} />
           <ReadonlyField label={t('detail.execution.fields.effectiveBackend')} value={effectiveProvider} />
-          {executionType === 'docker' ? <ReadonlyField label={t('detail.execution.fields.dockerImage')} value={String(environment.config.image ?? 'node:22-slim')} /> : null}
+          {executionType === 'docker' ? <ReadonlyField label={t('detail.execution.fields.dockerImage')} value={String(environment.config.image ?? 'ghcr.io/sandbaseai/sandbase-harness-sandbox:latest')} /> : null}
           {executionType === 'docker' && resources.memory ? <ReadonlyField label={t('detail.execution.fields.memoryLimit')} value={String(resources.memory)} /> : null}
           {executionType === 'docker' && resources.cpu ? <ReadonlyField label={t('detail.execution.fields.cpuLimit')} value={String(resources.cpu)} /> : null}
         </div>

@@ -225,12 +225,13 @@ describe('the environment pages', () => {
   it('creates an environment as cloud with no sandbox_provider and the published packages shape', async () => {
     const user = userEvent.setup();
     onApiRequest(() => environment);
-    renderConsole(<ResourceModal kind="environment" defaultSandboxProvider="docker" onClose={() => {}} onSaved={() => {}} />);
+    renderConsole(<ResourceModal kind="environment" onClose={() => {}} onSaved={() => {}} />);
 
-    // Cloud is the default: the summary names the workspace default backend
-    // and no hosting select is shown until the advanced section opens.
-    expect(screen.getByText(/workspace default sandbox backend/i)).toBeDefined();
-    expect(screen.getByText('docker')).toBeDefined();
+    // Cloud is the default: the summary names the reference sandbox image the
+    // docker binding resolves to, and no hosting select is shown until the
+    // advanced section opens.
+    expect(screen.getByText(/reference sandbox image/i)).toBeDefined();
+    expect(screen.getByText(/sandbase-harness-sandbox/)).toBeDefined();
 
     await user.type(screen.getByLabelText(/name/i), 'Demo env');
     await user.click(screen.getByRole('button', { name: /create environment/i }));
@@ -248,7 +249,7 @@ describe('the environment pages', () => {
   it('sends sandbox_provider when a specific hosting type is picked in the advanced section', async () => {
     const user = userEvent.setup();
     onApiRequest(() => environment);
-    renderConsole(<ResourceModal kind="environment" defaultSandboxProvider="docker" onClose={() => {}} onSaved={() => {}} />);
+    renderConsole(<ResourceModal kind="environment" onClose={() => {}} onSaved={() => {}} />);
 
     await user.type(screen.getByLabelText(/name/i), 'Docker env');
     await user.click(screen.getByText(/advanced/i));

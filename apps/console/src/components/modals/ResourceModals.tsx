@@ -8,14 +8,14 @@ import { ConsoleSelect } from '../console-select';
 import { sandboxProviderForHostingType, splitCsv } from '../pages/EnvironmentPageModel';
 import type { CredentialAuthType, EnvironmentHostingType } from '../../types';
 
-export function ResourceModal({ kind, defaultSandboxProvider, onClose, onSaved }: { kind: 'environment' | 'credential_vault' | 'memory_store'; defaultSandboxProvider?: string; onClose: () => void; onSaved: () => void }) {
+export function ResourceModal({ kind, onClose, onSaved }: { kind: 'environment' | 'credential_vault' | 'memory_store'; onClose: () => void; onSaved: () => void }) {
   const { t: tEnv } = useTranslation('environments');
   const { t: tCred } = useTranslation('credentials');
   const { t: tMem } = useTranslation('memory');
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [hostingType, setHostingType] = useState<EnvironmentHostingType>('cloud');
-  const [dockerImage, setDockerImage] = useState('node:22-slim');
+  const [dockerImage, setDockerImage] = useState('');
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const submit = async (event: FormEvent) => {
@@ -24,7 +24,7 @@ export function ResourceModal({ kind, defaultSandboxProvider, onClose, onSaved }
     setError('');
     const path = kind === 'environment' ? '/v1/environments' : kind === 'credential_vault' ? '/v1/credential-vaults' : '/v1/memory_stores';
     // `cloud` sends no `sandbox_provider`: it is the published "the platform
-    // decides" declaration and resolves to the workspace default server-side.
+    // decides" declaration and resolves to the docker backend server-side.
     const sandboxProvider = sandboxProviderForHostingType(hostingType);
     try {
       await postJson(path, {
@@ -34,7 +34,9 @@ export function ResourceModal({ kind, defaultSandboxProvider, onClose, onSaved }
           config: {
             hosting_type: hostingType,
             ...(sandboxProvider ? { sandbox_provider: sandboxProvider } : {}),
-            ...(hostingType === 'docker' ? { image: dockerImage.trim() || 'node:22-slim', resources: {} } : {}),
+            // A blank image field omits `image` so the provider's default —
+            // the published reference sandbox image — applies.
+            ...(hostingType === 'docker' ? { ...(dockerImage.trim() ? { image: dockerImage.trim() } : {}), resources: {} } : {}),
             network: {
               type: 'limited',
               allow_mcp_server_network_access: false,
@@ -69,7 +71,6 @@ export function ResourceModal({ kind, defaultSandboxProvider, onClose, onSaved }
               <Trans
                 i18nKey="create.summary"
                 ns="environments"
-                values={{ provider: defaultSandboxProvider ?? 'local' }}
                 components={{ code: <code /> }}
               />
             </p>
@@ -94,7 +95,7 @@ export function ResourceModal({ kind, defaultSandboxProvider, onClose, onSaved }
             {hostingType === 'docker' ? (
               <label className="editField">
                 {tEnv('create.dockerImage')}
-                <input value={dockerImage} onChange={(event) => setDockerImage(event.target.value)} placeholder="node:22-slim" />
+                <input value={dockerImage} onChange={(event) => setDockerImage(event.target.value)} placeholder="ghcr.io/sandbaseai/sandbase-harness-sandbox:latest" />
                 <small>{tEnv('create.dockerImageHint')}</small>
               </label>
             ) : null}

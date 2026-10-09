@@ -158,7 +158,9 @@ export function environmentDraftFromApi(environment: Environment): EnvironmentDr
     name: environment.name,
     description: environment.description ?? '',
     hostingType: declaredHostingType(environment),
-    dockerImage: stringValue(environment.config.image) ?? 'node:22-slim',
+    // Blank when the stored config carries no `image`: the provider's default
+    // (the reference sandbox image) applies rather than a Console-chosen one.
+    dockerImage: stringValue(environment.config.image) ?? '',
     dockerMemory: stringValue(resources.memory) ?? '',
     dockerCpu: numberOrStringValue(resources.cpu) ?? '',
     networkType: network.type,

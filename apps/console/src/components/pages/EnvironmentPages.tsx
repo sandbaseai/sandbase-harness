@@ -378,21 +378,13 @@ function EnvironmentEditor({ environment, data, onCancel, onSaved }: { environme
       </label>
 
       <div className="environmentBody">
-        <EnvironmentExecutionEditor draft={draft} onDraft={setDraft} workspaceDefaultProvider={workspaceDefaultProvider(data)} />
+        <EnvironmentExecutionEditor draft={draft} onDraft={setDraft} />
         <EnvironmentPackagesEditor draft={draft} onDraft={setDraft} />
         <EnvironmentMetadataEditor draft={draft} onDraft={setDraft} />
         {draft.hostingType === 'self_hosted' ? <SelfHostedEnvironment environment={environment} sessions={[]} /> : null}
       </div>
     </section>
   );
-}
-
-/**
- * The workspace default sandbox backend a `cloud` environment runs on — the
- * same one the runtime's `env_default` serves, read from Settings V2.
- */
-function workspaceDefaultProvider(data: ConsoleData): string {
-  return data.settings?.effective_config?.sandbox?.provider ?? 'local';
 }
 
 /**
@@ -424,7 +416,7 @@ export function EnvironmentPackagesEditor({ draft, onDraft }: { draft: Environme
   );
 }
 
-function EnvironmentExecutionEditor({ draft, onDraft, workspaceDefaultProvider }: { draft: EnvironmentDraft; onDraft: (draft: EnvironmentDraft) => void; workspaceDefaultProvider: string }) {
+function EnvironmentExecutionEditor({ draft, onDraft }: { draft: EnvironmentDraft; onDraft: (draft: EnvironmentDraft) => void }) {
   const { t } = useTranslation('environments');
   return (
     <section className="environmentSection environmentExecutionSection">
@@ -452,7 +444,6 @@ function EnvironmentExecutionEditor({ draft, onDraft, workspaceDefaultProvider }
           <Trans
             i18nKey="detail.execution.cloudNotice"
             ns="environments"
-            values={{ provider: workspaceDefaultProvider }}
             components={{ code: <code /> }}
           />
         </div>
@@ -467,7 +458,7 @@ function EnvironmentExecutionEditor({ draft, onDraft, workspaceDefaultProvider }
             <input
               value={draft.dockerImage}
               onChange={(event) => onDraft({ ...draft, dockerImage: event.target.value })}
-              placeholder="node:22-slim"
+              placeholder="ghcr.io/sandbaseai/sandbase-harness-sandbox:latest"
             />
             <small>{t('detail.execution.dockerImageHint')}</small>
           </label>

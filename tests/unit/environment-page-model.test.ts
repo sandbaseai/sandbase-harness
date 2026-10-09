@@ -64,6 +64,16 @@ describe('environment page model helpers', () => {
     expect(draft.preservedMetadata).toEqual({ environment_keys: '[{"id":"envkey_1","name":"host"}]' });
   });
 
+  it('drafts a blank docker image when the environment carries none', () => {
+    // A blank field means "the provider default" — the reference sandbox image —
+    // so the editor must not invent a value that would pin a different image on save.
+    const draft = environmentDraftFromApi(environment({
+      effective_sandbox_provider: 'docker',
+      config: { sandbox_provider: 'docker' },
+    }));
+    expect(draft.dockerImage).toBe('');
+  });
+
   it('creates the API payload while preserving protected metadata', () => {
     const payload = environmentPayloadFromDraft({
       name: '  CI  ',

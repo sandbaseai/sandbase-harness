@@ -73,20 +73,21 @@ export const environments = {
       hint: "Choose where sessions for this environment execute. Docker and Kubernetes isolate each session in a container.",
       hostingType: "Hosting type",
       hostingOptions: {
-        cloud: "Cloud — workspace default backend",
+        cloud: "Cloud — Docker reference image",
         local: "Local process",
         docker: "Docker container",
         kubernetes: "Kubernetes pod",
         self_hosted: "Self-hosted worker",
       },
       cloudNotice:
-        "Cloud environments run on the workspace default sandbox backend (currently <code>{{provider}}</code>). Change the default in Settings.",
+        "Cloud environments run in a Docker container using the published reference sandbox image (<code>ghcr.io/sandbaseai/sandbase-harness-sandbox</code>). The declaration stays <code>cloud</code>; the real backend is reported as effective_sandbox_provider.",
       localWarning:
         "Not isolated: tools execute directly on the host machine. Use Docker or Kubernetes for untrusted agent code.",
       selfHostedNotice:
         "Self-hosted sessions are pulled by an external worker. Save this environment, then use the setup instructions on the detail page.",
       dockerImage: "Docker image",
-      dockerImageHint: "Must already be pullable or cached by the local Docker daemon.",
+      dockerImageHint:
+        "Must already be pullable or cached by the local Docker daemon. Leave blank to use the reference image.",
       memoryLimit: "Memory limit",
       memoryLimitHint: "Optional Docker memory value, for example 512m or 2g.",
       cpuLimit: "CPU limit",
@@ -192,13 +193,14 @@ export const environments = {
     nameHint: "50 characters or fewer.",
     summaryTitle: "Cloud",
     summary:
-      "Runs on the workspace default sandbox backend (currently <code>{{provider}}</code>). Change the default in Settings.",
+      "Runs in a Docker container using the published reference sandbox image (<code>ghcr.io/sandbaseai/sandbase-harness-sandbox</code>).",
     advanced: "Advanced: choose a specific hosting type",
     description: "Description",
     descriptionPlaceholder: "Optional description for this environment",
     cancel: "Cancel",
     submit: "Create environment",
     dockerImage: "Docker image",
-    dockerImageHint: "One Docker container will be created per session.",
+    dockerImageHint:
+      "One Docker container will be created per session. Leave blank to use the reference image.",
   },
 };

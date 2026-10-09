@@ -195,7 +195,6 @@ export function App() {
       {resourceModal ? (
         <ResourceModal
           kind={resourceModal}
-          defaultSandboxProvider={data.settings?.effective_config?.sandbox?.provider}
           onClose={() => setResourceModal(null)}
           onSaved={() => {
             setResourceModal(null);
