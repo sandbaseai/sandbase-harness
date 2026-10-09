@@ -54,8 +54,25 @@ const RELAY_IMAGE = 'alpine/socat';
 /** Port the relay listens on inside the internal network. */
 const RELAY_PORT = 8080;
 
-/** True if the `docker` CLI is available on PATH. */
-export function isDockerAvailable(): boolean {
+/**
+ * True if the `docker` CLI is on PATH and its daemon answers.
+ *
+ * A missing CLI or a stopped daemon answers immediately, so the retries cost
+ * nothing there. They exist for the case that actually hits the probe's
+ * deadline: the CLI and daemon are healthy, but a loaded process table stalls
+ * the spawn itself — observed on Windows where parallel test workers pushed a
+ * `docker version` call past 5s and left the provider unregistered at boot.
+ * The worst case is one extra budget per attempt, paid once at startup or
+ * provision, for a daemon that never answers.
+ */
+export function isDockerAvailable(probe: () => boolean = dockerDaemonProbe): boolean {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    if (probe()) return true;
+  }
+  return false;
+}
+
+function dockerDaemonProbe(): boolean {
   try {
     const r = spawnSync('docker', ['version', '--format', '{{.Server.Version}}'], {
       stdio: 'ignore',

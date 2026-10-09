@@ -27,11 +27,20 @@ import { spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { isDockerAvailable } from '@/sandbox/docker-provider.js';
 import { STUB_REPLY_TEXT, startStubModelServer } from './support/stub-model-server.js';
 import { startRuntimeHarness } from './support/runtime-server.js';
 
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const quickstart = join(repositoryRoot, 'examples', 'official-sdk', 'quickstart.mjs');
+
+// The quickstart creates its environment with `config.type: "cloud"`, which
+// resolves to the docker sandbox provider. When no daemon answers, the runtime
+// boots without it and the run degrades into a misleading session-terminated
+// failure — so the requirement is stated here, at collection, where a missing
+// daemon reads as a skip with a name instead. The probed predicate retries
+// internally; a slow-but-healthy daemon under test-suite load is still found.
+const dockerAvailable = isDockerAvailable();
 
 interface QuickstartLine {
   type: string;
@@ -47,7 +56,7 @@ interface QuickstartRun {
 }
 
 describe('official SDK quickstart', () => {
-  it('runs a turn through the published SDK and reads the reply, the tool call, and idle', async () => {
+  it.skipIf(!dockerAvailable)('runs a turn through the published SDK and reads the reply, the tool call, and idle', async () => {
     const stub = await startStubModelServer();
     const runtime = await startRuntimeHarness({ modelBaseUrl: stub.baseUrl });
 
