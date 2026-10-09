@@ -11,6 +11,7 @@ memory-crud: supported
 memory-limits-and-preconditions: supported
 memory-version-audit: supported
 memory-multi-mount: supported
+memory-worker-materialization: supported
 -->
 
 ---
@@ -200,6 +201,28 @@ Mounting:
   to a running session is refused, because memories are part of the context the
   session was built with.
 
+Self-hosted worker materialization:
+
+- A worker serving a session with `memory_store` resources materializes each
+  store as a real directory under its workdir at the declared mount path —
+  `<workdir>/mnt/memory/<slug>/` by default — with an
+  `.anthropic-memory-store` marker file in the mount root, the same layout the
+  published worker contract prescribes. The download and every later sync go
+  through the claim's `mawt_` token against the memories routes above.
+- While the worker runs, a reconcile pass executes every 15 seconds
+  (`MANAGED_AGENTS_MEMORY_SYNC_INTERVAL_MS`, floored at 5000): remote edits
+  write to disk, local file edits upload back through `POST`/`DELETE` with
+  `content_sha256` preconditions, and a path edited on both sides resolves in
+  the store's favour. `read_only` attachments pull but never upload — the
+  scope fence would answer `403` anyway. On exit each mount runs one final
+  sync inside a 30-second budget, then the directory and its lock are
+  removed; the API store remains authoritative and the disk copy is
+  disposable.
+- Two workers on one host cannot mount the same store at once — an
+  exclusive-create lock file in the host temp dir carries the claimant's pid —
+  and a Windows host refuses memory mounts outright, matching the published
+  POSIX-only worker memory contract.
+
 ## 3. Alignment
 
 Aligned for: all four published limits, `access` default and values, the
@@ -243,6 +266,14 @@ version auditing.
   `read_write` mount unguarded, an absent provider failing closed, and the
   ContextBuilder searching every bound store while extraction reaches only the
   writable ones.
+- `tests/integration/worker-memory-materialization.test.ts` — the self-hosted
+  half: the `mawt_` scope admits the attached store and refuses the rest
+  (including a read_only write), a mount downloads to
+  `<workdir>/mnt/memory/<slug>/` with the marker, the reconcile syncs both
+  directions and resolves conflicts store-wins, a read_only mount never
+  uploads, the host lock blocks a second mount of one store, a Windows host is
+  refused, and release removes the copy. The end-to-end `worker run` case runs
+  on POSIX CI (skipped on Windows, matching the refused platform).
 - `tests/integration/memory-wiring.test.ts` — the legacy `context_id` memory path
   still injects its own section, so the resource-scoped path did not replace it.
 - `tests/integration/memory-store-list-include-archived.test.ts` — the published

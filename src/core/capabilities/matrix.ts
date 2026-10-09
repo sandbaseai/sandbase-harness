@@ -326,6 +326,13 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
     contract: 'contracts/anthropic-cma/memory-stores.md',
   },
   {
+    area: 'memory-stores',
+    id: 'memory-worker-materialization',
+    status: 'supported',
+    reason: 'A self-hosted worker materializes each attached store as a real directory under its workdir at the declared mount path (canonical /mnt/memory/<slug>), drops the .anthropic-memory-store marker, reconciles it against the memories API on a 15-second interval — remote edits land on disk, local edits upload with content_sha256 preconditions, conflicts resolve store-wins, read_only never uploads — holds a same-store host lock, refuses Windows hosts as the published contract is POSIX-only, and runs one final sync inside a 30-second budget before removing the copy on exit.',
+    contract: 'contracts/anthropic-cma/memory-stores.md',
+  },
+  {
     area: 'github-repository',
     id: 'github-repository-materialization',
     status: 'supported',

@@ -84,6 +84,15 @@ import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
 import { extractSkillZipEntries } from '@/core/skills/skill-zip.js';
+import type { MemoryStoreResourceLike } from '@/core/memory/bindings.js';
+import {
+  DEFAULT_MEMORY_SYNC_INTERVAL_MS,
+  MIN_MEMORY_SYNC_INTERVAL_MS,
+  mountSessionMemoryStores,
+  reconcileMemoryMount,
+  releaseSessionMemoryMounts,
+  type WorkerMemoryMount,
+} from './worker-memory.js';
 
 /** Below this, polling a queue is indistinguishable from hammering the server. */
 const MIN_POLL_INTERVAL_MS = 250;
@@ -363,11 +372,15 @@ export async function loadWorkerTools(toolsPath: string | undefined): Promise<Wo
 export async function workerPollCommand(opts: WorkerPollOptions) {
   const config = resolveWorkerPollOptions(opts);
   const customTools = await loadWorkerTools(config.toolsPath);
-  // Files and skill packages materialize once per session per worker process —
-  // a poll-mode worker may serve many sessions through one workdir.
-  const materializedSessions = new Set<string>();
+  // Files, skill packages, and memory mounts materialize once per session per
+  // worker process — a poll-mode worker may serve many sessions through one
+  // workdir. The reconcile interval and the exit path's final sync both walk
+  // the same mount list.
+  const materialization: SessionMaterialization = { done: new Set<string>(), memoryMounts: [] };
+  const memoryTimer = startMemoryReconcile(materialization.memoryMounts);
   console.log(`Polling self-hosted work as ${config.workerId} in ${config.root}`);
-  for (;;) {
+  try {
+    for (;;) {
     // The claim is the one step that can stop the worker on its own, and until this was
     // wrapped it did - in both directions at once. Unbounded, an unanswered claim parked the
     // process for ever: no item, no report, no second request, and no message, because there
@@ -439,10 +452,11 @@ export async function workerPollCommand(opts: WorkerPollOptions) {
         outcome = {
           status: 'fulfilled',
           value: await renewWhileRunning(config, item.id, async (signal) => {
-            // The session's files and skill packages land under the worker
-            // root the first time a session's work runs here — inside the
-            // heartbeat window so a slow download never lapses the lease.
-            await ensureSessionResources(config, item, materializedSessions);
+            // The session's files, skill packages, and memory mounts land
+            // under the worker root the first time a session's work runs
+            // here — inside the heartbeat window so a slow download never
+            // lapses the lease.
+            await ensureSessionResources(config, item, materialization);
             return executeWorkItem(item, config.root, signal, customTools);
           }),
         };
@@ -473,6 +487,12 @@ export async function workerPollCommand(opts: WorkerPollOptions) {
     }
     if (config.once) return;
     await sleep(config.intervalMs);
+    }
+  } finally {
+    // The published contract syncs a mount one last time before its copy is
+    // removed, so a worker exit cannot strand the agent's latest edits.
+    clearInterval(memoryTimer);
+    await releaseSessionMemoryMounts(materialization.memoryMounts);
   }
 }
 
@@ -1160,11 +1180,15 @@ export async function workerRunCommand(opts: WorkerRunOptions, stdin: Readable =
   config.sessionId = sessionId;
   const customTools = await loadWorkerTools(config.toolsPath);
 
-  // Files and skill packages materialize once per served session, inside the
-  // claim's heartbeat window so a slow download never lapses the lease.
-  const materializedSessions = new Set<string>();
-  const ensureSkills = (item: WorkerItem) => ensureSessionResources(config, item, materializedSessions);
+  // Files, skill packages, and memory mounts materialize once per served
+  // session, inside the claim's heartbeat window so a slow download never
+  // lapses the lease. Memory mounts reconcile on the sync interval while the
+  // worker runs and get their final sync on the way out.
+  const materialization: SessionMaterialization = { done: new Set<string>(), memoryMounts: [] };
+  const ensureSkills = (item: WorkerItem) => ensureSessionResources(config, item, materialization);
+  const memoryTimer = startMemoryReconcile(materialization.memoryMounts);
 
+  try {
   // The item the poller claimed arrives on stdin. When stdin is a TTY there is
   // no handed item — the loop below serves the session from the queue.
   const handed = await readStdinItem(stdin);
@@ -1210,6 +1234,10 @@ export async function workerRunCommand(opts: WorkerRunOptions, stdin: Readable =
     if (await sessionHasEnded(config, sessionId, workSecret)) return;
     if (Date.now() - idleSince >= maxIdleMs) return;
     await sleep(config.intervalMs);
+  }
+  } finally {
+    clearInterval(memoryTimer);
+    await releaseSessionMemoryMounts(materialization.memoryMounts);
   }
 }
 
@@ -1320,6 +1348,10 @@ const MAX_SKILL_PACKAGE_BYTES = 8 * 1024 * 1024;
  * exactly those. An unpinned skill reference resolves through the `latest`
  * alias the route accepts, pinned references fetch their exact version.
  *
+ * Attached memory stores materialize the same way — a real directory under
+ * `<root>/mnt/memory/<mount_path>/` per store, reconciled against the API on
+ * the worker's sync interval and flushed once more when the worker exits.
+ *
  * A worker without a forwarded secret skips materialization — it has no
  * credential with which to ask. A download failure throws: a session whose
  * declared resources cannot be materialized is running against a different
@@ -1329,8 +1361,9 @@ const MAX_SKILL_PACKAGE_BYTES = 8 * 1024 * 1024;
 async function materializeSessionResources(
   config: ResolvedWorkerPollOptions,
   item: WorkerItem,
+  memoryMounts: WorkerMemoryMount[],
 ): Promise<void> {
-  const token = sessionsTokenFromSecret(item.secret);
+  const token = sessionsTokenFromSecret(item.secret ?? process.env.MANAGED_AGENTS_WORK_SECRET);
   const sessionId = item.session_id ?? item.sessionId ?? config.sessionId;
   if (!token || !sessionId) return;
 
@@ -1387,22 +1420,85 @@ async function materializeSessionResources(
       if (entry.executable && process.platform !== 'win32') chmodSync(target, 0o755);
     }
   }
+
+  // Attached memory stores become real directories under the worker root at
+  // their declared mount paths (the canonical `/mnt/memory/<slug>` by
+  // default), synced back to the API by the reconcile loop the worker process
+  // runs for as long as it serves the session.
+  memoryMounts.push(
+    ...(await mountSessionMemoryStores(
+      {
+        baseUrl: config.baseUrl,
+        sessionToken: token,
+        root: config.root,
+        requestTimeoutMs: config.claimTimeoutMs,
+      },
+      resources as MemoryStoreResourceLike[],
+    )),
+  );
 }
 
 /**
- * Materialize a session's files and skill packages at most once per worker
- * process, keyed by session so a poll-mode worker serving many sessions does
- * not re-download on every item.
+ * The per-process record of what a worker has materialized: which sessions are
+ * done (files + skill packages + memory mounts) and the live memory mounts the
+ * reconcile interval and the exit path operate on.
+ */
+interface SessionMaterialization {
+  done: Set<string>;
+  memoryMounts: WorkerMemoryMount[];
+}
+
+/**
+ * Materialize a session's files, skill packages, and memory mounts at most
+ * once per worker process, keyed by session so a poll-mode worker serving
+ * many sessions does not re-download on every item.
  */
 async function ensureSessionResources(
   config: ResolvedWorkerPollOptions,
   item: WorkerItem,
-  done: Set<string>,
+  state: SessionMaterialization,
 ): Promise<void> {
   const sessionId = item.session_id ?? item.sessionId ?? config.sessionId;
-  if (!sessionId || done.has(sessionId)) return;
-  await materializeSessionResources(config, item);
-  done.add(sessionId);
+  if (!sessionId || state.done.has(sessionId)) return;
+  await materializeSessionResources(config, item, state.memoryMounts);
+  state.done.add(sessionId);
+}
+
+/** The sync interval mounts reconcile on — the published 15 s, floored at 5 s. */
+function memorySyncIntervalMs(): number {
+  const raw = Number(process.env.MANAGED_AGENTS_MEMORY_SYNC_INTERVAL_MS ?? '');
+  if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_MEMORY_SYNC_INTERVAL_MS;
+  return Math.max(MIN_MEMORY_SYNC_INTERVAL_MS, raw);
+}
+
+/**
+ * Start the background reconcile loop for the mounts a worker accumulates.
+ * Mounts may appear after the interval starts — a poll-mode worker serves
+ * sessions one claim at a time — so the timer is armed up front and walks
+ * whatever the array currently holds. `syncing` keeps a slow pass from
+ * overlapping the next tick.
+ */
+function startMemoryReconcile(mounts: WorkerMemoryMount[]): NodeJS.Timeout {
+  let syncing = false;
+  const timer = setInterval(() => {
+    if (syncing) return;
+    syncing = true;
+    void (async () => {
+      for (const mount of mounts) {
+        try {
+          await reconcileMemoryMount(mount.config, mount);
+        } catch (error) {
+          console.warn(
+            `memory sync: ${mount.storeId} reconcile failed: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+      }
+    })().finally(() => {
+      syncing = false;
+    });
+  }, memorySyncIntervalMs());
+  timer.unref?.();
+  return timer;
 }
 
 function safePath(root: string, value: string): string {

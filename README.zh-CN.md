@@ -172,6 +172,7 @@ node dist/index.js start --host 0.0.0.0
 | memory-stores | `memory-limits-and-preconditions` | Supported |  |
 | memory-stores | `memory-version-audit` | Supported |  |
 | memory-stores | `memory-multi-mount` | Supported |  |
+| memory-stores | `memory-worker-materialization` | Supported |  |
 | github-repository | `github-repository-materialization` | Supported |  |
 | github-repository | `github-repository-identity-freeze` | Supported |  |
 | files | `file-resources` | Supported |  |

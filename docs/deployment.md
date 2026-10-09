@@ -348,6 +348,22 @@ on extraction. A worker launched without a `secret` skips materialization,
 and a resource that cannot be fetched fails the item rather than letting it
 run short a declared file or skill.
 
+Attached `memory_store` resources get the same treatment, as real directories
+rather than API proxies: each store materializes under the worker root at its
+declared mount path (the canonical `/mnt/memory/<slug>` by default, so
+`<workdir>/mnt/memory/<slug>/`) with an `.anthropic-memory-store` marker file
+in the root. While the worker serves the session a reconcile pass runs every
+15 seconds (`MANAGED_AGENTS_MEMORY_SYNC_INTERVAL_MS`, floored at 5000): remote
+edits write to disk, local file edits upload back through the memories API
+with `content_sha256` preconditions, and a conflict resolves in the store's
+favour. `read_only` attachments pull but never upload — the scope fence would
+refuse their writes anyway. Two workers on one host cannot mount the same
+store at once (an exclusive lock file in the temp dir enforces it), Windows
+hosts refuse memory mounts entirely as the published contract is POSIX-only,
+and on exit each mount runs one final sync within a 30-second budget before
+its directory and lock are removed — the API store stays authoritative, the
+disk copy is disposable.
+
 A copyable reference implementation of both halves — the `spawn-docker.sh`
 handler that wraps `docker run` and a `webhook-handler.mjs` that starts the
 poller on `session.status_run_started` instead of running one always — lives
