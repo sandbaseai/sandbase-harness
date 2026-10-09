@@ -33,6 +33,8 @@ function fakeSink() {
       },
       getLatestSeq: () => seq,
       recordUsage: () => undefined,
+      recordAuxiliaryModelUsage: (_sessionId, _usage, _options) =>
+        ({ id: 'sevt_aux', sessionId: 'sess_pi_fixture', seq: ++seq, type: 'span.model_request_end', createdAt: new Date() } as SessionEvent),
     },
     broadcast: (event) => broadcasts.push(event),
     recordUsage: (sessionId, input, output) => usage.push([sessionId, input, output]),

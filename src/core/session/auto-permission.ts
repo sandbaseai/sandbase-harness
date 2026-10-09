@@ -16,7 +16,7 @@
  */
 
 import { generateText, type LanguageModel } from 'ai';
-import type { AutoPermissionCall, AutoPermissionVerdict } from '@/types/strategy.js';
+import type { AutoPermissionCall, AutoPermissionVerdict, AuxiliaryModelUsage } from '@/types/strategy.js';
 
 /** Registry-bound grounds an `ask` verdict reports on the event. */
 export const AUTO_PERMISSION_REASON_INDETERMINATE = 'indeterminate';
@@ -26,7 +26,7 @@ export const AUTO_PERMISSION_REASON_HIGH_RISK = 'high_risk';
 /** The evaluation outcome plus the request's usage for session accounting. */
 export interface AutoPermissionEvaluation {
   verdict: AutoPermissionVerdict;
-  usage?: { inputTokens: number; outputTokens: number };
+  usage?: AuxiliaryModelUsage;
 }
 
 export type AutoPermissionEvaluationFn = (
@@ -55,19 +55,10 @@ export function createAutoPermissionEvaluator(model: LanguageModel): AutoPermiss
         temperature: 0,
         prompt: evaluationPrompt(call),
       });
-      const usage = response.usage as
-        | { inputTokens?: number; outputTokens?: number }
-        | undefined;
+      const usage = response.usage as AuxiliaryModelUsage | undefined;
       return {
         verdict: parseVerdict(response.text),
-        ...(usage
-          ? {
-              usage: {
-                inputTokens: usage.inputTokens ?? 0,
-                outputTokens: usage.outputTokens ?? 0,
-              },
-            }
-          : {}),
+        ...(usage ? { usage } : {}),
       };
     } catch {
       // An unavailable judge is not evidence the call is safe.

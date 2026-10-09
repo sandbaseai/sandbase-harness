@@ -250,11 +250,14 @@ export class DefaultStrategy implements AgentStrategy {
               return await config.evaluateToolPermission(call);
             }
             const evaluation = await createAutoPermissionEvaluator(model)(call);
-            // The judge's request is a model request too, so its usage joins
-            // the session's canonical aggregate the same way a step's does.
-            if (evaluation.usage) {
-              eventLog.recordUsage(session.id, evaluation.usage.inputTokens, evaluation.usage.outputTokens);
-            }
+            // The judge's request is a model request too, so it records the
+            // same canonical pair a turn-end span does: the event for the
+            // request plus the session-aggregate update.
+            const usageEvent = eventLog.recordAuxiliaryModelUsage(session.id, evaluation.usage, {
+              purpose: 'auto_permission',
+              modelUsed,
+            });
+            broadcast(usageEvent);
             return evaluation.verdict;
           } catch {
             // A judge that cannot answer fails closed to the approval gate.

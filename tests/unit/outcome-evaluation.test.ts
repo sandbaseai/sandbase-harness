@@ -80,6 +80,32 @@ describe('runOutcomeEvaluation', () => {
     expect(appended.at(-1)?.metadata.result).toBe('needs_revision');
   });
 
+  it('records the grading request’s usage before publishing the verdict', async () => {
+    const { appended, logger } = appendSpy();
+    const recorded: unknown[] = [];
+    const evaluation = await runOutcomeEvaluation({
+      ...request,
+      grader: {
+        grade: async () => ({
+          result: 'satisfied',
+          explanation: 'ok',
+          usage: { input_tokens: 12, output_tokens: 4, cache_read_input_tokens: 3 },
+        }),
+      },
+      logger: { ...logger, recordModelUsage: (usage) => recorded.push(usage) },
+      readTranscript: () => 'assistant: done',
+    });
+
+    expect(evaluation.result).toBe('satisfied');
+    expect(recorded).toEqual([{ input_tokens: 12, output_tokens: 4, cache_read_input_tokens: 3 }]);
+    // The verdict span still carries the usage it published, unchanged.
+    expect(appended.at(-1)?.metadata.usage).toEqual({
+      input_tokens: 12,
+      output_tokens: 4,
+      cache_read_input_tokens: 3,
+    });
+  });
+
   it('closes the evaluation when the grader throws, then propagates the failure', async () => {
     const { appended, logger } = appendSpy();
     await expect(runOutcomeEvaluation({

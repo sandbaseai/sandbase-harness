@@ -433,6 +433,7 @@ export class PiStrategy implements AgentStrategy, LoopEngineSteering {
       append: (target, event) => eventLog.append(target, event),
       getLatestSeq: (target) => eventLog.getLatestSeq(target),
       recordUsage: (target, tokensIn, tokensOut, cache) => eventLog.recordUsage(target, tokensIn, tokensOut, cache),
+      recordAuxiliaryModelUsage: (target, usage, options) => eventLog.recordAuxiliaryModelUsage(target, usage, options),
       broadcast: (event) => context.broadcast(event),
       spillToolOutput: async (output) => {
         const spill = await spillToolOutput(output, {

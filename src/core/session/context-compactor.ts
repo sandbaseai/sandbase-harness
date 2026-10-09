@@ -19,6 +19,7 @@
 
 import { generateText, type LanguageModel } from 'ai';
 import type { SessionEvent } from '@/types/session.js';
+import type { AuxiliaryModelUsage } from '@/types/strategy.js';
 import type { Message } from './events-to-messages.js';
 import { anthropicModelCapabilities } from '@/model/anthropic-capabilities.js';
 
@@ -69,6 +70,11 @@ export interface CompactionResult {
   tokensAfter: number;
   /** How many trailing atomic groups are preserved verbatim. */
   preservedGroupCount: number;
+  /**
+   * The summarize request's usage, so the caller can persist the canonical
+   * usage record the way a turn does.
+   */
+  usage?: AuxiliaryModelUsage;
 }
 
 export interface CompactorConfig {
@@ -192,7 +198,7 @@ export class ContextCompactor {
       (priorBoundary ? Math.ceil(priorBoundary.summary.length / 4) : 0) +
       groups.reduce((sum, group) => sum + group.tokens, 0);
 
-    const { text } = await generateText({
+    const response = await generateText({
       model,
       // Retries belong to the registry's middleware, not a second layer here.
       maxRetries: 0,
@@ -200,7 +206,7 @@ export class ContextCompactor {
       prompt: `Summarize this conversation:\n\n${transcript}`,
     });
 
-    const summary = text.trim();
+    const summary = response.text.trim();
     const tokensAfter = Math.ceil(summary.length / 4) + keptTokens;
 
     return {
@@ -210,6 +216,7 @@ export class ContextCompactor {
       tokensBefore,
       tokensAfter,
       preservedGroupCount: groups.length - startIdx,
+      usage: response.usage,
     };
   }
 }

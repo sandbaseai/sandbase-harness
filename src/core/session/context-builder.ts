@@ -196,6 +196,13 @@ export class ContextBuilder {
         // this store existed.
         const legacy = await this.deps.compactor.compact(events, null, model as any, window);
         if (legacy) {
+          // The summarize call is a model request like any other, so it gets
+          // the canonical span-plus-aggregate record a turn-end span carries.
+          const usageEvent = this.deps.eventLogger.recordAuxiliaryModelUsage(session.id, legacy.usage, {
+            purpose: 'context_compaction',
+            modelUsed: modelId,
+          });
+          broadcast(usageEvent);
           const boundary = this.deps.eventLogger.append(session.id, {
             type: 'agent.thread_context_compacted',
             content: [{ type: 'text', text: legacy.summary }],
@@ -206,6 +213,11 @@ export class ContextBuilder {
       }
       const result = await this.deps.compactor.compact(events, prior ?? null, model as any, window);
       if (result) {
+        const usageEvent = this.deps.eventLogger.recordAuxiliaryModelUsage(session.id, result.usage, {
+          purpose: 'context_compaction',
+          modelUsed: modelId,
+        });
+        broadcast(usageEvent);
         const notification = this.deps.eventLogger.append(session.id, {
           type: 'agent.thread_context_compacted',
         });
@@ -287,13 +299,16 @@ export class ContextBuilder {
 
 /**
  * Current context size measured from real usage rather than estimated: the
- * last `span.model_request_end` reports what the model actually received
- * (`tokens_in + cache_read + cache_write`), and only the events appended
- * after it need the chars/4 estimate. Returns undefined when no completed
- * request exists to anchor on — the first turn must not count empty — or when
- * the last request predates the compaction boundary: its usage counted
- * history the boundary already summarized, so it can no longer stand in for
- * the current context.
+ * last turn's `span.model_request_end` reports what the model actually
+ * received (`tokens_in + cache_read + cache_write`), and only the events
+ * appended after it need the chars/4 estimate. Auxiliary request spans —
+ * marked `metadata.auxiliary` — never anchor: a compaction summary or a
+ * grading pass carries the transcript rather than the working context, so
+ * its input is not what the next turn sends. Returns undefined when no
+ * completed turn request exists to anchor on — the first turn must not count
+ * empty — or when the last request predates the compaction boundary: its
+ * usage counted history the boundary already summarized, so it can no
+ * longer stand in for the current context.
  */
 function measuredContextTokens(
   events: SessionEvent[],
@@ -301,7 +316,10 @@ function measuredContextTokens(
 ): number | undefined {
   let lastRequestEnd: SessionEvent | undefined;
   for (const event of events) {
-    if (event.type === 'span.model_request_end') lastRequestEnd = event;
+    // Auxiliary requests — a compaction summary, an outcome grade, a
+    // permission judgement — carry the whole transcript or the session's own
+    // text, so anchoring on one would measure the wrong context.
+    if (event.type === 'span.model_request_end' && !event.metadata?.auxiliary) lastRequestEnd = event;
   }
   if (!lastRequestEnd) return undefined;
   if (boundarySeq !== undefined && lastRequestEnd.seq <= boundarySeq) {

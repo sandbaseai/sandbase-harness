@@ -8,7 +8,7 @@
  */
 
 import { nanoid } from 'nanoid';
-import type { EventLogWriter } from '@/types/strategy.js';
+import type { AuxiliaryModelUsage, EventLogWriter } from '@/types/strategy.js';
 import type { SessionEvent } from '@/types/session.js';
 
 export class InMemoryEventLog implements EventLogWriter {
@@ -51,6 +51,22 @@ export class InMemoryEventLog implements EventLogWriter {
     _cache?: { read?: number; write?: number },
   ): void {
     // Ephemeral delegated sessions have no durable session aggregate.
+  }
+
+  recordAuxiliaryModelUsage(
+    sessionId: string,
+    usage: AuxiliaryModelUsage | undefined,
+    options: { purpose: string; modelUsed?: string; durationMs?: number },
+  ): SessionEvent {
+    return this.append(sessionId, {
+      type: 'span.model_request_end',
+      tokensIn: usage?.inputTokens ?? 0,
+      tokensOut: usage?.outputTokens ?? 0,
+      modelUsed: options.modelUsed,
+      durationMs: options.durationMs,
+      isError: false,
+      metadata: { auxiliary: options.purpose },
+    });
   }
 
   getEvents(): SessionEvent[] {

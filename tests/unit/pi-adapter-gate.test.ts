@@ -52,6 +52,8 @@ const sink: LoopEngineEventSink = {
   append: (_sessionId, event) => ({ id: 'sevt_1', sessionId: SESSION_ID, seq: 1, type: event.type, createdAt: new Date() } as unknown as SessionEvent),
   getLatestSeq: () => 0,
   recordUsage: () => {},
+  recordAuxiliaryModelUsage: (_sessionId, _usage, _options) =>
+    ({ id: 'sevt_1', sessionId: SESSION_ID, seq: 1, type: 'span.model_request_end', createdAt: new Date() } as unknown as SessionEvent),
   broadcast: () => {},
   spillToolOutput: async (output) => output,
 };

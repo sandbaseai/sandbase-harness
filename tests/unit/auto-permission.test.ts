@@ -77,7 +77,7 @@ describe('createAutoPermissionEvaluator', () => {
     const evaluation = await evaluate(call);
 
     expect(evaluation.verdict).toEqual({ type: 'deny', reasonCode: AUTO_PERMISSION_REASON_HIGH_RISK });
-    expect(evaluation.usage).toEqual({ inputTokens: 5, outputTokens: 3 });
+    expect(evaluation.usage).toMatchObject({ inputTokens: 5, outputTokens: 3 });
   });
 
   it('grants allow only on an explicit allow', async () => {

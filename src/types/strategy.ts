@@ -236,6 +236,34 @@ export interface EventLogWriter {
     tokensOut: number,
     cache?: { read?: number; write?: number },
   ): void;
+  /**
+   * Persist the canonical usage record for one model request that ran outside
+   * the streamed turn — a compaction summary, an outcome grading pass, a
+   * permission judgement — as the same `span.model_request_end` plus session
+   * aggregate a turn-end span produces. The span is marked
+   * `metadata.auxiliary` with the request's purpose and carries no paired
+   * `span.model_request_start`.
+   */
+  recordAuxiliaryModelUsage(
+    sessionId: string,
+    usage: AuxiliaryModelUsage | undefined,
+    options: { purpose: string; modelUsed?: string; durationMs?: number },
+  ): SessionEvent;
+}
+
+/**
+ * The usage one auxiliary model request reported, in the AI SDK's flat shape:
+ * `inputTokens` is the provider's input total and the cache buckets live in
+ * `inputTokenDetails`.
+ */
+export interface AuxiliaryModelUsage {
+  inputTokens?: number;
+  inputTokenDetails?: {
+    noCacheTokens?: number;
+    cacheReadTokens?: number;
+    cacheWriteTokens?: number;
+  };
+  outputTokens?: number;
 }
 
 // ============================================================

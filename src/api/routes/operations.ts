@@ -20,6 +20,7 @@ import {
 import { nextCronRun, runDueScheduledDeployments, runSchedule, type ScheduleRow } from '@/core/operations/scheduler.js';
 import { isValidTimeZone } from '@/core/operations/cron.js';
 import { evaluateDeterministicOutcome, type OutcomeEvaluationInput, type OutcomeEvaluationResult } from '@/core/operations/outcome-evaluator.js';
+import { EventLogger } from '@/core/session/event-logger.js';
 import { archiveById, invalid, notFound, now, objectField, parseObject, readObjectBody, stringField, type OperationMountOptions } from './operation-helpers.js';
 import { deploymentRoutes } from './deployments.js';
 import { webhookSigningSecret } from './operation-events.js';
@@ -396,6 +397,7 @@ export function operationsRoutes(deps: ServerDeps, options: OperationsRoutesOpti
       passThreshold: outcomeThreshold(outcome),
       evaluator: outcomeEvaluator(outcome),
     });
+    persistEvaluatedUsage(deps, sessionId, result);
     const id = `sout_${nanoid(18)}`;
     deps.db.prepare(`
       INSERT INTO session_outcomes (id, session_id, outcome_id, status, score, summary, details, created_at)
@@ -580,6 +582,31 @@ async function evaluateOutcome(deps: ServerDeps, input: OutcomeEvaluationInput):
     };
   }
   return evaluateDeterministicOutcome(input);
+}
+
+/**
+ * The evaluator's scoring call is a model request like any other, so it
+ * records the same canonical pair a turn-end span does: the
+ * `span.model_request_end` event for the request plus the session-aggregate
+ * update. The details' `model_usage` already carries the split buckets; the
+ * map back into `inputTokenDetails` keeps `recordAuxiliaryModelUsage` the
+ * single splitter.
+ */
+function persistEvaluatedUsage(deps: ServerDeps, sessionId: string, result: OutcomeEvaluationResult): void {
+  const usage = result.details.model_usage;
+  if (!usage || typeof usage !== 'object') return;
+  const buckets = usage as Record<string, unknown>;
+  const input = typeof buckets.input_tokens === 'number' ? buckets.input_tokens : 0;
+  const cacheRead = typeof buckets.cache_read_input_tokens === 'number' ? buckets.cache_read_input_tokens : 0;
+  const cacheWrite = typeof buckets.cache_creation_input_tokens === 'number' ? buckets.cache_creation_input_tokens : 0;
+  new EventLogger(deps.db).recordAuxiliaryModelUsage(sessionId, {
+    inputTokens: input,
+    inputTokenDetails: { noCacheTokens: input, cacheReadTokens: cacheRead, cacheWriteTokens: cacheWrite },
+    outputTokens: typeof buckets.output_tokens === 'number' ? buckets.output_tokens : 0,
+  }, {
+    purpose: 'outcome_evaluation',
+    modelUsed: typeof result.details.model === 'string' ? result.details.model : undefined,
+  });
 }
 
 function parseUnknownArray(value: string | null): unknown[] {

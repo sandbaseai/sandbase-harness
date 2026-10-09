@@ -1,5 +1,7 @@
 import { generateText } from 'ai';
 import type { ModelRegistry } from '@/model/registry.js';
+import type { AuxiliaryModelUsage } from '@/types/strategy.js';
+import { splitModelRequestUsage } from '@/strategy/model-usage.js';
 
 export type OutcomeEvaluationInput = {
   transcript: string;
@@ -83,11 +85,24 @@ export function createModelAssistedOutcomeEvaluator(modelRegistry: ModelRegistry
           model: modelName,
           pass_threshold: input.passThreshold,
           checks: Array.isArray(parsed.checks) ? parsed.checks : [],
+          // The scoring request's usage in the same buckets a turn-end span
+          // reports, so the route can persist the canonical usage record.
+          model_usage: toUsageBuckets(response.usage),
         },
       };
     } catch (err: any) {
       return unsupportedModelEvaluator(input, err?.message ?? String(err));
     }
+  };
+}
+
+function toUsageBuckets(usage: AuxiliaryModelUsage | undefined): Record<string, number> {
+  const { input, cacheRead, cacheWrite } = splitModelRequestUsage(usage);
+  return {
+    input_tokens: input,
+    output_tokens: usage?.outputTokens ?? 0,
+    cache_read_input_tokens: cacheRead,
+    cache_creation_input_tokens: cacheWrite,
   };
 }
 

@@ -133,6 +133,8 @@ function harness(options: {
       },
       getLatestSeq: () => sequence,
       recordUsage: (_sessionId: string, tokensIn: number, tokensOut: number) => usage.push([tokensIn, tokensOut]),
+      recordAuxiliaryModelUsage: (_sessionId, _usage, _options) =>
+        ({ id: `sevt_${++sequence}`, sessionId: SESSION_ID, seq: sequence, type: 'span.model_request_end', createdAt: new Date() } as unknown as SessionEvent),
       broadcast: (event: SessionEvent) => broadcasts.push(event),
       spillToolOutput: async (output: string) => output,
     },
@@ -393,6 +395,8 @@ describe('Pi RPC session release', () => {
         append: (_sessionId, event) => ({ id: 'sevt_1', sessionId: SESSION_ID, seq: 1, type: event.type, createdAt: new Date() } as unknown as SessionEvent),
         getLatestSeq: () => 0,
         recordUsage: () => {},
+        recordAuxiliaryModelUsage: (_sessionId, _usage, _options) =>
+          ({ id: 'sevt_1', sessionId: SESSION_ID, seq: 1, type: 'span.model_request_end', createdAt: new Date() } as unknown as SessionEvent),
         broadcast: () => {},
         spillToolOutput: async (output) => output,
       },

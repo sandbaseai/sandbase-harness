@@ -9,6 +9,8 @@ import { nanoid } from 'nanoid';
 import type { Database } from '@/core/db/database.js';
 import type { SessionEvent } from '@/types/session.js';
 import type { CMAEventType, ContentBlock } from '@/types/cma-protocol.js';
+import type { AuxiliaryModelUsage } from '@/types/strategy.js';
+import { splitModelRequestUsage } from '@/strategy/model-usage.js';
 
 export class EventLogger {
   constructor(private readonly db: Database) {}
@@ -202,6 +204,40 @@ export class EventLogger {
           updated_at = datetime('now')
       WHERE id = ?
     `).run(tokensIn, tokensOut, cache?.read ?? 0, cache?.write ?? 0, sessionId);
+  }
+
+  /**
+   * Persist the canonical usage record for one model request that ran outside
+   * the streamed turn — a compaction summary, an outcome grading pass, a
+   * permission judgement — in one call: the `span.model_request_end` event
+   * plus the session-aggregate update `recordUsage` performs.
+   *
+   * The span carries `metadata.auxiliary` naming the request's purpose and
+   * has no paired `span.model_request_start`: these calls are not streamed as
+   * turns, so the pair the wire projection expects is absent by design. The
+   * marker also keeps context measurement from anchoring on a request that
+   * carried the whole transcript.
+   */
+  recordAuxiliaryModelUsage(
+    sessionId: string,
+    usage: AuxiliaryModelUsage | undefined,
+    options: { purpose: string; modelUsed?: string; durationMs?: number },
+  ): SessionEvent {
+    const { input, cacheRead, cacheWrite } = splitModelRequestUsage(usage);
+    const tokensOut = usage?.outputTokens ?? 0;
+    const event = this.append(sessionId, {
+      type: 'span.model_request_end',
+      tokensIn: input,
+      tokensOut,
+      cacheReadTokens: cacheRead,
+      cacheWriteTokens: cacheWrite,
+      modelUsed: options.modelUsed,
+      durationMs: options.durationMs,
+      isError: false,
+      metadata: { auxiliary: options.purpose },
+    });
+    this.recordUsage(sessionId, input, tokensOut, { read: cacheRead, write: cacheWrite });
+    return event;
   }
 }
 

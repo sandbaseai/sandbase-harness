@@ -14,6 +14,7 @@
 
 import { generateText } from 'ai';
 import type { ModelRegistry } from '@/model/registry.js';
+import { splitModelRequestUsage } from '@/strategy/model-usage.js';
 
 export type OutcomeGradeResult = 'satisfied' | 'needs_revision' | 'failed';
 
@@ -43,15 +44,23 @@ export interface OutcomeGradeInput {
   model?: string;
 }
 
+/**
+ * The scoring request's usage in the same buckets a `span.model_request_end`
+ * reports: `input_tokens` is the uncached share and the prompt-cache buckets
+ * travel separately.
+ */
+export interface OutcomeGradeUsage {
+  input_tokens: number;
+  output_tokens: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+}
+
 export interface OutcomeGrade {
   result: OutcomeGradeResult;
   /** Why the criteria passed or failed — the loop feeds this back to the agent. */
   explanation: string;
-  usage?: {
-    input_tokens: number;
-    output_tokens: number;
-    cache_read_input_tokens?: number;
-  };
+  usage?: OutcomeGradeUsage;
 }
 
 export interface OutcomeGrader {
@@ -123,22 +132,18 @@ export function createModelOutcomeGrader(modelRegistry: ModelRegistry): OutcomeG
       }
 
       const parsed = parseGradeResponse(response.text);
-      const usage = response.usage as {
-        inputTokens?: number;
-        outputTokens?: number;
-        cachedInputTokens?: number;
-      } | undefined;
+      const usage = response.usage;
+      const { input: uncachedInput, cacheRead, cacheWrite } = splitModelRequestUsage(usage);
       return {
         result: parsed.result,
         explanation: parsed.explanation,
         ...(usage
           ? {
               usage: {
-                input_tokens: usage.inputTokens ?? 0,
+                input_tokens: uncachedInput,
                 output_tokens: usage.outputTokens ?? 0,
-                ...(typeof usage.cachedInputTokens === 'number'
-                  ? { cache_read_input_tokens: usage.cachedInputTokens }
-                  : {}),
+                ...(cacheRead > 0 ? { cache_read_input_tokens: cacheRead } : {}),
+                ...(cacheWrite > 0 ? { cache_creation_input_tokens: cacheWrite } : {}),
               },
             }
           : {}),

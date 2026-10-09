@@ -113,6 +113,40 @@ describe('declared outcome grading', () => {
     expect(events.some((event) => event.type === 'user.message')).toBe(false);
   });
 
+  it('persists the grading request’s usage as a canonical model-request record', async () => {
+    manager.setOutcomeGrader({
+      grade: async () => ({
+        result: 'satisfied',
+        explanation: 'Met.',
+        usage: { input_tokens: 12, output_tokens: 4, cache_read_input_tokens: 3, cache_creation_input_tokens: 2 },
+      }),
+    });
+
+    const session = await runDeclaredOutcome();
+    const events = manager.getEventLogger().getEvents(session.id);
+
+    // The grading call is a model request like any other: it leaves an
+    // auxiliary-marked end span before the verdict is published, and the same
+    // buckets land in the session aggregate.
+    const usageSpan = events.find(
+      (event) => event.type === 'span.model_request_end' && event.metadata?.auxiliary === 'outcome_evaluation',
+    );
+    expect(usageSpan).toBeDefined();
+    expect(usageSpan!.tokensIn).toBe(12);
+    expect(usageSpan!.tokensOut).toBe(4);
+    expect(usageSpan!.cacheReadTokens).toBe(3);
+    expect(usageSpan!.cacheWriteTokens).toBe(2);
+    const endSeq = events.find((event) => event.type === 'span.outcome_evaluation_end')!.seq;
+    expect(usageSpan!.seq).toBeLessThan(endSeq);
+
+    const row = db.prepare(
+      `SELECT usage_tokens_in AS i, usage_tokens_out AS o,
+              usage_cache_read_tokens AS r, usage_cache_write_tokens AS w
+       FROM sessions WHERE id = ?`,
+    ).get(session.id) as { i: number; o: number; r: number; w: number };
+    expect(row).toEqual({ i: 12, o: 4, r: 3, w: 2 });
+  });
+
   it('assigns the outcome_id at admission and joins declaration, spans, and projection on it', async () => {
     manager.setOutcomeGrader({
       grade: async () => ({ result: 'satisfied', explanation: 'Met.' }),

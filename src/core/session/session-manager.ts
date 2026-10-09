@@ -1821,6 +1821,21 @@ export class SessionManager {
           this.broadcast(sessionId, logged);
           return logged;
         },
+        recordModelUsage: (usage) => {
+          // The grade's `input_tokens` is already the uncached share, so the
+          // detail map re-splits it back to itself; the helper stays the
+          // single place that decides what counts as uncached input.
+          const logged = this.eventLogger.recordAuxiliaryModelUsage(sessionId, {
+            inputTokens: usage.input_tokens,
+            inputTokenDetails: {
+              noCacheTokens: usage.input_tokens,
+              cacheReadTokens: usage.cache_read_input_tokens,
+              cacheWriteTokens: usage.cache_creation_input_tokens,
+            },
+            outputTokens: usage.output_tokens,
+          }, { purpose: 'outcome_evaluation' });
+          this.broadcast(sessionId, logged);
+        },
       },
       appendRevision: (text) => {
         revision = text;

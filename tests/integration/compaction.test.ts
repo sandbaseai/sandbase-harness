@@ -125,6 +125,18 @@ describe('Compaction during execution', () => {
     expect(row!.summary).toContain('SUMMARY');
     expect(row!.compacted_event_id).toBe(boundary!.id);
 
+    // The summarize call is a model request like any other: it leaves an
+    // auxiliary-marked end span and lands in the session aggregate.
+    const auxSpan = events.find(
+      (e) => e.type === 'span.model_request_end' && e.metadata?.auxiliary === 'context_compaction',
+    );
+    expect(auxSpan).toBeDefined();
+    const usageRow = db
+      .prepare('SELECT usage_tokens_in AS i, usage_tokens_out AS o FROM sessions WHERE id = ?')
+      .get(session.id) as { i: number; o: number };
+    expect(usageRow.i).toBe(auxSpan!.tokensIn);
+    expect(usageRow.o).toBe(auxSpan!.tokensOut);
+
     // The preserved tail survives: the projection the strategy received is
     // summary + the newest group only.
     expect(strategy.lastMessageCount).toBe(2);
@@ -333,6 +345,33 @@ describe('Compaction during execution', () => {
       logger.append(session.id, {
         type: 'span.model_request_end',
         tokensIn: 100,
+      });
+      await manager.sendEvent(session.id, {
+        type: 'user.message',
+        content: [{ type: 'text', text: 'next' }],
+      } as any);
+      expect(await boundaryRow(session.id)).toBeUndefined();
+    });
+
+    it('never measures context from an auxiliary request span', async () => {
+      // The 100-token turn end is the only eligible anchor: if the 999,999-token
+      // auxiliary span after it could anchor, the measurement would sit far over
+      // the 800-token trigger and compact history that fits.
+      manager.setExecutor(executorFor(
+        new ContextCompactor({ contextWindowTokens: 1000, triggerFraction: 0.8, preserveBudgetTokens: 15 }),
+        fakeModel('anthropic.messages', 'claude-opus-4-5'),
+      ));
+      const session = manager.create({ agent: 'agent_big' });
+      const logger = manager.getEventLogger();
+      logger.append(session.id, {
+        type: 'user.message',
+        content: [{ type: 'text', text: 'old ' + 'x'.repeat(200) }],
+      });
+      logger.append(session.id, { type: 'span.model_request_end', tokensIn: 100 });
+      logger.append(session.id, {
+        type: 'span.model_request_end',
+        tokensIn: 999_999,
+        metadata: { auxiliary: 'context_compaction' },
       });
       await manager.sendEvent(session.id, {
         type: 'user.message',
