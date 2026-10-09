@@ -231,7 +231,7 @@ describe('Credential update', () => {
         type: 'mcp_oauth',
         access_token: 'new-access-token',
         expires_at: '2027-01-01T00:00:00Z',
-        refresh: { token_endpoint: 'https://auth.example.com/token', client_id: 'c1', refresh_token: 'rt' },
+        refresh: { token_endpoint: 'https://auth.example.com/token', client_id: 'c1', refresh_token: 'refresh-token-under-test' },
       },
     });
 
@@ -241,7 +241,7 @@ describe('Credential update', () => {
     expect(res.body!.auth.expires_at).toBe('2027-01-01T00:00:00.000Z');
     expect(res.body!.auth.refresh.token_endpoint).toBe('https://auth.example.com/token');
     expect(res.body!.auth.refresh.has_refresh_token).toBe(true);
-    expect(JSON.stringify(res.body)).not.toContain('rt');
+    expect(JSON.stringify(res.body)).not.toContain('refresh-token-under-test');
   });
 
   it('refuses a refresh patch that repoints the locked endpoint or client', async () => {
@@ -252,7 +252,7 @@ describe('Credential update', () => {
         type: 'mcp_oauth',
         mcp_server_url: 'https://mcp.example.com',
         access_token: 'oauth-secret',
-        refresh: { token_endpoint: 'https://auth.example.com/token', client_id: 'c1', refresh_token: 'rt' },
+        refresh: { token_endpoint: 'https://auth.example.com/token', client_id: 'c1', refresh_token: 'refresh-token-under-test' },
       },
     });
     expect(oauth.status, JSON.stringify(oauth.body)).toBe(201);
