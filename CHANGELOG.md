@@ -4,6 +4,14 @@
 
 ### Added
 
+- The self-hosted environment page can now issue worker keys. The keys
+  table reads `GET /v1/environments/{id}/worker-keys` (it previously
+  rendered a metadata field nothing writes, so it was always empty), and
+  a Create key modal posts to the same route and reveals the one-time
+  `secret_key` with a copy control — the key is never listed or stored
+  again after the modal closes.
+
+
 - The sessions, credential-vault, and memory-store lists now filter and
   page on the server instead of narrowing a fixed 100-row window. The
   sessions toolbar sends `statuses`, `agent_id`, and `include_archived`

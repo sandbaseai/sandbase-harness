@@ -151,28 +151,6 @@ export function environmentMetadataEntries(environment: Environment): string[][]
   return Object.entries(environment.metadata ?? {}).map(([key, value]) => [key, String(value)]);
 }
 
-export function environmentKeys(environment: Environment): Array<{ id: string; name: string; created_at: string; expires_at: string }> {
-  const raw = environment.metadata.environment_keys;
-  if (typeof raw !== 'string') return [];
-  try {
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.flatMap((item) => {
-      if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
-      const record = item as Record<string, unknown>;
-      if (typeof record.id !== 'string' || typeof record.name !== 'string') return [];
-      return [{
-        id: record.id,
-        name: record.name,
-        created_at: typeof record.created_at === 'string' ? record.created_at : environment.created_at,
-        expires_at: typeof record.expires_at === 'string' ? record.expires_at : environment.updated_at,
-      }];
-    });
-  } catch {
-    return [];
-  }
-}
-
 export function environmentDraftFromApi(environment: Environment): EnvironmentDraft {
   const network = environmentNetwork(environment);
   const resources = objectValue(environment.config.resources);

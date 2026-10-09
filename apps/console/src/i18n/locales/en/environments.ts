@@ -155,7 +155,22 @@ export const environments = {
       keysHint:
         "An environment key lets a runner on your infrastructure connect to this environment and pull jobs. Generate one per host so you can revoke access individually.",
       keysEmpty: "No environment keys",
-      columns: { name: "Name", id: "ID", created: "Created", expires: "Expires at" },
+      keysLoading: "Loading keys…",
+      createKey: "Create key",
+      columns: { name: "Name", prefix: "Prefix", created: "Created", expires: "Expires at" },
+      modal: {
+        title: "Create environment key",
+        name: "Name",
+        namePlaceholder: "e.g. gpu-runner-1",
+        hint: "The key authorizes a worker on your infrastructure to pull jobs for this environment.",
+        submit: "Create key",
+        creating: "Creating…",
+        cancel: "Cancel",
+        done: "Done",
+        copyKey: "Copy key",
+        secretHint:
+          "The full key is shown only once and cannot be read again. Store it on the host that runs the worker.",
+      },
       setupTitle: "Set up your self-hosted environment",
       dismiss: "Dismiss setup",
       setupHint:

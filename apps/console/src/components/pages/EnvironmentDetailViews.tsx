@@ -1,12 +1,15 @@
-import { TriangleAlert, X } from 'lucide-react';
+import { Copy, Plus, TriangleAlert, X } from 'lucide-react';
+import { type FormEvent, useCallback, useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { getCursorPage, postJson } from '../../api';
 import { Kpi, KpiStrip } from '../console-ui';
-import { formatDateShort, relativeDate, shortId } from '../../lib/format';
+import { Modal } from '../Modal';
+import { RequiredMark } from '../Common';
+import { copyText, formatDateShort, relativeDate } from '../../lib/format';
 import type { Environment, Session } from '../../types';
 import {
   declaredHostingType,
   effectiveSandboxProvider,
-  environmentKeys,
   environmentHostingType,
   environmentMetadataEntries,
   environmentNetwork,
@@ -78,9 +81,39 @@ export function CloudEnvironment({ environment }: { environment: Environment }) 
   );
 }
 
+/**
+ * A row of `GET /v1/environments/:id/worker-keys`: the secret is only ever
+ * present on the creation response, so listed keys carry `key_prefix` alone.
+ */
+interface EnvironmentWorkerKey {
+  id: string;
+  name: string;
+  key_prefix: string;
+  status: string;
+  created_at: string;
+  expires_at: string | null;
+}
+
 export function SelfHostedEnvironment({ environment, sessions }: { environment: Environment; sessions: Session[] }) {
   const { t } = useTranslation('environments');
-  const keys = environmentKeys(environment);
+  const [keys, setKeys] = useState<EnvironmentWorkerKey[] | null>(null);
+  const [keysError, setKeysError] = useState('');
+  const [modalOpen, setModalOpen] = useState(false);
+
+  const loadKeys = useCallback(async () => {
+    try {
+      const page = await getCursorPage<EnvironmentWorkerKey>(`/v1/environments/${environment.id}/worker-keys`);
+      setKeys(page.data);
+      setKeysError('');
+    } catch (error) {
+      setKeysError(error instanceof Error ? error.message : String(error));
+    }
+  }, [environment.id]);
+
+  useEffect(() => {
+    void loadKeys();
+  }, [loadKeys]);
+
   const idleSessions = sessions.filter((session) => session.status === 'idle');
   const runningSessions = sessions.filter((session) => session.status === 'running');
   const completedSessions = sessions.filter((session) => session.status === 'terminated');
@@ -99,12 +132,20 @@ export function SelfHostedEnvironment({ environment, sessions }: { environment: 
       </section>
       <div className="selfHostedGrid">
         <section className="environmentSection">
-          <h2>{t('detail.selfHosted.keysTitle')}</h2>
-          <p>{t('detail.selfHosted.keysHint')}</p>
+          <div className="sectionHeaderRow">
+            <div>
+              <h2>{t('detail.selfHosted.keysTitle')}</h2>
+              <p>{t('detail.selfHosted.keysHint')}</p>
+            </div>
+            <button className="primaryButton" type="button" onClick={() => setModalOpen(true)}>
+              <Plus size={16} />{t('detail.selfHosted.createKey')}
+            </button>
+          </div>
+          {keysError ? <div className="banner error inlineBanner">{keysError}</div> : null}
           <ReadonlyTable
-            empty={t('detail.selfHosted.keysEmpty')}
-            rows={keys.map((key) => [key.name, shortId(key.id), formatDateShort(key.created_at), formatDateShort(key.expires_at)])}
-            columns={[t('detail.selfHosted.columns.name'), t('detail.selfHosted.columns.id'), t('detail.selfHosted.columns.created'), t('detail.selfHosted.columns.expires')]}
+            empty={keys === null ? t('detail.selfHosted.keysLoading') : t('detail.selfHosted.keysEmpty')}
+            rows={(keys ?? []).map((key) => [key.name, key.key_prefix, formatDateShort(key.created_at), formatDateShort(key.expires_at)])}
+            columns={[t('detail.selfHosted.columns.name'), t('detail.selfHosted.columns.prefix'), t('detail.selfHosted.columns.created'), t('detail.selfHosted.columns.expires')]}
           />
         </section>
         <section className="setupCard">
@@ -119,7 +160,82 @@ export function SelfHostedEnvironment({ environment, sessions }: { environment: 
           <SetupStep index={4} title={t('detail.selfHosted.step4Title')} body={t('detail.selfHosted.step4Body')} code={`managed-agents worker poll \\\n  --environment-id "${environment.id}" \\\n  --workdir "/workspace"`} />
         </section>
       </div>
+      {modalOpen ? (
+        <WorkerKeyModal
+          environmentId={environment.id}
+          onClose={() => setModalOpen(false)}
+          onSaved={() => void loadKeys()}
+        />
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * The one-time-secret flow for `POST /v1/environments/:id/worker-keys`: the
+ * `secret_key` exists only on the creation response, so the modal reveals it
+ * in place — matching the API-key modal — before the keys table refreshes.
+ */
+function WorkerKeyModal({ environmentId, onClose, onSaved }: { environmentId: string; onClose: () => void; onSaved: () => void }) {
+  const { t } = useTranslation('environments');
+  const [name, setName] = useState('');
+  const [created, setCreated] = useState<(EnvironmentWorkerKey & { secret_key: string }) | null>(null);
+  const [error, setError] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (created) {
+      onClose();
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const response = await postJson<EnvironmentWorkerKey & { secret_key: string }>(
+        `/v1/environments/${encodeURIComponent(environmentId)}/worker-keys`,
+        { name: name.trim() },
+      );
+      setCreated(response);
+      onSaved();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Modal title={t('detail.selfHosted.modal.title')} onClose={onClose}>
+      <form className="modalForm" onSubmit={submit}>
+        {error ? <div className="banner error">{error}</div> : null}
+        {!created ? (
+          <>
+            <label>
+              <span>{t('detail.selfHosted.modal.name')} <RequiredMark /></span>
+              <input value={name} onChange={(event) => setName(event.target.value.slice(0, 80))} placeholder={t('detail.selfHosted.modal.namePlaceholder')} required />
+            </label>
+            <p className="formHint">{t('detail.selfHosted.modal.hint')}</p>
+          </>
+        ) : (
+          <div className="secretReveal">
+            <div>
+              <strong>{created.name}</strong>
+              <span>{created.key_prefix}</span>
+            </div>
+            <code>{created.secret_key}</code>
+            <p className="formHint">{t('detail.selfHosted.modal.secretHint')}</p>
+            <button type="button" className="secondaryButton" onClick={() => void copyText(created.secret_key)}>
+              <Copy size={16} />{t('detail.selfHosted.modal.copyKey')}
+            </button>
+          </div>
+        )}
+        <div className="modalActions">
+          <button type="button" className="secondaryButton" onClick={onClose}>{created ? t('detail.selfHosted.modal.done') : t('detail.selfHosted.modal.cancel')}</button>
+          {!created ? <button className="primaryButton" type="submit" disabled={saving || !name.trim()}>{saving ? t('detail.selfHosted.modal.creating') : t('detail.selfHosted.modal.submit')}</button> : null}
+        </div>
+      </form>
+    </Modal>
   );
 }
 
