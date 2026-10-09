@@ -1,0 +1,47 @@
+name: Release Tarball
+
+on:
+  release:
+    types: [published]
+
+permissions: read-all
+
+jobs:
+  tarball:
+    name: Build and attach the npm tarball
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      attestations: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - run: npm run package:check
+
+      - name: Pack the release tarball
+        id: pack
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ASSET="sandbase-harness-${VERSION}.tgz"
+          npm pack
+          mv ./*.tgz "$ASSET"
+          echo "asset=$ASSET" >> "$GITHUB_OUTPUT"
+
+      - name: Attach the tarball to the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" "${{ steps.pack.outputs.asset }}" --clobber
+
+      - name: Attest tarball provenance
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: ${{ steps.pack.outputs.asset }}
