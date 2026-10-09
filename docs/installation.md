@@ -235,7 +235,6 @@ process isolation:
 environments:
   docker:
     sandbox_provider: docker
-    image: node:22-slim
     resources:
       memory: 1g
       cpu: 1
@@ -243,10 +242,13 @@ environments:
 ```
 
 Docker mode creates one long-lived container per session and runs tool commands
-with `docker exec` inside `/workspace`. The Docker CLI and daemon must be
-available to the local runtime process; if Docker is not detected, the Console
-marks the adapter unavailable and existing Docker environments cannot start new
-containers until Docker is running again.
+with `docker exec` inside `/workspace`. The default image is the published
+reference sandbox image `ghcr.io/sandbaseai/sandbase-harness-sandbox:latest`
+(pulled on first use); set `image` to pin a release tag or a mirror. The Docker
+CLI and daemon must be available to the local runtime process; if Docker is not
+detected, the Console marks the adapter unavailable and existing Docker
+environments cannot start new containers until Docker is running again. This
+includes `cloud`-declared Environments, which resolve to the docker backend.
 
 ## Start Options
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeRuntimeEnvironment } from '@/core/runtime/composition.js';
-import { ENVIRONMENT_CONFIG_ERROR_CODES, WORKSPACE_DEFAULT_SANDBOX_PROVIDER } from '@/sandbox/provider-names.js';
+import { ENVIRONMENT_CONFIG_ERROR_CODES } from '@/sandbox/provider-names.js';
 
 describe('runtime environment normalization', () => {
   it('defaults to local sandbox with a stable timeout', () => {
@@ -85,15 +85,14 @@ describe('runtime environment normalization', () => {
     })).toMatchObject({ sandbox_provider: 'local' });
   });
 
-  it('resolves cloud hosting to the workspace-default sentinel', () => {
-    // `cloud` is "the platform decides": normalization surfaces the sentinel
-    // and `resolveEnvironmentConfig` substitutes the workspace's effective
-    // backend — the sentinel itself is never a provisioning target.
+  it('resolves cloud hosting to the docker backend', () => {
+    // `cloud` is "the platform decides": this runtime's managed-cloud
+    // substitute is a docker container on the operator's host.
     expect(normalizeRuntimeEnvironment({
       id: 'env_cloud',
       name: 'cloud',
       config: '{"hosting_type":"cloud"}',
-    })).toMatchObject({ sandbox_provider: WORKSPACE_DEFAULT_SANDBOX_PROVIDER });
+    })).toMatchObject({ sandbox_provider: 'docker' });
   });
 
   it('resolves an explicitly named backend over the hosting descriptor', () => {

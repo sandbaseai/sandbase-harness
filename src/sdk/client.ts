@@ -349,7 +349,7 @@ export interface EnvironmentSummary {
   /**
    * The Environment's declaration in the published `config` shape.
    * `config.type` is the official two-value hosting axis — `"cloud"` means the
-   * workspace's configured default backend serves the environment —
+   * docker backend serves the environment —
    * `config.networking` and `config.packages` are the published spellings.
    * Local declaration keys this runtime stores (`hosting_type`, `network`,
    * array-form `packages`) are echoed verbatim as local extensions.
@@ -357,8 +357,8 @@ export interface EnvironmentSummary {
   config: Record<string, unknown>;
   /**
    * Local extension: the backend sessions on this Environment actually
-   * provision. For `config.type: "cloud"` this is the workspace's configured
-   * sandbox provider; `null` when the stored config cannot be resolved.
+   * provision. For `config.type: "cloud"` this is `docker`; `null` when the
+   * stored config cannot be resolved.
    */
   effective_sandbox_provider: string | null;
   /** Local extension: declared packages are recorded but not installed. */

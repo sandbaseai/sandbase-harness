@@ -63,11 +63,10 @@ describe('Environment provider translation boundary', () => {
   it('reports an unreadable Environment without claiming a backend', () => {
     // `local` here is what let an operator read a damaged record as local, save
     // the form, and store it as one. `effective_sandbox_provider` reporting
-    // `null` — through the provider-names sentinel, not a literal — is what
-    // marks a record no session could provision on.
+    // `null` for a record no session could provision on is what marks it.
     const routes = source('src/api/routes/environments.ts');
     expect(routes).toContain('effective_sandbox_provider');
-    expect(routes).toContain('WORKSPACE_DEFAULT_SANDBOX_PROVIDER');
+    expect(routes).toContain('sandboxProviderForEnvironmentConfig');
     expect(routes).not.toContain("'local'");
   });
 

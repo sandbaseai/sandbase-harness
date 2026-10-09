@@ -18,7 +18,6 @@ import { isTerminal } from '@/core/session/state-machine.js';
 import type { SessionStatus } from '@/types/session.js';
 import { SHIPPED_SANDBOX_PROVIDER_TYPES } from '@/types/sandbox.js';
 import {
-  DEFAULT_SANDBOX_PROVIDER,
   ENVIRONMENT_CONFIG_ERROR_CODES,
   ENVIRONMENT_HOSTING_FIELDS,
   hostingTypeError,
@@ -27,7 +26,6 @@ import {
   publishedEnvironmentHostingType,
   readDeclaredHostingType,
   sandboxProviderForEnvironmentConfig,
-  WORKSPACE_DEFAULT_SANDBOX_PROVIDER,
 } from '@/sandbox/provider-names.js';
 import {
   environmentNetworkPolicyOf,
@@ -379,11 +377,9 @@ function toApiEnvironment(row: EnvironmentRow, deps: ServerDeps) {
  * The backend sessions on this Environment actually provision.
  *
  * The composition resolver is the authority — it overlays the effective
- * Settings V2 sandbox configuration, which is what makes `cloud` mean the
- * workspace default. A row the resolver cannot read reports `null` rather than
- * a substituted backend, and a caller that still sees the workspace-default
- * sentinel (the embedded path has no Settings) reports the declared default it
- * would fall back to.
+ * Settings V2 sandbox configuration, and `cloud` resolves to the `docker`
+ * backend there the same way it does on the embedded fallback path. A row
+ * the resolver cannot read reports `null` rather than a substituted backend.
  */
 function effectiveProviderFor(
   environmentId: string,
@@ -391,9 +387,8 @@ function effectiveProviderFor(
   deps: ServerDeps,
 ): string | null {
   try {
-    const provider = deps.sessionManager.environmentSandboxProvider(environmentId)
+    return deps.sessionManager.environmentSandboxProvider(environmentId)
       ?? sandboxProviderForEnvironmentConfig(config, `Environment ${environmentId}`);
-    return provider === WORKSPACE_DEFAULT_SANDBOX_PROVIDER ? DEFAULT_SANDBOX_PROVIDER : provider;
   } catch {
     return null;
   }

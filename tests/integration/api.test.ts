@@ -2480,10 +2480,10 @@ description: Uploaded from a compressed package.
       expect(updatedBody.metadata.owner).toBe('platform');
     });
 
-    it('accepts cloud hosting as the workspace-default declaration, and refuses what cannot name a backend', async () => {
+    it('accepts cloud hosting as the docker-backed declaration, and refuses what cannot name a backend', async () => {
       // `cloud` is the official "the platform decides" value: this runtime has
-      // no managed cloud service, so the workspace's configured default backend
-      // serves it — the same one `env_default` runs on.
+      // no managed cloud service, so the docker backend — its managed-cloud
+      // substitute — serves it.
       const cloudOnly = await postJson('/v1/environments', {
         name: 'Cloud only',
         config: { type: 'cloud', networking: { type: 'unrestricted' } },
@@ -2491,7 +2491,7 @@ description: Uploaded from a compressed package.
       expect(cloudOnly.res.status).toBe(201);
       expect(cloudOnly.body.config.type).toBe('cloud');
       expect(cloudOnly.body.config.networking).toEqual({ type: 'unrestricted' });
-      expect(cloudOnly.body.effective_sandbox_provider).toBe('local');
+      expect(cloudOnly.body.effective_sandbox_provider).toBe('docker');
 
       // A declared backend still wins over the hosting declaration, so an
       // explicit provider keeps deciding where sessions provision.
@@ -2545,7 +2545,7 @@ description: Uploaded from a compressed package.
         const renamedBody = await renamed.json();
         expect(renamedBody.config.type).toBe('cloud');
         expect(renamedBody.config.hosting_type).toBe('cloud');
-        expect(renamedBody.effective_sandbox_provider).toBe('local');
+        expect(renamedBody.effective_sandbox_provider).toBe('docker');
 
         const repaired = await app.request('/v1/environments/env_legacy_cloud', {
           method: 'PUT',

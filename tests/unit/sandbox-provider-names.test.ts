@@ -25,7 +25,6 @@ import {
   sandboxProviderForHostingType,
   sandboxProviderForSettings,
   sandboxSettingForProvider,
-  WORKSPACE_DEFAULT_SANDBOX_PROVIDER,
   workspaceDefaultSettingForEnvironmentConfig,
   type SandboxSettingProvider,
 } from '@/sandbox/provider-names.js';
@@ -102,16 +101,17 @@ describe('environment hosting_type resolution', () => {
     expect(sandboxProviderForEnvironmentConfig({ hosting_type: 'self_hosted' }, context)).toBe('self_hosted');
   });
 
-  it('resolves cloud hosting to the workspace-default sentinel, not to a backend', () => {
-    // `cloud` is the official "the platform decides" value. The sentinel is a
-    // resolution marker — the caller that owns the effective Settings swaps in
-    // the workspace default, and nothing here pretends a managed cloud exists.
+  it('resolves cloud hosting to the docker backend', () => {
+    // `cloud` is the official "the platform decides" value. The platform here
+    // is the operator's host, and its managed-cloud substitute is a docker
+    // container on the published reference image — not the workspace default,
+    // which could resolve to unsandboxed `local` execution.
     expect(sandboxProviderForHostingType('cloud', 'Environment env_x'))
-      .toBe(WORKSPACE_DEFAULT_SANDBOX_PROVIDER);
+      .toBe('docker');
     expect(sandboxProviderForEnvironmentConfig({ hosting_type: 'cloud' }, 'Environment env_x'))
-      .toBe(WORKSPACE_DEFAULT_SANDBOX_PROVIDER);
+      .toBe('docker');
     expect(sandboxProviderForEnvironmentConfig({ type: 'cloud' }, 'Environment env_x'))
-      .toBe(WORKSPACE_DEFAULT_SANDBOX_PROVIDER);
+      .toBe('docker');
   });
 
   it('refuses a hosting type it does not know', () => {
@@ -188,10 +188,9 @@ describe('environment hosting_type resolution', () => {
   it('refuses to seed a workspace default with a backend Settings V2 cannot name', () => {
     expect(workspaceDefaultSettingForEnvironmentConfig({ hosting_type: 'self_hosted' }, 'The default'))
       .toBe('remote');
-    // `cloud` defers to the workspace default, which is what the undeclared
-    // seed is — `local`, the same value a config that declares nothing seeds.
+    // `cloud` resolves to the docker backend, so that is what the seed names.
     expect(workspaceDefaultSettingForEnvironmentConfig({ hosting_type: 'cloud' }, 'The default'))
-      .toBe('local');
+      .toBe('docker');
     expect(() => workspaceDefaultSettingForEnvironmentConfig({ sandbox_provider: 'microsandbox' }, 'The default'))
       .toThrow(EnvironmentConfigError);
   });
@@ -205,9 +204,9 @@ describe('environment hosting_type resolution', () => {
     expect(sandboxProviderForEnvironmentConfig({ type: 'local' }, 'Environment env_x')).toBe('local');
   });
 
-  it('reads the published cloud hosting as the workspace-default declaration', () => {
+  it('reads the published cloud hosting as the docker backend', () => {
     expect(sandboxProviderForEnvironmentConfig({ type: 'cloud' }, 'Environment env_x'))
-      .toBe(WORKSPACE_DEFAULT_SANDBOX_PROVIDER);
+      .toBe('docker');
     // An unrecognized published value is refused by name, not defaulted.
     try {
       sandboxProviderForEnvironmentConfig({ type: 'team_server' }, 'Environment env_x');
@@ -279,7 +278,7 @@ describe('environment hosting_type resolution', () => {
 });
 
 describe('the workspace default Environment seed', () => {
-  it('seeds the platform default from a cloud env_default, like an undeclared row', () => {
+  it('seeds the docker backend from a cloud env_default', () => {
     const directory = mkdtempSync(join(tmpdir(), 'ma-provider-names-'));
     const db = new Database(join(directory, 'settings.db'));
     try {
@@ -287,9 +286,9 @@ describe('the workspace default Environment seed', () => {
       db.exec(`INSERT INTO environments (id, name, config) VALUES ('env_default', 'local', '{}')`);
       const first = getOrSeedRuntimeSettings(db, {}, directory);
 
-      // `cloud` asks the workspace default to decide — which is exactly what a
-      // seed is. It must not refuse boot the way an unservable concrete backend
-      // does, and it must not seed anything but the platform default.
+      // `cloud` resolves to the docker backend, so a cloud env_default seeds
+      // docker as the workspace default. It must not refuse boot the way an
+      // unservable backend does.
       db.exec(`UPDATE environments SET config = '{"type":"cloud"}' WHERE id = 'env_default'`);
       expect(() => getOrSeedRuntimeSettings(db, {}, directory)).not.toThrow();
       expect(getOrSeedRuntimeSettings(db, {}, directory).effective_config.sandbox)
@@ -297,7 +296,7 @@ describe('the workspace default Environment seed', () => {
 
       db.exec('DELETE FROM runtime_settings');
       const reseeded = getOrSeedRuntimeSettings(db, {}, directory);
-      expect(reseeded.saved_config.sandbox.provider).toBe('local');
+      expect(reseeded.saved_config.sandbox.provider).toBe('docker');
     } finally {
       db.close();
       rmSync(directory, { recursive: true, force: true });

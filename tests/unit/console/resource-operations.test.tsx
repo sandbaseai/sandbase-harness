@@ -6,8 +6,8 @@
  * These tests drive the real UI through the jsdom harness and assert the
  * exact request bodies the Console posts:
  *
- * - environments create as `cloud` with no `sandbox_provider` (the workspace
- *   default resolves it), the detail page surfaces `effective_sandbox_provider`
+ * - environments create as `cloud` with no `sandbox_provider` (the server-side
+ *   docker binding resolves it), the detail page surfaces `effective_sandbox_provider`
  *   with an un-isolated warning for `local`, and delete is confirmed and its
  *   409 reason displayed;
  * - webhook subscriptions are picked from the grouped official event

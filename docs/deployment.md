@@ -113,13 +113,18 @@ command rather than degrade, and `MANAGED_AGENTS_LOCAL_ISOLATION_WRITE_PATHS`
 to grant extra writable roots. Windows hosts run unconfined regardless — use
 Docker for untrusted work there.
 
-A reference session-sandbox image is published at
-`ghcr.io/sandbaseai/sandbase-harness-sandbox`. It approximates the published
-cloud sandbox toolchain (Ubuntu 24.04, Python 3.12, Node 22, git, jq,
-ripgrep, build tools, ffmpeg, ImageMagick, SQLite/PostgreSQL/Redis installed
-but not running) and can be selected per Environment through `config.image`.
-See `docker/sandbox-image/` for the Dockerfile, the mid-size exclusions, and
-a local build command.
+The default session-sandbox image is the published reference image
+`ghcr.io/sandbaseai/sandbase-harness-sandbox:latest`. It approximates the
+published cloud sandbox toolchain (Ubuntu 24.04, Python 3.12, Node 22, git,
+jq, ripgrep, build tools, ffmpeg, ImageMagick, SQLite/PostgreSQL/Redis
+installed but not running) and is what `config.type: "cloud"` — the
+published "the platform decides" hosting value — provisions: `cloud`
+resolves to the `docker` backend on this image, so a `cloud` Environment
+needs a running Docker daemon and fails at provision without one rather than
+downgrading to `local`. `config.image` still overrides the image per
+Environment — to pin a release tag, or to point at a mirror. See
+`docker/sandbox-image/` for the Dockerfile, the mid-size exclusions, and a
+local build command.
 
 ## Kubernetes
 

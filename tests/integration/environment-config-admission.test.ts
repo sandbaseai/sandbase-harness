@@ -97,15 +97,15 @@ describe('environment config admission', () => {
     expect(published.body.effective_sandbox_provider).toBe(local.body.effective_sandbox_provider);
   });
 
-  it('accepts published cloud hosting and resolves it to the workspace default backend', async () => {
+  it('accepts published cloud hosting and resolves it to the docker backend', async () => {
     const { status, body } = await post({ name: 'published-cloud', config: { type: 'cloud' } });
 
     expect(status).toBe(201);
     // `cloud` is the official "the platform decides" value: the declaration is
-    // preserved, and the effective backend is the workspace default — `local`
-    // for an embedded runtime without Settings selecting otherwise.
+    // preserved, and the effective backend is docker — this runtime's
+    // managed-cloud substitute.
     expect(body.config.type).toBe('cloud');
-    expect(body.effective_sandbox_provider).toBe('local');
+    expect(body.effective_sandbox_provider).toBe('docker');
     expect(storedConfig(body.id).type).toBe('cloud');
   });
 

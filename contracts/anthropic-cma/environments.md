@@ -4,7 +4,7 @@ Contract area: `/v1/environments` — reusable execution environments and the
 published `config` shape they carry.
 Status: `supported` for the published hosting and network configuration shape,
 with `cloud` — the published "the platform decides" value — accepted and
-resolved to the workspace's configured default backend. `partial` for
+resolved to the `docker` backend. `partial` for
 the network policy: a `limited` policy is applied through a per-session
 allowlist egress proxy (enforced on docker, advisory on local), and the
 kubernetes and self-hosted providers carry no egress boundary at all, so the
@@ -91,12 +91,11 @@ translation between the two spellings of the hosting axis live in
   which only ever sends that one — and a request naming the hosting type once
   would be refused for disagreeing with a value it never sent.
 - `cloud` is accepted at write time, in either spelling: it is the published
-  "the platform decides" value, and on this runtime the platform is the
-  workspace — sessions on a `cloud` environment provision on the workspace's
-  configured default backend, the `sandbox.provider` the active Settings V2
-  configuration carries, with that provider's backend-specific options
-  (image, Kubernetes namespace, timeout) applied. The record keeps the `cloud`
-  declaration; it is never rewritten to a backend name. An unrecognized value
+  "the platform decides" value, and on this runtime the platform's answer is
+  the `docker` backend — sessions on a `cloud` environment provision in a
+  container on the operator's host, on the published reference sandbox image.
+  The record keeps the `cloud` declaration; it is never rewritten to a
+  backend name. An unrecognized value
   (`team_server`) is still refused at write time with `unsupported_hosting_type`,
   naming the hosting types this build can serve.
 - `config.networking` is normalized into `config.network` by
@@ -165,7 +164,7 @@ translation between the two spellings of the hosting axis live in
 ## 3. Alignment
 
 Aligned for: the published hosting axis (`type` with both values understood,
-`cloud` accepted and resolved to the workspace default rather than misread),
+`cloud` accepted and resolved to the docker backend rather than misread),
 the published `networking` object including its `limited` / `unrestricted`
 forms and its two permission keys, the fail-closed reading of a policy
 (limited, and a permission denied, unless the caller declared otherwise),
@@ -177,9 +176,9 @@ caller.
 
 | Difference | Detail |
 | --- | --- |
-| `config.type: "cloud"` | Accepted and resolved to the workspace's configured default backend — the active Settings V2 `sandbox.provider` and its options — rather than to a managed cloud, which this runtime does not have. The declaration is stored as written, `config.type` reports `cloud` back, and `effective_sandbox_provider` reports which backend it lands on, so nothing claims managed hosting and nothing maps the declaration to `local` by default. |
+| `config.type: "cloud"` | Accepted and resolved to the `docker` backend — this runtime's managed-cloud substitute, a container on the operator's host running the published reference sandbox image — rather than to a managed cloud, which this runtime does not have. The declaration is stored as written, `config.type` reports `cloud` back, and `effective_sandbox_provider` reports `docker`, so nothing claims managed hosting and nothing maps the declaration to `local` by default. A host without a Docker daemon refuses the session at provision time rather than downgrading silently. |
 | Hosting spellings that disagree | Refused with `invalid_environment_config` rather than resolved by precedence. The published shape has one spelling, so a request carrying both is a caller error this runtime cannot guess at. A stored row that already holds both is refused at resolution and reports `effective_sandbox_provider: null`; naming either spelling in an update replaces it. |
-| Workspace default seeding | `env_default` seeds the workspace `sandbox.provider` setting on a workspace that has no settings row. A `cloud` declaration there asks the workspace default to decide, which is what a seed is, so it seeds the same platform default a config that declares nothing does. An `env_default` declaring a hosting type this build cannot execute at all refuses that seeding rather than substituting `local`, so such a workspace does not start until the row is repaired — with an update, or in the database when the runtime is not running. |
+| Workspace default seeding | `env_default` seeds the workspace `sandbox.provider` setting on a workspace that has no settings row. A `cloud` declaration there resolves to `docker`, so it seeds `docker` as the workspace default. An `env_default` declaring a hosting type this build cannot execute at all refuses that seeding rather than substituting `local`, so such a workspace does not start until the row is repaired — with an update, or in the database when the runtime is not running. |
 | Network policy enforcement | Applied at backend-dependent strength. Docker is `enforced` (an `--internal` network whose only reachable egress is the allowlist proxy), local is `best_effort` (proxy variables a subprocess can ignore), and kubernetes/self-hosted are `unsupported` (no boundary installed — the read reports it rather than claiming one). `web_fetch` and the MCP url connect boundary enforce the declared allowlist in the runtime process on every backend. |
 | `config.packages` | Recorded and reported in the published per-manager object shape — the local `{ manager, package }` array is folded into it — and marked `packages_enforced: false`. Nothing installs declared packages for any provider, so the published object shape and the local list are both inert configuration today. |
 | Deletion guard | `DELETE` is mounted and physical, but refused while any session row references the environment — a finished session included — because `sessions.environment_id` is a hard foreign key and history keeps the environment it ran on. `env_default` is refused as `environment_protected`. `POST /v1/environments/{id}/archive` remains the lifecycle verb for an environment that should stop being offered without erasing its record. |
@@ -191,13 +190,14 @@ caller.
   refusing it would make every published quickstart fail at write time. This
   runtime has no managed cloud, but it does have the thing `cloud` asks for —
   a platform that decides — so the honest answer is the one it gives: the
-  workspace's configured default backend, reported distinctly as
+  `docker` backend, a container on the operator's host with real namespace
+  isolation and the published reference image, reported distinctly as
   `effective_sandbox_provider` rather than hidden inside the declaration.
   The alternative the previous version took, refusing the value by name,
   left the published request shape unusable; the alternative before that,
-  reading `cloud` as `local`, ran those sessions unsandboxed on the runtime
-  host. The workspace default is neither: it is the backend the operator
-  configured, reported as itself.
+  reading `cloud` as `local` — or deferring to a workspace default that may
+  itself be `local` — ran those sessions unsandboxed on the runtime host.
+  Docker is neither: it is a fixed isolated backend, reported as itself.
 - The network policy is applied per backend rather than refused on the ones
   that cannot bound egress, because a session must still be able to run: a
   kubernetes deployment that declares `limited` gets an honest `unsupported`
@@ -289,8 +289,8 @@ caller.
 ## 7. Status
 
 `supported` for the published configuration shape: the hosting axis is read in
-both spellings through one vocabulary, `cloud` is accepted and resolved to the
-workspace default with the resolution reported as `effective_sandbox_provider`,
+both spellings through one vocabulary, `cloud` is accepted and resolved to
+`docker` with the resolution reported as `effective_sandbox_provider`,
 unknown values are refused by name with an actionable message and the
 documented code, the published network vocabulary is accepted, and the response
 projects the published `config` shape beside the effective backend.

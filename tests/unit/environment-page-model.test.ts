@@ -17,12 +17,13 @@ describe('environment page model helpers', () => {
     expect(sandboxProviderForHostingType('docker')).toBe('docker');
     expect(sandboxProviderForHostingType('kubernetes')).toBe('kubernetes');
     expect(sandboxProviderForHostingType('local')).toBe('local');
-    // `cloud` names no backend — the workspace default resolves it.
+    // `cloud` names no backend in the payload — the server resolves it to
+    // docker, so the Console sends no `sandbox_provider` for it.
     expect(sandboxProviderForHostingType('cloud')).toBeUndefined();
   });
 
   it('drafts the declared hosting type, not the resolved one', () => {
-    // A cloud environment whose workspace default is docker still edits as
+    // A cloud environment whose effective backend is docker still edits as
     // `cloud` — the declaration is what the config stores.
     const draft = environmentDraftFromApi(environment({
       effective_sandbox_provider: 'docker',
@@ -104,7 +105,7 @@ describe('environment page model helpers', () => {
     });
   });
 
-  it('omits sandbox_provider for cloud hosting so the workspace default resolves it', () => {
+  it('omits sandbox_provider for cloud hosting so the server-side docker binding resolves it', () => {
     const payload = environmentPayloadFromDraft({
       name: 'Cloud',
       description: '',

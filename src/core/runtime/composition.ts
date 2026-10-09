@@ -9,7 +9,6 @@ import {
   parseEnvironmentConfig,
   sandboxProviderForEnvironmentConfig,
   sandboxProviderForSettings,
-  WORKSPACE_DEFAULT_SANDBOX_PROVIDER,
 } from '@/sandbox/provider-names.js';
 import type { EnvironmentConfig, KubernetesEnvironmentConfig } from '@/types/sandbox.js';
 
@@ -60,10 +59,10 @@ export function composeRuntimeFromSettings({
       if (!row) return undefined;
       const environment = normalizeRuntimeEnvironment(row);
       // env_default is the workspace fallback; named Environments remain
-      // explicit session-level sandbox overrides — unless they declared
-      // `type: "cloud"`, the published "platform decides" value, which on
-      // this runtime resolves to the workspace's configured default backend.
-      if (row.id !== 'env_default' && environment.sandbox_provider !== WORKSPACE_DEFAULT_SANDBOX_PROVIDER) {
+      // explicit session-level sandbox overrides — including `type: "cloud"`,
+      // which resolves to the `docker` backend at parse time, not to the
+      // workspace default.
+      if (row.id !== 'env_default') {
         return environment;
       }
       return {
@@ -80,9 +79,7 @@ export function normalizeRuntimeEnvironment(row: { id: string; name: string; con
   // The declared backend — or the hosting type behind it — decides where this
   // Environment runs. An unreadable row or a value this runtime cannot serve
   // is refused here instead of being replaced by the local backend, which used
-  // to run isolated configurations on the host with no error at all. `cloud`
-  // reads as the workspace-default sentinel and is substituted by the caller
-  // that owns the effective Settings.
+  // to run isolated configurations on the host with no error at all.
   const sandboxProvider = sandboxProviderForEnvironmentConfig(parsed, context);
 
   return {

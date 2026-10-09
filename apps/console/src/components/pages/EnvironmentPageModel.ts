@@ -32,7 +32,7 @@ export function hostingLabel(type: EnvironmentHostingType) {
 
 /**
  * The hosting type a session on this environment actually provisions — for a
- * `cloud` declaration that is the workspace default backend, so the effective
+ * `cloud` declaration that is the docker backend, so the effective
  * provider wins when the API reports it.
  */
 export function environmentHostingType(environment: Environment): EnvironmentHostingType {
@@ -205,8 +205,8 @@ export function environmentPayloadFromDraft(draft: EnvironmentDraft) {
   );
   const metadata = { ...draft.preservedMetadata, ...editableMetadata };
   // `cloud` deliberately sends no `sandbox_provider`: it is the published
-  // "the platform decides" declaration and resolves to the workspace default
-  // backend server-side, not to a name the Console picks.
+  // "the platform decides" declaration and resolves to the docker backend
+  // server-side, not to a name the Console picks.
   const provider = sandboxProviderForHostingType(draft.hostingType);
   const config: Record<string, unknown> = {
     hosting_type: draft.hostingType,
@@ -225,10 +225,12 @@ export function environmentPayloadFromDraft(draft: EnvironmentDraft) {
     },
   };
   if (draft.hostingType === 'docker') {
-    const image = draft.dockerImage.trim() || 'node:22-slim';
+    // A blank image field omits `image` so the provider's default — the
+    // published reference sandbox image — applies rather than an override.
+    const image = draft.dockerImage.trim();
     const memory = draft.dockerMemory.trim();
     const cpu = Number(draft.dockerCpu);
-    config.image = image;
+    if (image) config.image = image;
     config.resources = {
       ...(memory ? { memory } : {}),
       ...(Number.isFinite(cpu) && cpu > 0 ? { cpu } : {}),
@@ -245,8 +247,8 @@ export function environmentPayloadFromDraft(draft: EnvironmentDraft) {
 
 /**
  * The backend a hosting declaration names, or `undefined` for `cloud` —
- * "the platform decides" carries no backend name and resolves to the
- * workspace default at run time.
+ * "the platform decides" carries no backend name and resolves to `docker`
+ * server-side at run time.
  */
 export function sandboxProviderForHostingType(hostingType: EnvironmentHostingType): string | undefined {
   if (hostingType === 'self_hosted') return 'self_hosted';

@@ -1904,10 +1904,9 @@ one sessions use:
   does not ship can still name it.
 - Otherwise the hosting type selects the backend: `local`, `docker`,
   `kubernetes`, and `self_hosted` map to the backend of the same name. `cloud` —
-  the published "the platform decides" value — resolves to the workspace's
-  configured default backend: the `sandbox.provider` the active Settings V2
-  configuration carries, with its backend-specific options (image, Kubernetes
-  namespace, timeout) applied.
+  the published "the platform decides" value — resolves to the `docker`
+  backend, this runtime's managed-cloud substitute, on the published
+  reference sandbox image (`ghcr.io/sandbaseai/sandbase-harness-sandbox`).
 - Otherwise the environment runs on `local`, the runtime default. An
   environment that declares neither is the only case that resolves to `local`;
   a declaration this runtime cannot serve is never lowered to it.
@@ -1958,9 +1957,11 @@ The published CMA `config` shape is read rather than stored and ignored:
 
 `hosting_type: "cloud"` — and the published `config: {"type": "cloud"}` — is
 accepted and means "the platform decides": sessions on that environment
-provision on the workspace's configured default sandbox backend. The record
-keeps the `cloud` declaration; the response's `effective_sandbox_provider`
-reports which backend it resolves to. An *unrecognized* hosting type is still
+provision on the `docker` backend, this runtime's managed-cloud substitute,
+on the published reference sandbox image. The record keeps the `cloud`
+declaration; the response's `effective_sandbox_provider` reports `docker`.
+A host without a running Docker daemon refuses the session at provision time
+rather than downgrading to `local`. An *unrecognized* hosting type is still
 refused with `400 invalid_request_error` and code `unsupported_hosting_type`,
 and the message names the hosting types this build can serve.
 
@@ -2011,8 +2012,8 @@ Environment response keeps the declaration and the execution separate:
 `config.type` reports the published hosting axis the caller declared —
 `self_hosted`, or `cloud` for every backend this runtime itself serves — while
 `effective_sandbox_provider` reports the backend sessions on it actually
-provision: `kubernetes` on a Kubernetes environment, the workspace default on a
-`cloud` one. An environment whose stored `config` cannot be read resolves to no
+provision: `kubernetes` on a Kubernetes environment, `docker` on a `cloud`
+one. An environment whose stored `config` cannot be read resolves to no
 backend, so `effective_sandbox_provider` is `null` rather than `local` and
 repairing it is a deliberate choice: an update that does not carry a
 replacement `config` is refused.
@@ -2022,8 +2023,8 @@ workspace runtime setting (`sandbox.provider`) and its stored `config` is the
 legacy seed those settings were derived from; a named Environment decides its own
 backend as described above. A stored `cloud` declaration on `env_default` — the
 published `config: {"type": "cloud"}` spelling included, which a version before
-this one accepted and stored verbatim — asks the workspace default to decide,
-so it seeds the same platform default a config that declares nothing does. A
+this one accepted and stored verbatim — resolves to `docker`, so it seeds
+`docker` as the workspace default. A
 workspace whose `env_default` declares a hosting type this runtime cannot
 serve at all still refuses to derive its runtime settings on a workspace that
 has no settings row yet, rather than quietly seeding the local backend the

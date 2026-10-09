@@ -32,8 +32,23 @@ import {
   type EnvironmentNetworkPolicy,
 } from '@/core/config/environment-network.js';
 
-const DEFAULT_IMAGE = 'node:22-slim';
+/**
+ * The reference session-sandbox image this repository publishes
+ * (`docker/sandbox-image/Dockerfile` → ghcr.io, `latest` plus release semver
+ * tags). It approximates the managed cloud sandbox spec — Ubuntu 24.04,
+ * bash at /bin/bash, Python 3.12, Node 22, git/curl/jq/rg/tmux/make,
+ * ffmpeg/ImageMagick — instead of a bare runtime image, and it is what
+ * `config.type: "cloud"` runs on. `config.image` still overrides it, which is
+ * also how a deployment pins a specific release tag instead of `latest`.
+ */
+const DEFAULT_IMAGE = 'ghcr.io/sandbaseai/sandbase-harness-sandbox:latest';
 const WORKDIR = '/workspace';
+/**
+ * `docker run` pulls an absent image inline under the run's own timeout — a
+ * cold pull of the multi-GB reference image would lose the session before it
+ * starts, so provision pulls deliberately first under this budget instead.
+ */
+const IMAGE_PULL_TIMEOUT_MS = 10 * 60 * 1000;
 /** Relay sidecar image: a static `socat` (~8 MB) that forwards the internal network's only permitted peer to the host proxy. */
 const RELAY_IMAGE = 'alpine/socat';
 /** Port the relay listens on inside the internal network. */
@@ -70,7 +85,22 @@ export class DockerSandboxProvider implements SandboxProvider {
   });
 
   async provision(sessionId: string, config: EnvironmentConfig): Promise<SandboxInstance> {
+    if (!isDockerAvailable()) {
+      throw new Error(
+        'The docker sandbox provider needs a running Docker daemon and none answered. '
+          + 'Start Docker (Docker Desktop / the dockerd service), or declare a different '
+          + 'backend — `config.type: "cloud"` also resolves here.',
+      );
+    }
     const image = config.image ?? DEFAULT_IMAGE;
+    if (spawnSync('docker', ['image', 'inspect', image], { stdio: 'ignore' }).status !== 0) {
+      const pull = spawnSync('docker', ['pull', image], { encoding: 'utf-8', timeout: IMAGE_PULL_TIMEOUT_MS });
+      if (pull.status !== 0) {
+        throw new Error(
+          `docker pull ${image} failed: ${(pull.stderr || pull.stdout || 'unknown error').trim()}`,
+        );
+      }
+    }
     const containerName = `ma-sandbox-${safeContainerSuffix(sessionId)}`;
     const policy = environmentNetworkPolicyOf(config);
     // Every session gets a proxy, not only `limited` ones: the proxy is also
