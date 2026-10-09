@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import type { ServerDeps } from '../server.js';
 import { offsetCursorPage } from '../standard.js';
@@ -329,7 +329,15 @@ export function skillsRoutes(deps: ServerDeps) {
     if (skill.source !== 'custom') {
       return c.json({ error: { type: 'not_found', message: 'Skill version content is not stored for built-in skills' } }, 404);
     }
-    const row = getSkillVersion(deps.db, skill.id, c.req.param('versionId'));
+    // `latest` is accepted so a caller that knows the skill but not its
+    // current version id (a self-hosted worker holding an unpinned agent
+    // reference) can still address the newest package.
+    const requestedVersion = c.req.param('versionId');
+    const row = getSkillVersion(
+      deps.db,
+      skill.id,
+      requestedVersion === 'latest' ? (skill.latest_version ?? requestedVersion) : requestedVersion,
+    );
     if (!row || !row.storage_path || !deps.workspace?.dataDir) {
       return c.json({ error: { type: 'not_found', message: 'Skill version not found' } }, 404);
     }
@@ -346,7 +354,11 @@ export function skillsRoutes(deps: ServerDeps) {
 
     const entries = collectVersionFiles(versionDir, resolve(skillsRoot, skill.id));
     const zip = buildSkillZip(
-      entries.map((entry) => ({ path: `${skill.name}/${entry.relativePath}`, content: entry.content })),
+      entries.map((entry) => ({
+        path: `${skill.name}/${entry.relativePath}`,
+        content: entry.content,
+        executable: entry.executable,
+      })),
     );
     return new Response(new Uint8Array(zip), {
       status: 200,
@@ -447,9 +459,9 @@ function removeVersionFiles(storagePath: string, skillId: string, dataDir: strin
 function collectVersionFiles(
   versionDir: string,
   skillRoot: string,
-): Array<{ relativePath: string; content: Buffer }> {
+): Array<{ relativePath: string; content: Buffer; executable: boolean }> {
   const isLegacyRoot = versionDir === skillRoot;
-  const entries: Array<{ relativePath: string; content: Buffer }> = [];
+  const entries: Array<{ relativePath: string; content: Buffer; executable: boolean }> = [];
 
   const walk = (dir: string, prefix: string, topLevel: boolean): void => {
     for (const item of readdirSync(dir, { withFileTypes: true })) {
@@ -461,7 +473,7 @@ function collectVersionFiles(
       if (item.isDirectory()) {
         walk(full, rel, false);
       } else if (item.isFile()) {
-        entries.push({ relativePath: rel, content: readFileSync(full) });
+        entries.push({ relativePath: rel, content: readFileSync(full), executable: (statSync(full).mode & 0o111) !== 0 });
       }
     }
   };

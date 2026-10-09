@@ -78,10 +78,12 @@
  */
 
 import { execFile, spawn } from 'node:child_process';
+import { chmodSync } from 'node:fs';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, relative, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { pathToFileURL } from 'node:url';
+import { extractSkillZipEntries } from '@/core/skills/skill-zip.js';
 
 /** Below this, polling a queue is indistinguishable from hammering the server. */
 const MIN_POLL_INTERVAL_MS = 250;
@@ -361,6 +363,9 @@ export async function loadWorkerTools(toolsPath: string | undefined): Promise<Wo
 export async function workerPollCommand(opts: WorkerPollOptions) {
   const config = resolveWorkerPollOptions(opts);
   const customTools = await loadWorkerTools(config.toolsPath);
+  // Skill packages materialize once per session per worker process — a
+  // poll-mode worker may serve many sessions through one workdir.
+  const materializedSessions = new Set<string>();
   console.log(`Polling self-hosted work as ${config.workerId} in ${config.root}`);
   for (;;) {
     // The claim is the one step that can stop the worker on its own, and until this was
@@ -433,7 +438,13 @@ export async function workerPollCommand(opts: WorkerPollOptions) {
       try {
         outcome = {
           status: 'fulfilled',
-          value: await renewWhileRunning(config, item.id, (signal) => executeWorkItem(item, config.root, signal, customTools)),
+          value: await renewWhileRunning(config, item.id, async (signal) => {
+            // The session's skill packages land under `<root>/skills/<name>/`
+            // the first time a session's work runs here — inside the heartbeat
+            // window so a slow download never lapses the lease.
+            await ensureSessionSkills(config, item, materializedSessions);
+            return executeWorkItem(item, config.root, signal, customTools);
+          }),
         };
       } catch (error) {
         outcome = { status: 'rejected', reason: error };
@@ -1149,12 +1160,17 @@ export async function workerRunCommand(opts: WorkerRunOptions, stdin: Readable =
   config.sessionId = sessionId;
   const customTools = await loadWorkerTools(config.toolsPath);
 
+  // Skill packages materialize once per served session, inside the claim's
+  // heartbeat window so a slow download never lapses the lease.
+  const materializedSessions = new Set<string>();
+  const ensureSkills = (item: WorkerItem) => ensureSessionSkills(config, item, materializedSessions);
+
   // The item the poller claimed arrives on stdin. When stdin is a TTY there is
   // no handed item — the loop below serves the session from the queue.
   const handed = await readStdinItem(stdin);
   if (handed) {
     await acceptWorkItem(config, handed.id);
-    const outcome = await runItemWithHeartbeat(config, handed, customTools);
+    const outcome = await runItemWithHeartbeat(config, handed, customTools, ensureSkills);
     await completeWorkItem(config, handed, outcome);
     if (outcome.status === 'fulfilled') console.log(`completed ${handed.id}`);
   }
@@ -1181,7 +1197,7 @@ export async function workerRunCommand(opts: WorkerRunOptions, stdin: Readable =
         await sleep(config.intervalMs);
         continue;
       }
-      const outcome = await runItemWithHeartbeat(config, item, customTools);
+      const outcome = await runItemWithHeartbeat(config, item, customTools, ensureSkills);
       try {
         await completeWorkItem(config, item, outcome);
         if (outcome.status === 'fulfilled') console.log(`completed ${item.id}`);
@@ -1206,11 +1222,15 @@ async function runItemWithHeartbeat(
   config: ResolvedWorkerPollOptions,
   item: WorkerItem,
   customTools: WorkerCustomTools,
+  beforeExecute?: (item: WorkerItem) => Promise<void>,
 ): Promise<PromiseSettledResult<unknown>> {
   try {
     return {
       status: 'fulfilled',
-      value: await renewWhileRunning(config, item.id, (signal) => executeWorkItem(item, config.root, signal, customTools)),
+      value: await renewWhileRunning(config, item.id, async (signal) => {
+        await beforeExecute?.(item);
+        return executeWorkItem(item, config.root, signal, customTools);
+      }),
     };
   } catch (error) {
     return { status: 'rejected', reason: error };
@@ -1251,14 +1271,8 @@ async function sessionHasEnded(
   sessionId: string,
   workSecret: string | null | undefined,
 ): Promise<boolean> {
-  if (!workSecret) return false;
-  let token = workSecret;
-  try {
-    const decoded = JSON.parse(Buffer.from(workSecret, 'base64url').toString('utf8')) as { sessions_token?: string };
-    if (typeof decoded.sessions_token === 'string') token = decoded.sessions_token;
-  } catch {
-    // A raw token works too; only the BetaWorkSecret envelope needs decoding.
-  }
+  const token = sessionsTokenFromSecret(workSecret);
+  if (!token) return false;
   try {
     const res = await fetch(`${config.baseUrl}/v1/sessions/${sessionId}`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -1270,6 +1284,107 @@ async function sessionHasEnded(
   } catch {
     return false;
   }
+}
+
+/**
+ * Pull the `sessions_token` out of a work item's `secret`. The published
+ * envelope is base64url JSON (`{sessions_token, api_base_url}`); a bare token
+ * in the field is accepted too so a hand-rolled spawner can pass one.
+ */
+function sessionsTokenFromSecret(secret: string | null | undefined): string | null {
+  if (!secret) return null;
+  try {
+    const decoded = JSON.parse(Buffer.from(secret, 'base64url').toString('utf8')) as { sessions_token?: string };
+    if (typeof decoded.sessions_token === 'string' && decoded.sessions_token) return decoded.sessions_token;
+  } catch {
+    // A raw token works too; only the BetaWorkSecret envelope needs decoding.
+  }
+  return secret;
+}
+
+/** Same ceiling the upload route enforces on a package. */
+const MAX_SKILL_PACKAGE_BYTES = 8 * 1024 * 1024;
+
+/**
+ * Download the session's assigned skill packages into `<root>/skills/<name>/`.
+ *
+ * The published worker contract puts the package tree at that path inside the
+ * worker workdir — the same location the runtime's own provisioning writes
+ * for `local`/`docker` sessions, so a packaged script runs the same way on
+ * every backend. Discovery and fetch both go through the claim's `mawt_`
+ * token: `GET /v1/sessions/{id}` names the agent's skill references, and the
+ * version-content route is scoped to exactly those references. An unpinned
+ * reference resolves through the `latest` alias the route accepts, pinned
+ * references fetch their exact version.
+ *
+ * A worker without a forwarded secret skips materialization — it has no
+ * credential with which to ask. A download failure throws: a session whose
+ * declared skills cannot be materialized is running against a different
+ * contract than the caller asked for, so the item reports failed rather than
+ * executing short a package.
+ */
+async function materializeSessionSkills(
+  config: ResolvedWorkerPollOptions,
+  item: WorkerItem,
+): Promise<void> {
+  const token = sessionsTokenFromSecret(item.secret);
+  const sessionId = item.session_id ?? item.sessionId ?? config.sessionId;
+  if (!token || !sessionId) return;
+
+  const fetchScoped = async (path: string): Promise<Response> => {
+    const res = await fetch(`${config.baseUrl}${path}`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(config.claimTimeoutMs),
+    });
+    if (!res.ok) {
+      throw new Error(`skill materialization: GET ${path} failed: ${res.status} ${await res.text()}`);
+    }
+    return res;
+  };
+
+  const session = (await (await fetchScoped(`/v1/sessions/${sessionId}`)).json()) as {
+    agent?: { skills?: unknown };
+  };
+  const refs = Array.isArray(session.agent?.skills) ? session.agent!.skills! : [];
+  for (const rawRef of refs) {
+    if (!rawRef || typeof rawRef !== 'object') continue;
+    const ref = rawRef as Record<string, unknown>;
+    // Built-in skills have no stored package to download; only custom
+    // packages are materialized.
+    if (ref.type !== 'custom' || typeof ref.skill_id !== 'string') continue;
+    const version = typeof ref.version === 'string' && ref.version && ref.version !== 'latest'
+      ? ref.version
+      : 'latest';
+    const res = await fetchScoped(`/v1/skills/${ref.skill_id}/versions/${version}/content`);
+    if (res.headers.get('content-type')?.includes('application/zip') === false) {
+      throw new Error(`skill materialization: ${ref.skill_id}@${version} is not a package`);
+    }
+    const zip = Buffer.from(await res.arrayBuffer());
+    for (const entry of extractSkillZipEntries(zip, MAX_SKILL_PACKAGE_BYTES)) {
+      // Entry paths are `<name>/<relative>` inside the archive, so extracting
+      // under `skills/` reproduces `skills/<name>/...`.
+      const target = safePath(config.root, `skills/${entry.path}`);
+      await mkdir(dirname(target), { recursive: true });
+      await writeFile(target, entry.content);
+      if (entry.executable && process.platform !== 'win32') chmodSync(target, 0o755);
+    }
+  }
+}
+
+/**
+ * Materialize a session's skill packages at most once per worker process,
+ * keyed by session so a poll-mode worker serving many sessions does not
+ * re-download on every item.
+ */
+async function ensureSessionSkills(
+  config: ResolvedWorkerPollOptions,
+  item: WorkerItem,
+  done: Set<string>,
+): Promise<void> {
+  const sessionId = item.session_id ?? item.sessionId ?? config.sessionId;
+  if (!sessionId || done.has(sessionId)) return;
+  await materializeSessionSkills(config, item);
+  done.add(sessionId);
 }
 
 function safePath(root: string, value: string): string {

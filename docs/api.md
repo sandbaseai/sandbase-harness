@@ -1825,7 +1825,7 @@ format and upload rules.
 | `POST` | `/v1/skills/{skill_id}/versions` | Upload a new version with the same package format as `POST /v1/skills`. |
 | `GET` | `/v1/skills/{skill_id}/versions/{version_id}` | Retrieve one version's metadata. |
 | `DELETE` | `/v1/skills/{skill_id}/versions/{version_id}` | Delete one version; the only remaining version is refused with `409`. |
-| `GET` | `/v1/skills/{skill_id}/versions/{version_id}/content` | Download the version's package as a zip archive. |
+| `GET` | `/v1/skills/{skill_id}/versions/{version_id}/content` | Download the version's package as a zip archive; `latest` addresses the current version. A session work token may download only the versions its session's agent assigns. |
 
 Skill objects carry `latest_version` and the published `latest_version_id`
 alias; both point at the newest uploaded version. A version upload must keep

@@ -5,9 +5,10 @@
  * The token is minted per claim inside a work item's `secret` and hands a
  * worker exactly the session-level calls the published worker flow needs,
  * without giving it an API key or the environment key: fetch its session
- * (the `resources` list is what tells it which memory stores and skills to
- * materialize), read and answer the session's event log, and read or write
- * the memory stores that session attached. The binding is enforced here,
+ * (the `resources` list tells it which memory stores to materialize and the
+ * `agent.skills` list which skill packages to download), read and answer the
+ * session's event log, fetch the content of exactly the skill versions the
+ * agent assigns, and read or write the memory stores that session attached. The binding is enforced here,
  * not by the request's own claims: the session id in the path must be the
  * session the token was minted for, and a memory store id must appear in
  * that session's attached `resources`.
@@ -107,6 +108,14 @@ export function authorizeSessionWorkCall(
     return outOfScope();
   }
 
+  const skillContentMatch = /^\/v1\/skills\/([^/]+)\/versions\/([^/]+)\/content$/.exec(path);
+  if (skillContentMatch) {
+    if (method !== 'GET') return outOfScope();
+    return sessionAllowsSkillVersion(db, token.sessionId, skillContentMatch[1], skillContentMatch[2])
+      ? ok(token)
+      : deny(401, 'authentication_error', 'Session work token is not valid for this skill version.');
+  }
+
   return outOfScope();
 }
 
@@ -153,4 +162,53 @@ function attachedMemoryStore(db: Database, sessionId: string, memoryStoreId: str
     }
   }
   return null;
+}
+
+/**
+ * Whether the session's agent assigns `skillId` at `versionId`.
+ *
+ * The reference list comes from the same place the session retrieve projects:
+ * the frozen `agent_definition` snapshot when present, else the live `agents`
+ * row the session points at. A pinned reference admits exactly its version id;
+ * an unpinned one admits the `latest` literal or the skill row's current
+ * `latest_version`, which is what the route then serves.
+ */
+function sessionAllowsSkillVersion(db: Database, sessionId: string, skillId: string, versionId: string): boolean {
+  const sessionRow = db.prepare('SELECT agent_id, agent_definition FROM sessions WHERE id = ?').get(sessionId) as
+    | { agent_id: string; agent_definition: string | null }
+    | undefined;
+  if (!sessionRow) return false;
+
+  let definitionJson = sessionRow.agent_definition;
+  if (!definitionJson) {
+    const agentRow = db.prepare('SELECT definition FROM agents WHERE id = ?').get(sessionRow.agent_id) as
+      | { definition: string }
+      | undefined;
+    definitionJson = agentRow?.definition ?? null;
+  }
+  if (!definitionJson) return false;
+
+  let skills: unknown;
+  try {
+    skills = (JSON.parse(definitionJson) as { skills?: unknown }).skills;
+  } catch {
+    return false;
+  }
+  if (!Array.isArray(skills)) return false;
+
+  for (const ref of skills) {
+    if (!ref || typeof ref !== 'object') continue;
+    const r = ref as Record<string, unknown>;
+    if (r.skill_id !== skillId) continue;
+    const pinned = typeof r.version === 'string' && r.version.length > 0 && r.version !== 'latest'
+      ? r.version
+      : undefined;
+    if (pinned) return versionId === pinned;
+    if (versionId === 'latest') return true;
+    const skillRow = db.prepare('SELECT latest_version FROM skills WHERE id = ?').get(skillId) as
+      | { latest_version: string | null }
+      | undefined;
+    return skillRow?.latest_version === versionId;
+  }
+  return false;
 }

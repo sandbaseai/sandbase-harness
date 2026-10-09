@@ -224,7 +224,8 @@ curl http://127.0.0.1:3000/v1/skills/SKILL_ID/versions
 # Retrieve one version's metadata
 curl http://127.0.0.1:3000/v1/skills/SKILL_ID/versions/VERSION_ID
 
-# Download one version's package as a zip archive
+# Download one version's package as a zip archive (`latest` addresses the
+# current version without naming its id)
 curl -OJ http://127.0.0.1:3000/v1/skills/SKILL_ID/versions/VERSION_ID/content
 
 # Delete one version
@@ -242,6 +243,12 @@ Rules:
   version's stored package.
 - Built-in `anthropic` skills expose their version metadata read-only;
   uploads, deletions, and content downloads are refused.
+- The content route accepts the literal `latest` in place of a version id and
+  serves the version `latest_version` currently points at — the spelling a
+  caller holding an unpinned reference (a self-hosted worker downloading the
+  session's packages) uses. A session work token may download only the skill
+  versions its session's agent assigns; every other skill or version is
+  refused.
 
 ## Delete A Skill
 
