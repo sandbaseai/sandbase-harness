@@ -1688,15 +1688,14 @@ Environment's `sandbox_provider` after a session is bound does not change what
 that session's instructions say: the sandbox in hand is the one serving it.
 On `docker` the container's filesystem is the sandbox, so the canonical path is
 the real path and the mount lands verbatim; `kubernetes` rejects anything
-outside `/workspace`. A session that
-attaches a file resource on `kubernetes`, or on a `self_hosted` worker (which
-resolves the path inside its own root), is refused
+outside `/workspace`. A self-hosted worker downloads each attached file through
+its session work token and writes it at the mount path under its own root
+(`<workdir>/mnt/session/uploads/...`). A session that
+attaches a file resource on `kubernetes` is refused
 when it is created with `resource_not_mountable` and `400`, before any record
 exists, instead of being accepted and failing at provisioning
 (`Path escapes sandbox workspace`). The same refusal answers an attempt to attach
-the resource to an existing session on such a backend. The capability is recorded
-as `supported` for the `local` backend in `contracts/anthropic-cma/files.md`,
-which is the scope the entry states.
+the resource to an existing session on such a backend.
 
 ## Session Artifacts
 

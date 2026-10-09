@@ -5,10 +5,12 @@
  * The token is minted per claim inside a work item's `secret` and hands a
  * worker exactly the session-level calls the published worker flow needs,
  * without giving it an API key or the environment key: fetch its session
- * (the `resources` list tells it which memory stores to materialize and the
- * `agent.skills` list which skill packages to download), read and answer the
- * session's event log, fetch the content of exactly the skill versions the
- * agent assigns, and read or write the memory stores that session attached. The binding is enforced here,
+ * (the `resources` list tells it which memory stores and files to
+ * materialize and the `agent.skills` list which skill packages to download),
+ * read and answer the session's event log, fetch the content of exactly the
+ * skill versions the agent assigns, download the file resources the session
+ * attached, and read or write the memory stores that session attached. The
+ * binding is enforced here,
  * not by the request's own claims: the session id in the path must be the
  * session the token was minted for, and a memory store id must appear in
  * that session's attached `resources`.
@@ -116,6 +118,14 @@ export function authorizeSessionWorkCall(
       : deny(401, 'authentication_error', 'Session work token is not valid for this skill version.');
   }
 
+  const fileMatch = /^\/v1\/files\/([^/]+)\/content$/.exec(path);
+  if (fileMatch) {
+    if (method !== 'GET') return outOfScope();
+    return sessionAttachesFile(db, token.sessionId, fileMatch[1])
+      ? ok(token)
+      : deny(401, 'authentication_error', 'Session work token is not valid for this file.');
+  }
+
   return outOfScope();
 }
 
@@ -211,4 +221,30 @@ function sessionAllowsSkillVersion(db: Database, sessionId: string, skillId: str
     return skillRow?.latest_version === versionId;
   }
   return false;
+}
+
+/**
+ * Whether the session's `resources` attach `fileId` — the same list the
+ * worker's session retrieve projects, so the fence and the wire agree about
+ * which files this session's worker may fetch. A file resource is content the
+ * session's creator already chose to hand the sandbox, so an attached id is a
+ * GET admission; everything else answers 401 like any other scope miss.
+ */
+function sessionAttachesFile(db: Database, sessionId: string, fileId: string): boolean {
+  const row = db.prepare('SELECT resources FROM sessions WHERE id = ?').get(sessionId) as
+    | { resources: string }
+    | undefined;
+  if (!row) return false;
+  let resources: unknown;
+  try {
+    resources = JSON.parse(row.resources);
+  } catch {
+    return false;
+  }
+  if (!Array.isArray(resources)) return false;
+  return resources.some(
+    (r) => Boolean(r) && typeof r === 'object'
+      && (r as Record<string, unknown>).type === 'file'
+      && (r as Record<string, unknown>).file_id === fileId,
+  );
 }

@@ -28,12 +28,14 @@ const REPO = { type: 'github_repository', url: 'https://github.com/example/widge
 describe('resource mountability', () => {
   it('names only the resource types a backend cannot serve', () => {
     // `docker` serves both roots verbatim inside the container, so nothing is
-    // refused on it; kubernetes and self_hosted keep their per-type refusals.
+    // refused on it; kubernetes keeps its per-type refusals, and self_hosted
+    // serves files through its worker but still cannot promise a clone.
     expect(unmountableResourceTypes([FILE, REPO], 'docker')).toEqual([]);
     expect(unmountableResourceTypes([REPO], 'kubernetes')).toEqual(['github_repository']);
     // Both, in the order the runtime materializes them, when both are declared.
-    expect(unmountableResourceTypes([REPO, FILE], 'self_hosted')).toEqual(['file', 'github_repository']);
-    expect(unmountableResourceTypes([FILE], 'self_hosted')).toEqual(['file']);
+    expect(unmountableResourceTypes([REPO, FILE], 'kubernetes')).toEqual(['file', 'github_repository']);
+    expect(unmountableResourceTypes([REPO, FILE], 'self_hosted')).toEqual(['github_repository']);
+    expect(unmountableResourceTypes([FILE], 'self_hosted')).toEqual([]);
   });
 
   it('leaves a backend that can serve the canonical roots alone', () => {
@@ -81,17 +83,23 @@ describe('resource mountability', () => {
     // The plural reads as a sentence rather than a list of words.
     let both: unknown;
     try {
-      assertResourcesMountable([FILE, REPO], 'self_hosted');
+      assertResourcesMountable([FILE, REPO], 'kubernetes');
     } catch (error) {
       both = error;
     }
     const bothError = both as Error;
     expect(bothError.message).toContain('cannot mount file and github_repository resources');
     expect(bothError.message).toContain('without those resources');
-    // The self-hosted reason states what the runtime cannot promise, not that the
-    // worker refuses the path: the shipped worker maps an absolute path into its
-    // own root (recorded next to the refusal in the integration suite).
-    expect(bothError.message).toContain('maps the path into its own root');
+    // The self-hosted repository reason states what the runtime cannot promise,
+    // not that the worker refuses the path: cloning belongs to the operator's
+    // process and its credentials.
+    let repoOnly: unknown;
+    try {
+      assertResourcesMountable([REPO], 'self_hosted');
+    } catch (error) {
+      repoOnly = error;
+    }
+    expect((repoOnly as Error).message).toContain('maps the path into its own root');
   });
 
   it('returns instead of throwing where the backend serves the resource', () => {

@@ -5,11 +5,9 @@
  * sandbox directory, and `docker` serves them verbatim inside the container —
  * a file or repository resource mounts on both. `kubernetes` resolves an
  * absolute path inside its own `/workspace` and so refuses the upload root.
- * `self_hosted` is refused on a different ground: its worker maps
- * an absolute path into its own root, so the operator's process decides where the
- * bytes land and the runtime cannot hold it to the canonical roots — the last case
- * here records that measurement so the stated reason is evidence rather than an
- * assumption. A session that
+ * `self_hosted` serves `file` resources now that its worker downloads them
+ * under its own root at the canonical mount path; only its
+ * `github_repository` mount stays refused. A session that
  * declares a `file` or `github_repository` resource on one of those used to be
  * accepted with a `201` and then fail at provisioning, with a path error the
  * caller had no way to connect to the environment they chose.
@@ -232,14 +230,16 @@ describe('resource admission against the session backend', () => {
     expect(JSON.stringify(created.body)).not.toContain('ghp_admission_token');
   });
 
-  it('refuses the same resources on kubernetes and self_hosted', async () => {
+  it('refuses a file resource on kubernetes but admits it on self_hosted', async () => {
     const fileId = await uploadFile('notes.txt', 'attached bytes');
-    for (const environmentId of ['env_kubernetes', 'env_self_hosted']) {
-      const created = await createSession(environmentId, [{ ...FILE_RESOURCE, file_id: fileId }]);
-      expect(created.status, environmentId).toBe(400);
-      expect(created.body.error.code, environmentId).toBe('resource_not_mountable');
-    }
-    expect(counts()).toEqual({ sessions: 0, instances: 0, events: 0 });
+    const refused = await createSession('env_kubernetes', [{ ...FILE_RESOURCE, file_id: fileId }]);
+    expect(refused.status, 'env_kubernetes').toBe(400);
+    expect(refused.body.error.code, 'env_kubernetes').toBe('resource_not_mountable');
+    // The shipped worker downloads the file under its own root at the
+    // canonical mount path, so self_hosted is a serving backend now.
+    const admitted = await createSession('env_self_hosted', [{ ...FILE_RESOURCE, file_id: fileId }]);
+    expect(admitted.status, JSON.stringify(admitted.body)).toBe(201);
+    expect(counts()).toEqual({ sessions: 1, instances: 1, events: 0 });
   });
 
   it('refuses POST /v1/runs before the session exists', async () => {
@@ -349,11 +349,10 @@ describe('resource admission against the session backend', () => {
   });
 
   it('records what the shipped self-hosted worker does with a canonical path', async () => {
-    // The evidence behind the `self_hosted` half of the refusal. The worker does
-    // not refuse `/mnt/session/uploads/...`; it maps an absolute path into its own
-    // root, so where the bytes land is the operator's process to decide and the
-    // runtime cannot verify or enforce the canonical root. That is why the
-    // refusal is stated as "cannot be held to it" rather than "refuses the path".
+    // The mapping worker-side file delivery relies on. The worker does not
+    // refuse `/mnt/session/uploads/...`; it maps an absolute path into its own
+    // root, which is where the runtime's download materialization writes the
+    // attached file bytes.
     const workerRoot = mkdtempSync(join(tmpdir(), 'ma-worker-root-'));
     try {
       await executeWorkItem(

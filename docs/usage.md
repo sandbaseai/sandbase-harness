@@ -366,13 +366,15 @@ the bytes land there verbatim. The agent is told
 where the file landed: a session with a file or repository resource carries a
 `# Session Resources` section in its system prompt naming both spellings on the
 `local` backend, so it does not have to guess the path. See
-[Mounting a file into a session](api.md#mounting-a-file-into-a-session). The other
-shipped backends do not serve that root — `kubernetes` was never exercised
-against a cluster, and a `self_hosted` worker resolves the path inside its own
-root — so the runtime refuses the session rather
+[Mounting a file into a session](api.md#mounting-a-file-into-a-session). A
+`self_hosted` worker downloads each attached file through its session work
+token and writes it at the mount path under its own root, so the file serves
+there too. `kubernetes` was never exercised
+against a cluster and does not serve that root, so the runtime refuses the
+session rather
 than accepting a mount it cannot account for: creating it answers `400` with
-`resource_not_mountable` and writes nothing, so use a `local` or `docker`
-environment or create the session without the resource.
+`resource_not_mountable` and writes nothing, so use a `local`, `docker`, or
+`self_hosted` environment or create the session without the resource.
 
 ## Attach A Memory Store
 

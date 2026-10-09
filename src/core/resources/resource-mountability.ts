@@ -39,15 +39,13 @@ export type SandboxMountedResourceType = (typeof SANDBOX_MOUNTED_RESOURCE_TYPES)
  * a backend that can serve one of the two resources is not a backend that
  * can serve a session's resources.
  *
- * `self_hosted` is listed on the same "not the runtime's to promise" reasoning,
- * not because its worker refuses the path. The shipped worker maps an absolute
- * path into its own root (`/mnt/session/uploads/x` becomes `<worker root>/mnt/
- * session/uploads/x`), so the operator's process decides where bytes land and the
- * runtime cannot verify or enforce that it is the canonical root the resources,
- * the Files API, and the agent's instructions all name; no worker-side mount was
- * ever exercised. `tests/integration/resource-admission-refusal.test.ts` records
- * that measurement next to the refusal, so the wording is evidence rather than
- * an assumption.
+ * `self_hosted` serves `file` resources: the shipped worker downloads each
+ * attached file through its session work token and writes it under its own
+ * root at the canonical mount path (`/mnt/session/uploads/x` becomes
+ * `<worker root>/mnt/session/uploads/x`), so the refusal is not about files.
+ * `github_repository` stays refused on the same "not the runtime's to
+ * promise" reasoning it always carried: cloning belongs to the operator's
+ * process and its credentials, and no worker-side clone was ever exercised.
  *
  * `Map`s rather than object literals: a provider name is caller-supplied
  * configuration, and `'toString' in {}` is true, which would turn an unknown
@@ -67,7 +65,6 @@ const UNSERVING_BACKENDS = new Map<string, ReadonlyMap<SandboxMountedResourceTyp
   [
     'self_hosted',
     new Map<SandboxMountedResourceType, string>([
-      ['file', 'the worker maps the path into its own root, which the runtime cannot hold to the canonical roots'],
       ['github_repository', 'the worker maps the path into its own root, which the runtime cannot hold to the canonical roots'],
     ]),
   ],
