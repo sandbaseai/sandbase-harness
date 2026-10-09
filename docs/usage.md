@@ -192,11 +192,20 @@ reported in the runtime log rather than silently dropped.
 
 Consequences worth knowing before choosing one:
 
-- **Local is not a security boundary.** File tools are confined to the session
-  workspace and the child process environment is reduced to an allowlist, but a
-  shell command still runs as the same OS user on the same machine as the
-  runtime: it can read outside the workspace and reach the network. Use it for
-  trusted local development, not for running untrusted agent output.
+- **Local is not a VM boundary.** File tools are confined to the session
+  workspace and the child process environment is reduced to an allowlist. On
+  POSIX hosts carrying the tooling, commands additionally run under OS-level
+  confinement — `sandbox-exec` on macOS or `bubblewrap` on Linux — which
+  denies writes outside the session workdir, temp dirs, and device files while
+  leaving reads and egress untouched. It is a best-effort seatbelt/namespace
+  boundary, not a kernel VM boundary: the command still runs as the same OS
+  user on the same machine, and a host without the tooling falls back to
+  plain subprocesses. `MANAGED_AGENTS_LOCAL_ISOLATION=off` disables the wrap,
+  `=require` makes a missing tool fail the command instead of degrading, and
+  `MANAGED_AGENTS_LOCAL_ISOLATION_WRITE_PATHS` lists extra writable roots for
+  toolchains that need them. Windows has no equivalent — nothing is wrapped
+  there. Use `local` for trusted development and `docker` for untrusted agent
+  output.
 - **Workspace snapshots need a host workspace.** Only `local` exposes one, so
   snapshots are unavailable on the other three. Enabling them anyway logs a
   warning naming the missing capability.

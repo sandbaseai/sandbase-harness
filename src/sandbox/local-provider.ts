@@ -4,13 +4,17 @@
  * Default execution backend: runs commands as local subprocesses.
  * Working directory: <runtime-data-dir>/sandbox/<session_id>/
  *
- * No kernel-level isolation. File tools are confined to the workspace by path
+ * No VM-level isolation. File tools are confined to the workspace by path
  * resolution (including symlink-escape checks) and the subprocess environment
- * is reduced to an allowlist, but a shell command still runs as the same OS
- * user on the same machine as the runtime: it can read outside the workspace
- * and reach the network. This is why the provider declares
- * `isolatedExecution: false` — suitable for trusted local development, not for
- * running untrusted agent output.
+ * is reduced to an allowlist. On POSIX hosts that carry the tooling,
+ * `execute` additionally wraps each command in OS-level confinement —
+ * `sandbox-exec` on macOS, `bubblewrap` on Linux — which denies writes
+ * outside the workdir (see `local-isolation.ts`). That is a best-effort
+ * seatbelt/namespace boundary, not a kernel VM boundary: a command still runs
+ * as the same OS user, can read the host filesystem, and reaches the network
+ * subject to the egress policy. This is why the provider keeps
+ * `isolatedExecution: false` — suitable for trusted local development, not
+ * for running untrusted agent output; use `docker` for that.
  *
  * ## Canonical in-sandbox roots
  *
@@ -78,6 +82,11 @@ import {
 } from '@/types/sandbox.js';
 import { withAgentIdentity } from './agent-identity.js';
 import { EgressProxy } from '@/core/net/egress-proxy.js';
+import {
+  localIsolationMode,
+  localIsolationPlan,
+  type LocalIsolationPlan,
+} from './local-isolation.js';
 import {
   environmentEgressAllowlist,
   environmentNetworkPolicyOf,
@@ -218,11 +227,37 @@ export class LocalSandboxProvider implements SandboxProvider {
 }
 
 class LocalSandboxInstance implements SandboxInstance {
+  /** Resolved lazily on the first command — `undefined` until probed. */
+  private isolation: LocalIsolationPlan | null | undefined;
+
   constructor(
     readonly sessionId: string,
     private readonly workDir: string,
     private readonly egress?: EgressProxy,
   ) {}
+
+  /**
+   * The OS-level confinement plan for commands, when the host carries
+   * `sandbox-exec` (macOS) or `bubblewrap` (Linux) and the operator has not
+   * turned it off. `MANAGED_AGENTS_LOCAL_ISOLATION=require` throws here
+   * rather than running unconfined; `auto` warns once and degrades to a plain
+   * subprocess, and Windows takes the plain path unconditionally.
+   */
+  private confinement(): LocalIsolationPlan | null {
+    if (this.isolation === undefined) {
+      this.isolation = localIsolationPlan(this.workDir);
+      if (
+        this.isolation === null &&
+        localIsolationMode(process.env) === 'auto' &&
+        process.platform !== 'win32'
+      ) {
+        console.warn(
+          `local sandbox ${this.sessionId}: neither sandbox-exec nor bubblewrap found; commands run unconfined`,
+        );
+      }
+    }
+    return this.isolation;
+  }
 
   /**
    * The proxy block runtime-spawned session processes (stdio MCP servers)
@@ -302,7 +337,10 @@ class LocalSandboxInstance implements SandboxInstance {
       let timedOut = false;
       let resolved = false;
 
-      const shell = shellInvocation(command);
+      // Confinement wraps the resolved shell invocation: the seatbelt/bwrap
+      // boundary is about writes outside the workdir, not about which shell
+      // runs the command.
+      const shell = this.confinement()?.wrap(shellInvocation(command)) ?? shellInvocation(command);
       const proc = spawn(shell.file, shell.args, {
         cwd,
         env,

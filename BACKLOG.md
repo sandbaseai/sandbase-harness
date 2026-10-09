@@ -34,10 +34,11 @@ project-owned features only.
 
 ## Sandboxes
 
-- Harden local sandbox defaults. The local backend has path confinement and an
-  environment allowlist but no kernel boundary; add OS-level isolation
-  (`sandbox-exec` on macOS, `bubblewrap` on Linux) so `local` can declare
-  `isolatedExecution`.
+- Harden local sandbox defaults. The local backend now wraps commands in
+  `sandbox-exec` (macOS) or `bubblewrap` (Linux) when the tool is present —
+  writes confined to the workdir — but that is a best-effort boundary, not a
+  VM. Remaining hardening: network namespacing (today the egress proxy is
+  env-level), resource limits, and a confinement story for Windows hosts.
 - Expand Docker examples and resource-limit coverage.
 - Run the Kubernetes live-cluster suites in CI. They exist and pass against a
   real cluster, but they skip when no cluster is reachable, so nothing currently

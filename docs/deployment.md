@@ -103,6 +103,16 @@ volumes:
 For stronger isolation, run Docker-backed sandboxes only on hosts where the
 container runtime and permissions are explicitly managed.
 
+The `local` backend wraps every sandbox command in OS-level confinement when
+the host carries the tooling: `sandbox-exec` on macOS (`/usr/bin/sandbox-exec`)
+or `bubblewrap` on Linux (`bwrap`, install the `bubblewrap` package). The wrap
+denies writes outside the session workdir, temp dirs, and device files —
+reads and the egress policy are unchanged. Detection is automatic; set
+`MANAGED_AGENTS_LOCAL_ISOLATION=off` to run unconfined, `=require` to fail a
+command rather than degrade, and `MANAGED_AGENTS_LOCAL_ISOLATION_WRITE_PATHS`
+to grant extra writable roots. Windows hosts run unconfined regardless — use
+Docker for untrusted work there.
+
 A reference session-sandbox image is published at
 `ghcr.io/sandbaseai/sandbase-harness-sandbox`. It approximates the published
 cloud sandbox toolchain (Ubuntu 24.04, Python 3.12, Node 22, git, jq,
