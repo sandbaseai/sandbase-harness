@@ -299,6 +299,27 @@
 
 ### Fixed
 
+- Auxiliary model requests are now recorded on the same canonical
+  span-plus-aggregate path as agent-turn requests. Context compaction,
+  outcome grading, the operations-route outcome evaluator, and the
+  auto-permission judge each append a `span.model_request_end` carrying the
+  request's `model_usage` buckets (including cache read/write) and a
+  `metadata.auxiliary` marker, and the same request's usage counts once in
+  the session aggregate, session spend, and runtime metrics. Previously
+  these calls dropped their usage entirely — the permission judge recorded
+  an aggregate without a span, the others recorded nothing — so the session
+  total and the sum over request spans diverged, and cache buckets from
+  auxiliary calls disappeared. Auxiliary spans never anchor
+  `measuredContextTokens`, so a compaction's own request cannot retrigger
+  compaction, and `events-to-messages` still ignores spans when rebuilding
+  context.
+- The Docker availability probe now retries instead of judging the daemon
+  on a single 5s `docker version` spawn. A missing CLI or stopped daemon
+  still answers immediately — the retries exist for a healthy daemon whose
+  spawn stalls under a loaded process table (observed on Windows under
+  parallel test workers), which previously left the docker provider
+  unregistered at boot and sent `cloud`/`docker` sessions down the wrong
+  backend path.
 - The Console no longer presents or pins the retired pre-`cloud`-binding
   defaults. The environment create dialog and the hosting-type picker now
   describe `cloud` as Docker with the published reference image instead of
@@ -1231,8 +1252,6 @@ ext_page as well as on the first page. No runtime behaviour changes.
   authority only after validation.
 - Documents the maintainer and organic project-promotion workflow in
   `AGENTS.md` and keeps the DeepSeek Harness Handbook discovery link current.
-
-## Unreleased
 
 ## 0.3.7 - 2026-08-20
 

@@ -22,6 +22,15 @@ unscoped npm package. Keep the profile and Hub log until the runtime starts;
 see [Issue #78](https://github.com/sandbaseai/sandbase-harness/issues/78) for
 the original report and recovery discussion.
 
+A git-source add builds `dist/` through the package's `prepare` script, and
+pnpm blocks that script on first run with
+`ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED`. Add the exact key pnpm prints under
+`allowBuilds:` in the profile's `pnpm-workspace.yaml`, then re-run the add
+command — the same workaround the
+[DeepSeek Harness example](../examples/deepseek-harness/README.md#troubleshooting)
+documents. A checkout added with `dsh plugin add -w <path>` skips `prepare`
+entirely but needs a local `npm run build` first.
+
 ## Requirements
 
 - Node.js 22 or newer
