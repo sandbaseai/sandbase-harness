@@ -93,7 +93,9 @@ export function bubblewrapAvailable(platform: NodeJS.Platform): boolean {
 function seatbeltProfile(workDir: string, writePaths: string[], tmpRoot: string): string {
   const writable = [workDir, '/tmp', '/private/tmp', tmpRoot, '/dev', ...writePaths]
     .filter((path, index, all) => path && all.indexOf(path) === index)
-    .map((path) => `(subpath "${path.replace(/\\/g, '/').replace(/"/g, '\\"')}")`)
+    // Seatbelt string quoting: backslashes first, then quotes, so a path can
+    // never break out of the subpath literal.
+    .map((path) => `(subpath "${path.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}")`)
     .join(' ');
   return (
     '(version 1)(allow default)(deny file-write*)' +
