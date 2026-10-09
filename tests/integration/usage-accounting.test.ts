@@ -4,8 +4,8 @@
  * The unit test asserts the identity against a hand-built log. This one drives
  * `DefaultStrategy` with a mock model of known usage, so it also covers the two
  * write paths themselves: the `span.model_request_end` append and the
- * `recordUsage` call that must accompany it, at `default-strategy.ts:190` and
- * `:199`. Drop either one and this goes red.
+ * `recordUsage` call that must accompany it, both in `onStepFinish` of
+ * `default-strategy.ts`. Drop either one and this goes red.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -20,38 +20,39 @@ import { ModelRegistry } from '@/model/registry.js';
 import { LocalSandboxProvider } from '@/sandbox/local-provider.js';
 import { runtimeRoutes } from '@/api/routes/runtime.js';
 import type { ServerDeps } from '@/api/server.js';
-import type { LanguageModelV1 } from 'ai';
+import type { LanguageModel } from 'ai';
 
 const PROMPT_TOKENS = 120;
 const COMPLETION_TOKENS = 30;
+const STOP = { unified: 'stop', raw: 'stop' } as const;
 
-function usageReportingModel(): LanguageModelV1 {
-  const usage = { promptTokens: PROMPT_TOKENS, completionTokens: COMPLETION_TOKENS };
+function usageReportingModel(): LanguageModel {
+  const usage = {
+    inputTokens: { total: PROMPT_TOKENS, noCache: PROMPT_TOKENS, cacheRead: undefined, cacheWrite: undefined },
+    outputTokens: { total: COMPLETION_TOKENS, text: COMPLETION_TOKENS, reasoning: undefined },
+  };
   return {
-    specificationVersion: 'v1',
+    specificationVersion: 'v4',
     provider: 'test',
     modelId: 'usage-reporting',
+    supportedUrls: {},
     async doGenerate() {
-      return {
-        text: 'ok',
-        finishReason: 'stop',
-        usage,
-        rawCall: { rawPrompt: null, rawSettings: {} },
-      } as any;
+      throw new Error('not used');
     },
     async doStream() {
       return {
         stream: new ReadableStream({
           start(controller) {
-            controller.enqueue({ type: 'text-delta', textDelta: 'ok' });
-            controller.enqueue({ type: 'finish', finishReason: 'stop', usage });
+            controller.enqueue({ type: 'text-start', id: 'text_1' });
+            controller.enqueue({ type: 'text-delta', id: 'text_1', delta: 'ok' });
+            controller.enqueue({ type: 'text-end', id: 'text_1' });
+            controller.enqueue({ type: 'finish', finishReason: STOP, usage });
             controller.close();
           },
         }),
-        rawCall: { rawPrompt: null, rawSettings: {} },
       } as any;
     },
-  } as unknown as LanguageModelV1;
+  } as unknown as LanguageModel;
 }
 
 interface MetricsSummary {
@@ -96,11 +97,26 @@ describe('usage accounting identity over a real turn', () => {
   });
 
   async function runTurn(sessionId: string, text: string): Promise<void> {
+    const log = manager.getEventLogger();
+    const before = log.getLatestSeq(sessionId);
     await manager.sendEvent(sessionId, {
       type: 'user.message',
       content: [{ type: 'text', text }],
     } as any);
-    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Poll for this turn's terminal event rather than sleep a fixed interval:
+    // a loaded machine makes any constant both slow and still unreliable, and
+    // the session status alone cannot say whether *this* turn ran when the
+    // previous one left the session paused.
+    const deadline = Date.now() + 15_000;
+    while (true) {
+      const settled = log.getEvents(sessionId, before).some((event) =>
+        event.type === 'session.status_idle'
+        || event.type === 'session.status_terminated'
+        || event.type === 'session.error');
+      if (settled) return;
+      if (Date.now() >= deadline) throw new Error(`turn for ${sessionId} did not settle within 15s`);
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
   }
 
   it('agrees with itself after one turn, and reports the model usage once', async () => {
