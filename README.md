@@ -44,7 +44,7 @@ is that runtime layer — not a visual workflow builder and not another model SD
 - Sandbox backends: local process, Docker (per-session containers), Kubernetes
   (kubectl exec/cp), self-hosted worker queue
 - MCP toolsets, permission policies, built-in tools, and skill packages
-- TypeScript SDK at `managed-agents/sdk`
+- TypeScript SDK at `@sandbaseai/harness/sdk`
 - Release gate: `npm run release:check`
 
 ## Quick Start
@@ -54,13 +54,10 @@ Anthropic, MiniMax, or any OpenAI-compatible endpoint). Docker is optional and
 only needed for Docker-backed sandboxes.
 
 ```bash
-git clone --branch v0.3.8 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
-cd sandbase-harness
-npm ci
-npm run build
-mkdir ../my-agents && cd ../my-agents
-node ../sandbase-harness/dist/index.js init
-node ../sandbase-harness/dist/index.js start
+npm install -g @sandbaseai/harness
+mkdir my-agents && cd my-agents
+managed-agents init
+managed-agents start
 ```
 
 `init` writes a workspace into the directory you run it from: an agent, a skills
@@ -85,7 +82,7 @@ Send the first message from the Console: open **Sessions**, create a session for
 the agent, and type into the composer. From a terminal it is one command:
 
 ```bash
-node ../sandbase-harness/dist/index.js chat agent_assistant --message "hello" --tool-approval allow
+managed-agents chat agent_assistant --message "hello" --tool-approval allow
 ```
 
 `chat` sends that one message and exits once the turn settles; without
@@ -94,10 +91,10 @@ node ../sandbase-harness/dist/index.js chat agent_assistant --message "hello" --
 preauthorizes the tool calls the agent may make, which the `init` template
 otherwise parks for approval and waits for a person to answer; see [CLI](#cli).
 
-The unscoped `managed-agents` name on npm is not this project. Until an
-official scoped package is announced in this repository, install only from the
-tagged GitHub source release shown above. Do not run `npx managed-agents` or
-`npm install managed-agents`.
+The official npm package is the scoped `@sandbaseai/harness`. The unscoped
+`managed-agents` name on npm belongs to an unrelated project — do not run
+`npx managed-agents` or `npm install managed-agents`. To build from source
+instead, see [docs/installation.md](docs/installation.md).
 
 ### Try it in Codespaces
 
@@ -237,7 +234,7 @@ client can produce its result, and `chat` says so and exits non-zero. See
 ## SDK
 
 ```typescript
-import { ManagedAgentsClient } from 'managed-agents/sdk';
+import { ManagedAgentsClient } from '@sandbaseai/harness/sdk';
 
 const client = new ManagedAgentsClient({
   baseUrl: 'http://127.0.0.1:3000',

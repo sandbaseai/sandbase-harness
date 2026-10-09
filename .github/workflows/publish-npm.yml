@@ -1,0 +1,34 @@
+name: Publish npm Package
+
+on:
+  release:
+    types: [published]
+
+permissions: read-all
+
+jobs:
+  publish:
+    name: Publish the scoped package to npm
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org/'
+
+      # npm trusted publishing requires CLI >= 11.5.1; Node 22 bundles npm 10.
+      - run: npm install -g npm@latest
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - run: npm run package:check
+
+      - name: Publish with provenance
+        run: npm publish --provenance

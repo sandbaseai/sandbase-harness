@@ -8,11 +8,21 @@ and the local Console.
 
 If the DSH Plugin Hub reports `already installed: managed-agents` after a
 partial or repeated install, update the Hub and remove only the exact residual
-entry shown in its Installed view before retrying the tagged HTTPS Git source:
+entry shown in its Installed view before retrying. Prefer the scoped npm
+package, which needs no build step:
 
 ```bash
 dsh plugin --profile web update dsh-plugin
 dsh plugin --profile web remove managed-agents
+dsh plugin --profile web add @sandbaseai/harness
+```
+
+The tagged HTTPS Git source still works once the profile allows the package's
+`prepare` build — pnpm reports `ERR_PNPM_GIT_DEP_PREPARE_NOT_ALLOWED` and
+prints the key to add under `allowBuilds:` in the profile's
+`pnpm-workspace.yaml`; re-run the git add afterwards:
+
+```bash
 dsh plugin --profile web add git+https://github.com/sandbaseai/sandbase-harness.git
 ```
 
@@ -29,15 +39,31 @@ the original report and recovery discussion.
 - A model vendor API key or an OpenAI-compatible local endpoint
 - Docker, only when using Docker-backed sandboxes
 
-## Install From A Tagged Source Release
+## Install From npm
 
-The unscoped `managed-agents` package currently visible on npm is not this
-project. Until an official scoped package is announced in this repository, use
-the tagged GitHub source release and do not run `npx managed-agents` or
-`npm install managed-agents`.
+The official package is the scoped `@sandbaseai/harness`. The unscoped
+`managed-agents` name on npm belongs to an unrelated project — do not run
+`npx managed-agents` or `npm install managed-agents`.
 
 ```bash
-git clone --branch v0.3.8 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
+npm install -g @sandbaseai/harness
+mkdir my-agents
+cd my-agents
+managed-agents init
+managed-agents start
+```
+
+The package also installs under pnpm, yarn, or a URL spec — every GitHub
+release attaches a prebuilt `sandbase-harness-<version>.tgz` asset, so
+`pnpm add https://github.com/sandbaseai/sandbase-harness/releases/download/v<version>/sandbase-harness-<version>.tgz`
+works without any build step.
+
+## Install From A Tagged Source Release
+
+Use a source checkout when contributing or auditing the build:
+
+```bash
+git clone --branch v0.4.0 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
 cd sandbase-harness
 npm ci
 npm run build

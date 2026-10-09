@@ -3,7 +3,7 @@
  * managed-agents SDK — public client entry point.
  *
  * Usage:
- *   import { ManagedAgentsClient } from 'managed-agents/sdk';
+ *   import { ManagedAgentsClient } from '@sandbaseai/harness/sdk';
  *   const client = new ManagedAgentsClient({ baseUrl: 'http://localhost:3000' });
  *   const session = await client.sessions.create({ agent: 'agent_assistant' });
  *   for await (const ev of client.sessions.chat(session.id, 'hello')) {

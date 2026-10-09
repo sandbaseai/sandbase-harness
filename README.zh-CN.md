@@ -40,7 +40,7 @@ Memory、凭证、审计日志、事件回放和可视化 Console 放在同一�
 - 可恢复的 Server-Sent Events 与会话事件回放
 - Local、Docker、Kubernetes 和自托管 Worker 沙箱
 - MCP Toolset、权限策略、内置工具和 Skill Package
-- TypeScript SDK：managed-agents/sdk
+- TypeScript SDK：@sandbaseai/harness/sdk
 - 发布门禁：npm run release:check
 
 ## 五分钟快速开始
@@ -50,14 +50,10 @@ MiniMax 或任意 OpenAI-compatible 端点）。Docker 可选，只有使用 Doc
 才需要。
 
 ~~~bash
-git clone --branch v0.3.8 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
-cd sandbase-harness
-npm ci
-npm run build
-
-mkdir ../my-agents && cd ../my-agents
-node ../sandbase-harness/dist/index.js init
-node ../sandbase-harness/dist/index.js start
+npm install -g @sandbaseai/harness
+mkdir my-agents && cd my-agents
+managed-agents init
+managed-agents start
 ~~~
 
 `init` 会在你执行命令的目录里生成工作区：一个 Agent、一个 Skill 目录，以及
@@ -78,7 +74,7 @@ node ../sandbase-harness/dist/index.js start
 在终端里用一条命令：
 
 ~~~bash
-node ../sandbase-harness/dist/index.js chat agent_assistant --message "你好" --tool-approval allow
+managed-agents chat agent_assistant --message "你好" --tool-approval allow
 ~~~
 
 `chat` 发完这一条消息、回合结束就退出；不带 `--message` 时才会保持会话打开，
@@ -86,9 +82,10 @@ node ../sandbase-harness/dist/index.js chat agent_assistant --message "你好" -
 可能发起的工具调用；`init` 模板默认会把这些调用挂起等待人工确认。其余命令见
 [CLI](#cli)。
 
-npm 上未加 scope 的 managed-agents **不是**本项目。在本仓库公布官方 scoped 包之前，
-请只使用上面带标签的 GitHub 源码安装。不要运行 npx managed-agents 或
-npm install managed-agents。
+npm 上的官方包是带 scope 的 `@sandbaseai/harness`；未加 scope 的
+`managed-agents` 属于无关项目，不要运行 `npx managed-agents` 或
+`npm install managed-agents`。如需从源码构建，见
+[docs/installation.md](docs/installation.md)。
 
 ### 在 Codespaces 中试用
 
@@ -221,7 +218,7 @@ managed-agents template list | install <name> | create <name>
 ## SDK
 
 ```typescript
-import { ManagedAgentsClient } from 'managed-agents/sdk';
+import { ManagedAgentsClient } from '@sandbaseai/harness/sdk';
 
 const client = new ManagedAgentsClient({
   baseUrl: 'http://127.0.0.1:3000',

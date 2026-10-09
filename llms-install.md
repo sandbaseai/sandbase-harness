@@ -13,15 +13,16 @@ standalone model provider.
 ## Start the runtime
 
 ```bash
-git clone --branch v0.3.8 --depth 1 https://github.com/sandbaseai/sandbase-harness.git
-cd sandbase-harness
-npm ci
-npm run build
-mkdir ../sandbase-workspace
-cd ../sandbase-workspace
-node ../sandbase-harness/dist/index.js init
-node ../sandbase-harness/dist/index.js start --workspace "$PWD"
+npm install -g @sandbaseai/harness
+mkdir sandbase-workspace
+cd sandbase-workspace
+managed-agents init
+managed-agents start --workspace "$PWD"
 ```
+
+From a tagged source checkout instead, run `npm ci && npm run build` in the
+clone and use `node ../sandbase-harness/dist/index.js` in place of
+`managed-agents`.
 
 ## Connect the MCP bridge with Docker
 

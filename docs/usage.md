@@ -456,7 +456,7 @@ Attach one or more vaults when creating a session:
 ## TypeScript SDK
 
 ```typescript
-import { ManagedAgentsClient } from 'managed-agents/sdk';
+import { ManagedAgentsClient } from '@sandbaseai/harness/sdk';
 
 const client = new ManagedAgentsClient({
   baseUrl: 'http://127.0.0.1:3000',
@@ -474,7 +474,7 @@ for await (const event of client.sessions.chat(session.id, 'Hello')) {
 }
 ```
 
-`managed-agents/sdk` also exports the session workflows the CLI itself is built
+`@sandbaseai/harness/sdk` also exports the session workflows the CLI itself is built
 on, each taking `client.sessions` as its first argument: `collectReply` streams a
 turn and returns `{ text, events }`; `sessionHistory` returns the whole recorded
 log, paginated through `next_page` for you; `followSession` yields that log and
@@ -492,7 +492,7 @@ instead of on the
 message, which is prose and may be reworded:
 
 ```typescript
-import { ManagedAgentsApiError } from 'managed-agents/sdk';
+import { ManagedAgentsApiError } from '@sandbaseai/harness/sdk';
 
 try {
   await client.sessions.create({ agent: 'assistant' });

@@ -38,7 +38,7 @@ describe('v1 local-first architecture spec', () => {
     expect(readme).not.toContain('"name": "Default cloud"');
     expect(readme).not.toContain('Local, Docker, and self-hosted sandbox provider support');
     expect(readme).not.toContain('OpenAI-compatible, Ollama-compatible, and Anthropic model adapters');
-    expect(readme.indexOf("import { ManagedAgentsClient } from 'managed-agents/sdk'"))
+    expect(readme.indexOf("import { ManagedAgentsClient } from '@sandbaseai/harness/sdk'"))
       .toBeLessThan(readme.indexOf("import Anthropic from '@anthropic-ai/sdk'"));
 
     expect(docsIndex).toContain('## Advanced / Optional');

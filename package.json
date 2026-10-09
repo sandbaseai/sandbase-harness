@@ -1,7 +1,6 @@
 {
-  "name": "managed-agents",
+  "name": "@sandbaseai/harness",
   "version": "0.3.8",
-  "private": true,
   "description": "Local-first, self-hosted AI agent runtime with Claude Managed Agents-style APIs, sandboxed sessions, memory, tools, audit, replay, and a local Console.",
   "type": "module",
   "homepage": "https://github.com/sandbaseai/sandbase-harness#readme",
@@ -26,7 +25,8 @@
   },
   "bin": {
     "managed-agents": "dist/index.js",
-    "managed-agents-mcp": "dist/mcp/index.js"
+    "managed-agents-mcp": "dist/mcp/index.js",
+    "sandbase-harness": "dist/index.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

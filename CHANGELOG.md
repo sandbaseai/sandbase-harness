@@ -267,6 +267,15 @@
 
 ### Changed
 
+- The package is published to npm as the scoped `@sandbaseai/harness`. The
+  unscoped `managed-agents` name on the registry belongs to an unrelated
+  project and was never this runtime; installs move from the tagged GitHub
+  source checkout to `npm install -g @sandbaseai/harness`, and the SDK import
+  specifier becomes `@sandbaseai/harness/sdk`. The CLI binaries keep their
+  names (`managed-agents`, `managed-agents-mcp`), joined by a
+  `sandbase-harness` alias on the same entry point, and every GitHub release
+  still attaches a prebuilt `sandbase-harness-<version>.tgz` for URL-spec
+  installs that do not touch the registry.
 - Webhook rotation windows now close on their own: a rotation stamps the
   moment it opened, and once the window has been open for the deployment's
   duration the previous secret is retired — dropped from the row, enforced
