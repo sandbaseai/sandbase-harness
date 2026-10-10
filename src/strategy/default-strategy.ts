@@ -1035,6 +1035,7 @@ export function wrapGovernedToolsForExternalAuthorization(
     id: string;
     environmentId?: string | null;
     loopEngine?: string | null;
+    vaultIds?: string[];
     agentDefinition?: { tools?: unknown[] };
   },
   authorize: ExternalAuthorizationHook,
@@ -1049,6 +1050,7 @@ export function wrapGovernedToolsForExternalAuthorization(
   const policyContext = {
     environmentId: session.environmentId ?? null,
     loopEngine: session.loopEngine ?? 'builtin',
+    vaultIds: session.vaultIds ?? [],
     toolPolicies,
   };
   return Object.fromEntries(
@@ -1098,6 +1100,7 @@ export function externalAuthorizationTool(
     policyContext: {
       environmentId: string | null;
       loopEngine: string | null;
+      vaultIds: string[];
       toolPolicies: Record<string, string | undefined>;
     };
     authorize: ExternalAuthorizationHook;

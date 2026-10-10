@@ -86,6 +86,8 @@ export function policyContextDigest(input: {
   environmentId?: string | null;
   loopEngine?: string | null;
   toolPolicies: Record<string, string | undefined>;
+  /** The credential-set identity bound to the session — a changed set can change the decision. */
+  vaultIds?: string[];
 }): string {
   return authorizationDigest({
     digest_schema: EXTERNAL_AUTHORIZATION_DIGEST_SCHEMA,
@@ -94,6 +96,7 @@ export function policyContextDigest(input: {
     environment_id: input.environmentId ?? null,
     loop_engine: input.loopEngine ?? null,
     tool_policies: input.toolPolicies,
+    vault_ids: input.vaultIds ?? [],
   });
 }
 
