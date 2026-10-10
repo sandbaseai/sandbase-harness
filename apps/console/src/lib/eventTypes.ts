@@ -61,6 +61,7 @@ export const LOCAL_SESSION_EVENT_TYPES = [
   'user.steer',
   'turn_complete',
   'internal.resume_after_budget',
+  'agent.external_authorization',
 ] as const;
 
 /** Events that open a tool call in the transcript. */

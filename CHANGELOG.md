@@ -4,6 +4,22 @@
 
 ### Added
 
+- An optional external authorization-freshness boundary for long-running
+  sessions (#812). Setting `MANAGED_AGENTS_EXTERNAL_AUTHZ_ENDPOINT` makes the
+  runtime present every governed tool call the local permission policy
+  already admitted to an external control plane, immediately before
+  execution. The hook is veto-only — it can refuse a call but never widen a
+  local denial — and fail-closed, so a timeout
+  (`MANAGED_AGENTS_EXTERNAL_AUTHZ_TIMEOUT_MS`, default 2000 ms), an
+  unreachable endpoint, or a malformed verdict refuses the call rather than
+  releasing it. The request is a versioned `sandbase.authz/v1` envelope
+  carrying digests over the session's effective posture (`sandbase.digest/v1`
+  canonical JSON), which is what lets the authorizer detect that the policy a
+  prior authorization was granted under has changed. A refusal is answered to
+  the model as a synthetic error result and persisted as an
+  `agent.external_authorization` audit event carrying the reason code and the
+  binding digests — no raw arguments and no secrets. With the endpoint unset
+  nothing in the permission/approval path changes.
 - The self-hosted environment page can now issue worker keys. The keys
   table reads `GET /v1/environments/{id}/worker-keys` (it previously
   rendered a metadata field nothing writes, so it was always empty), and

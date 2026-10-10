@@ -114,6 +114,14 @@ export interface AgentStrategyConfig {
    * session without a budget is.
    */
   budgetExhausted?: () => boolean;
+  /**
+   * Optional external authorization-freshness check, consulted once per
+   * governed tool call after the local permission policy cleared it and
+   * immediately before execution. Veto-only: a `refuse` blocks the call, an
+   * `allow` never widens a local denial, and every hook failure collapses to
+   * `refuse`. Absent means "no external check" — the turn is unchanged.
+   */
+  authorizeExternal?: ExternalAuthorizationHook;
   /** Called once before the maxSteps loop starts */
   beforeTurn?: (ctx: StrategyContext) => Promise<void>;
   /** Called after each tool-loop step completes */
@@ -171,6 +179,73 @@ export interface AutoPermissionCall {
 }
 
 export type AutoPermissionEvaluator = (call: AutoPermissionCall) => Promise<AutoPermissionVerdict>;
+
+// ============================================================
+// External Authorization (authorization-freshness hook)
+// ============================================================
+
+/**
+ * The authorization-freshness boundary, composed with — not replacing — the
+ * local permission model.
+ *
+ * When `config.authorizeExternal` is set, every governed tool call that the
+ * local policy already cleared is presented to the hook immediately before
+ * execution. The hook is *veto-only*: it may refuse a call (the local policy
+ * denied it? this never even runs) but an `allow` never widens what the
+ * local policy decided. When the hook is absent, nothing in the turn's
+ * behavior changes.
+ */
+export interface ExternalAuthorizationRequest {
+  /** Envelope version both sides canonicalize against. */
+  schema: 'sandbase.authz/v1';
+  session_id: string;
+  /** The model-assigned tool-call id — the logical invocation the verdict binds to. */
+  invocation_id: string;
+  /** The operation being authorized; `tool.execute` for the first slice. */
+  capability: string;
+  /** The invocation's target — the governed tool's name. */
+  target: string;
+  /** sha256 of the canonical-JSON invocation input (`digest_schema`). */
+  arguments_digest: string;
+  /**
+   * sha256 of the canonical-JSON decision-relevant context (`digest_schema`):
+   * the session's effective tool policies, its environment identity, and its
+   * loop engine. A policy change alters the digest, which is what makes a
+   * prior authorization stale.
+   */
+  policy_context_digest: string;
+  /** The canonicalization/digest version used for both digests. */
+  digest_schema: 'sandbase.digest/v1';
+}
+
+/** The grounds a refusal reports on the `agent.external_authorization` event. */
+export type ExternalAuthorizationRefusalReason =
+  | 'denied'
+  | 'reauthorize'
+  | 'unavailable'
+  | 'malformed';
+
+/**
+ * What the hook answers. `refuse` covers every negative outcome — an explicit
+ * denial, a stale authorization that needs re-issue, and the fail-closed
+ * collapse of a timeout, unreachable endpoint, or unreadable response.
+ */
+export type ExternalAuthorizationOutcome =
+  | { type: 'allow' }
+  | {
+      type: 'refuse';
+      reasonCode: ExternalAuthorizationRefusalReason;
+      /** Human-readable grounds from the authorizer; free text, no secrets. */
+      reason?: string;
+      /** The policy generation the verdict was computed under, if reported. */
+      policy_version?: string;
+      /** The authorizer's own decision id, for cross-system evidence. */
+      decision_id?: string;
+    };
+
+export type ExternalAuthorizationHook = (
+  request: ExternalAuthorizationRequest,
+) => Promise<ExternalAuthorizationOutcome>;
 
 // ============================================================
 // Step & Completion Results

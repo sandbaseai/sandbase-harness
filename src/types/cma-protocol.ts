@@ -37,6 +37,8 @@ export type CMAEventType =
   | 'agent.mcp_tool_result'
   | 'agent.custom_tool_use'
   | 'agent.thread_context_compacted'
+  // Local extension — an external authorization hook refused a governed call
+  | 'agent.external_authorization'
   // Streaming events (transient — broadcast over SSE only, never persisted)
   | 'agent.message_stream_start'
   | 'agent.message_chunk'
@@ -309,6 +311,18 @@ export interface AgentThreadContextCompactedEvent extends EventBase {
   type: 'agent.thread_context_compacted';
 }
 
+/**
+ * Audit record for an external authorization refusal — a local extension, not
+ * part of the published vocabulary. Emitted only when the veto-only hook
+ * (`config.authorizeExternal`) blocks a governed call: the refusal's grounds
+ * (`reason_code`, `reason`, `policy_version`, `decision_id`) and the binding
+ * (`invocation_id`, `capability`, `target`, both digests) ride in `metadata`.
+ * No raw arguments and no secrets are recorded.
+ */
+export interface AgentExternalAuthorizationEvent extends EventBase {
+  type: 'agent.external_authorization';
+}
+
 export type AgentEvent =
   | AgentMessageEvent
   | AgentThinkingEvent
@@ -317,7 +331,8 @@ export type AgentEvent =
   | AgentMcpToolUseEvent
   | AgentMcpToolResultEvent
   | AgentCustomToolUseEvent
-  | AgentThreadContextCompactedEvent;
+  | AgentThreadContextCompactedEvent
+  | AgentExternalAuthorizationEvent;
 
 // ============================================================
 // Session Events (lifecycle status changes)

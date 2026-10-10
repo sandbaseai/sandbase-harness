@@ -20,6 +20,11 @@ import { createAiSdkExecutionLock, type JsonSchemaLike } from 'prefix-safe-json'
 import type { LanguageModel, ModelMessage } from 'ai';
 import type { AgentStrategy, StrategyContext } from '@/types/strategy.js';
 import type { AutoPermissionCall, AutoPermissionVerdict } from '@/types/strategy.js';
+import type {
+  ExternalAuthorizationHook,
+  ExternalAuthorizationOutcome,
+  ExternalAuthorizationRequest,
+} from '@/types/strategy.js';
 import type { PermissionPolicyType } from '@/types/agent.js';
 import type { SessionEvent } from '@/types/session.js';
 import type { ContentBlock } from '@/types/cma-protocol.js';
@@ -29,6 +34,12 @@ import {
   AUTO_PERMISSION_REASON_INDETERMINATE,
   createAutoPermissionEvaluator,
 } from '@/core/session/auto-permission.js';
+import {
+  authorizationDigest,
+  EXTERNAL_AUTHORIZATION_CAPABILITY,
+  externalAuthorizationRequest,
+  policyContextDigest,
+} from '@/core/auth/external-authorization.js';
 import { toolError, toolErrorText } from '@/core/tool-result-error.js';
 import { MODEL_AUTH_FAILED_CODE, MODEL_NOT_FOUND_CODE } from '@/model/errors.js';
 import { resolvedModelIdOf } from '@/model/registry.js';
@@ -265,6 +276,19 @@ export class DefaultStrategy implements AgentStrategy {
           }
         }
       : undefined;
+    // External authorization freshness — veto-only, fail-closed, off means
+    // off. The hook wraps every governed tool's `execute` innermost, so it is
+    // consulted only after the local gates (auto verdict, confirmation lock)
+    // already admitted the call: an `allow` here can never widen a local
+    // denial. The policy-context digest covers the session's full effective
+    // posture rather than the single call's policy, so a policy change
+    // anywhere in the posture is what makes a prior authorization read as
+    // stale. Caller-executed custom tools are out of scope — the runtime
+    // never executes them.
+    const authorizeExternal = config.authorizeExternal;
+    const governedTools = authorizeExternal
+      ? wrapGovernedToolsForExternalAuthorization(tools, customTools, session, authorizeExternal, eventLog, broadcast)
+      : tools;
     // The id recorded against every event this turn produces. Resolution order
     // is by how directly each source knows the request: the registry recorded
     // the id the client was built with, a caller-supplied configuration is the
@@ -332,18 +356,18 @@ export class DefaultStrategy implements AgentStrategy {
     try {
       // Build Vercel AI SDK tool definitions from our CoreTool map
       const confirmationToolDefinitions = Object.fromEntries(
-        Object.entries(tools).filter(([name]) => confirmTools.has(name)),
+        Object.entries(governedTools).filter(([name]) => confirmTools.has(name)),
       );
       const customToolDefinitions = Object.fromEntries(
-        Object.entries(tools).filter(([name]) => customTools.has(name)),
+        Object.entries(governedTools).filter(([name]) => customTools.has(name)),
       );
       const autoToolDefinitions = Object.fromEntries(
-        Object.entries(tools).filter(([name]) => autoTools.has(name)),
+        Object.entries(governedTools).filter(([name]) => autoTools.has(name)),
       );
       const lockedConfirmationTools = createAiSdkExecutionLock(confirmationToolDefinitions);
       const lockedCustomTools = createAiSdkExecutionLock(customToolDefinitions);
       const aiTools: Record<string, any> = {};
-      for (const [name, tool] of Object.entries(tools)) {
+      for (const [name, tool] of Object.entries(governedTools)) {
         const base = lockedConfirmationTools[name] ?? lockedCustomTools[name]
           ?? (autoTools.has(name) && evaluateAutoCall
             ? autoPermissionTool(tool, name, evaluateAutoCall, autoVerdicts)
@@ -992,6 +1016,123 @@ function autoPermissionTool(
           return execute(input, options);
         }
       : execute,
+  };
+}
+
+/**
+ * Wrap every governed tool with the external-authorization check.
+ *
+ * The wrap sits on `execute`, which makes veto-only structural rather than
+ * contractual: the hook is consulted only by code paths that already decided
+ * to run the tool, so the strongest answer it can give is "don't". The
+ * refusal is published as an `agent.external_authorization` audit event whose
+ * metadata binds the verdict to the invocation — digests only, no arguments.
+ */
+export function wrapGovernedToolsForExternalAuthorization(
+  tools: Record<string, any>,
+  customTools: Set<string>,
+  session: {
+    id: string;
+    environmentId?: string | null;
+    loopEngine?: string | null;
+    agentDefinition?: { tools?: unknown[] };
+  },
+  authorize: ExternalAuthorizationHook,
+  eventLog: StrategyContext['eventLog'],
+  broadcast: StrategyContext['broadcast'],
+): Record<string, any> {
+  const toolPolicies = Object.fromEntries(
+    Object.keys(tools)
+      .filter((name) => !customTools.has(name))
+      .map((name) => [name, governedPolicyOf(session, name, customTools)]),
+  );
+  const policyContext = {
+    environmentId: session.environmentId ?? null,
+    loopEngine: session.loopEngine ?? 'builtin',
+    toolPolicies,
+  };
+  return Object.fromEntries(
+    Object.entries(tools).map(([name, tool]) => [
+      name,
+      customTools.has(name) || typeof tool?.execute !== 'function'
+        ? tool
+        : externalAuthorizationTool(tool, {
+            sessionId: session.id,
+            toolName: name,
+            policyContext,
+            authorize,
+            onRefusal: (request, outcome) => {
+              const refusal = eventLog.append(session.id, {
+                type: 'agent.external_authorization',
+                metadata: {
+                  invocation_id: request.invocation_id,
+                  capability: request.capability,
+                  target: request.target,
+                  reason_code: outcome.reasonCode,
+                  ...(outcome.reason ? { reason: outcome.reason } : {}),
+                  ...(outcome.policy_version ? { policy_version: outcome.policy_version } : {}),
+                  ...(outcome.decision_id ? { decision_id: outcome.decision_id } : {}),
+                  arguments_digest: request.arguments_digest,
+                  policy_context_digest: request.policy_context_digest,
+                },
+              });
+              broadcast(refusal);
+            },
+          }),
+    ]),
+  );
+}
+
+/**
+ * One governed tool's `execute` behind the freshness check: consult the hook,
+ * execute on `allow`, answer a ToolResultError on `refuse` — the same
+ * synthetic-error shape the `auto` deny path uses, so the model reads the
+ * refusal as an ordinary error result and the emitted `agent.tool_result` is
+ * flagged `is_error` by the shared marker path.
+ */
+export function externalAuthorizationTool(
+  tool: any,
+  options: {
+    sessionId: string;
+    toolName: string;
+    policyContext: {
+      environmentId: string | null;
+      loopEngine: string | null;
+      toolPolicies: Record<string, string | undefined>;
+    };
+    authorize: ExternalAuthorizationHook;
+    onRefusal: (
+      request: ExternalAuthorizationRequest,
+      outcome: Extract<ExternalAuthorizationOutcome, { type: 'refuse' }>,
+    ) => void;
+  },
+): any {
+  const execute = tool.execute;
+  return {
+    ...tool,
+    execute: async (input: unknown, execOptions?: { toolCallId?: string }) => {
+      const request = externalAuthorizationRequest({
+        sessionId: options.sessionId,
+        toolCallId: execOptions?.toolCallId ?? '',
+        toolName: options.toolName,
+        argumentsDigest: authorizationDigest(
+          input && typeof input === 'object' ? input : { value: input },
+        ),
+        policyContextDigest: policyContextDigest({
+          capability: EXTERNAL_AUTHORIZATION_CAPABILITY,
+          target: options.toolName,
+          ...options.policyContext,
+        }),
+      });
+      const outcome = await options.authorize(request);
+      if (outcome.type === 'refuse') {
+        options.onRefusal(request, outcome);
+        return toolError(
+          `Tool call refused by external authorization (${outcome.reasonCode}).`,
+        );
+      }
+      return execute(input, execOptions);
+    },
   };
 }
 

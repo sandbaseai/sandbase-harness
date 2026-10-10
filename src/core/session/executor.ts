@@ -19,7 +19,7 @@ import type { TurnTrigger } from '@/types/session.js';
 import type { AgentDefinition } from '@/types/agent.js';
 import type { SandboxInstance, SandboxProvider, EnvironmentConfig } from '@/types/sandbox.js';
 import type { SandboxProviderRegistry } from '@/sandbox/registry.js';
-import type { AgentStrategy, StrategyContext } from '@/types/strategy.js';
+import type { AgentStrategy, ExternalAuthorizationHook, StrategyContext } from '@/types/strategy.js';
 import { ModelRegistry } from '@/model/registry.js';
 import type { McpServerStatus } from '@/core/mcp/mcp-manager.js';
 import { EventLogger } from './event-logger.js';
@@ -175,6 +175,13 @@ export interface ExecutorDeps {
    * Called after every turn, with whatever the sandbox currently holds.
    */
   sessionOutputSink?: (sessionId: string, files: SessionOutputFile[]) => void | Promise<void>;
+  /**
+   * Optional external authorization-freshness hook, carried through to the
+   * strategy config so it is consulted per governed tool call after local
+   * permission policy admits it. Veto-only and fail-closed by contract;
+   * absent keeps the permission/approval path exactly as it is.
+   */
+  authorizeExternal?: ExternalAuthorizationHook;
 }
 
 export class DefaultSessionExecutor implements SessionExecutor {
@@ -468,6 +475,7 @@ export class DefaultSessionExecutor implements SessionExecutor {
         ...(autoTools.length > 0 ? { autoTools } : {}),
         onRequiresAction: options?.onRequiresAction,
         budgetExhausted: options?.budgetExhausted,
+        ...(this.deps.authorizeExternal ? { authorizeExternal: this.deps.authorizeExternal } : {}),
         // The agent's model profile rides into the provider request here; a
         // provider that does not consume the options sees the same request as
         // before, so a bare `model` string costs nothing.

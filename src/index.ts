@@ -25,6 +25,7 @@ import { createRuntimeSessionServices } from './core/runtime/session-runtime.js'
 import { resolveSessionCredentialInjections } from './core/credentials/injection.js';
 import { refreshMcpOauthCredentialsForServer } from './core/credentials/oauth-refresh.js';
 import { dispatchWebhookEvent } from './core/operations/webhook-dispatcher.js';
+import { createExternalAuthorizationHook } from './core/auth/external-authorization.js';
 import { searchProviderFromSettings } from './core/web/search/index.js';
 import { attachRuntimeServerErrorHandler, parseCsv, runtimeStartupBannerLines } from './core/runtime/http-server.js';
 import { createLogger, InMemoryLogStore } from './core/observability/logger.js';
@@ -102,6 +103,22 @@ async function startServer(opts: StartServerOptions) {
   // are restart-gated, so the provider this process resolved is also the one
   // its capability inventory should advertise for its whole lifetime.
   const webSearchProvider = searchProviderFromSettings(effectiveSettings.web_search, { db, dataDir });
+  // Optional external authorization-freshness boundary: set
+  // MANAGED_AGENTS_EXTERNAL_AUTHZ_ENDPOINT to a control plane that answers the
+  // `sandbase.authz/v1` envelope, and every governed tool call the local
+  // policy admits is presented to it before execution — veto-only, fail-closed.
+  // Unset keeps the permission/approval path exactly as it is.
+  const externalAuthzEndpoint = process.env.MANAGED_AGENTS_EXTERNAL_AUTHZ_ENDPOINT;
+  const authorizeExternal = externalAuthzEndpoint
+    ? createExternalAuthorizationHook({
+        endpoint: externalAuthzEndpoint,
+        // An unset or unreadable budget falls back to the module default.
+        timeoutMs: Number(process.env.MANAGED_AGENTS_EXTERNAL_AUTHZ_TIMEOUT_MS) || undefined,
+        headers: process.env.MANAGED_AGENTS_EXTERNAL_AUTHZ_TOKEN
+          ? { authorization: `Bearer ${process.env.MANAGED_AGENTS_EXTERNAL_AUTHZ_TOKEN}` }
+          : undefined,
+      })
+    : undefined;
 
   // config.yaml is a first-start import, not a live setting. Saying so at
   // startup is what keeps an edit that will not take effect from presenting
@@ -178,6 +195,7 @@ async function startServer(opts: StartServerOptions) {
         }).then(() => {}),
       }),
     webSearchProvider,
+    authorizeExternal,
     logger,
   });
   if (reconciled > 0) {

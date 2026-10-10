@@ -74,6 +74,34 @@ and the opt-in `auto`, which judges each call with a local model evaluation
 `user.tool_confirmation`, and any evaluation failure parks the call rather
 than allowing it).
 
+### External authorization freshness
+
+Long-running sessions can outlive the authorization they were granted under.
+Set `MANAGED_AGENTS_EXTERNAL_AUTHZ_ENDPOINT` to an external control plane and
+every governed tool call the local policy admits is presented to it before
+execution — a veto-only, fail-closed check that composes with the policies
+above rather than replacing them:
+
+- The runtime POSTs a `sandbase.authz/v1` envelope (`session_id`,
+  `invocation_id`, `capability`, `target`, `arguments_digest`,
+  `policy_context_digest`; digests are SHA-256 over canonical JSON under
+  `sandbase.digest/v1`, so a policy change alters the digest and makes a prior
+  authorization read as stale).
+- The endpoint answers `{"decision": "allow"|"deny"|"reauthorize", ...}`;
+  `deny` and `reauthorize` refuse the call with a synthetic error result.
+  `allow` never widens a local denial — the hook only sees calls the local
+  policy already cleared.
+- Timeout (`MANAGED_AGENTS_EXTERNAL_AUTHZ_TIMEOUT_MS`, default 2000 ms),
+  unreachable endpoints, HTTP errors, and malformed responses all refuse the
+  call — an unreadable verdict never reads as permission.
+- `MANAGED_AGENTS_EXTERNAL_AUTHZ_TOKEN` adds a bearer header for the
+  authorizer.
+- Every refusal is persisted as an `agent.external_authorization` audit event
+  carrying the reason code and digests — no raw arguments and no secrets.
+
+Unset means no check: with the endpoint absent the permission/approval path
+is exactly what it always was.
+
 Agent ids are stable object identifiers. YAML seed agents use deterministic ids
 when they are first imported, while agents created through the API or Console
 receive server-generated `agent_...` ids. Use the returned id in API calls,
