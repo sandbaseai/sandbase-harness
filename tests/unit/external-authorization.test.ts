@@ -66,7 +66,7 @@ describe('externalAuthorizationRequest', () => {
   });
 });
 
-function hookWith(impl: (request: ExternalAuthorizationRequest) => Promise<Response>) {
+function hookWith(impl: (url: string | URL, init?: RequestInit) => Promise<Response>) {
   return createExternalAuthorizationHook({
     endpoint: 'https://authorizer.test/decide',
     timeoutMs: 50,
@@ -90,13 +90,13 @@ function jsonResponse(status: number, body: unknown): Promise<Response> {
 
 describe('createExternalAuthorizationHook', () => {
   it('posts the request envelope as JSON', async () => {
-    let seen: { url: unknown; init: RequestInit | undefined } | undefined;
+    let seen: { url: string | URL; init: RequestInit | undefined } | undefined;
     const hook = hookWith(async (url, init) => {
       seen = { url, init };
-      return jsonResponse(200, { decision: 'ALLOW' }) as Promise<Response>;
+      return jsonResponse(200, { decision: 'ALLOW' });
     });
     await hook(sampleRequest);
-    expect(seen?.url).toBe('https://authorizer.test/decide');
+    expect(String(seen?.url)).toBe('https://authorizer.test/decide');
     expect(seen?.init?.method).toBe('POST');
     expect((seen?.init?.headers as Record<string, string>)['content-type']).toBe('application/json');
     expect(JSON.parse(seen?.init?.body as string)).toEqual(sampleRequest);
@@ -132,7 +132,7 @@ describe('createExternalAuthorizationHook', () => {
     ['a transport failure', () => Promise.reject(new Error('ECONNREFUSED'))],
     ['an HTTP error status', () => jsonResponse(503, 'unavailable')],
   ])('fails closed on %s', async (_label, impl) => {
-    const hook = hookWith(impl as (r: ExternalAuthorizationRequest) => Promise<Response>);
+    const hook = hookWith(impl);
     expect(await hook(sampleRequest)).toEqual({ type: 'refuse', reasonCode: 'unavailable' });
   });
 
@@ -141,7 +141,7 @@ describe('createExternalAuthorizationHook', () => {
     ['an unknown decision', () => jsonResponse(200, { decision: 'maybe' })],
     ['a missing decision', () => jsonResponse(200, {})],
   ])('fails closed on %s', async (_label, impl) => {
-    const hook = hookWith(impl as (r: ExternalAuthorizationRequest) => Promise<Response>);
+    const hook = hookWith(impl);
     expect(await hook(sampleRequest)).toEqual({ type: 'refuse', reasonCode: 'malformed' });
   });
 });
@@ -156,6 +156,7 @@ describe('externalAuthorizationTool', () => {
       policyContext: {
         environmentId: 'env_1',
         loopEngine: 'builtin',
+        vaultIds: [],
         toolPolicies: { write_file: 'always_allow' },
       },
       authorize,

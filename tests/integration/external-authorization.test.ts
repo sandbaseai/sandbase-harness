@@ -160,7 +160,7 @@ describe('external authorization freshness', () => {
     await waitFor(
       () => {
         const status = mgr.get(session.id)?.status;
-        return status === 'idle' || status === 'paused' ? status : undefined;
+        return status === 'paused' || status === 'completed' || status === 'requires_action' ? status : undefined;
       },
       'the turn to settle',
     );
