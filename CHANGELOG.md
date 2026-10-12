@@ -4,6 +4,19 @@
 
 ### Added
 
+- `managed-agents apply <file...>` — the declarative manifest workflow (the
+  `ant apply` pattern). A Markdown frontmatter document creates or updates an
+  agent (the body becomes its system prompt) or a scheduled deployment
+  (frontmatter carries `name`, `agent`, `environment`, `schedule`; the body
+  becomes the initial `user.message`), and a `.yaml`/`.json` document carries
+  an environment. Resolved ids are recorded in `managed-agents-lock.json`
+  keyed by each file's path relative to the lock, so re-applying an edited
+  manifest updates the same row rather than creating a duplicate. A later file
+  may reference an earlier one by name — a deployment's `agent: Coding
+  Assistant` binds the id the agent file applied before it created — which is
+  what makes one command able to stand up a whole stack. A stale lock entry or
+  a moved file falls back to the live list by name, and a manifest that is
+  none of the three kinds is refused before any request is made.
 - An optional external authorization-freshness boundary for long-running
   sessions (#812). Setting `MANAGED_AGENTS_EXTERNAL_AUTHZ_ENDPOINT` makes the
   runtime present every governed tool call the local permission policy

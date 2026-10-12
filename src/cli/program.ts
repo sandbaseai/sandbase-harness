@@ -1,6 +1,7 @@
 import { Command } from 'commander';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { applyCommand } from './apply-command.js';
 import type { ParkedToolCall, ToolApprovalPolicy } from './chat-approvals.js';
 import { defaultConfigPath, defaultTemplateCacheDir, WORKSPACE_STATE_DIR } from '../core/config/paths.js';
 import { createTemplate, installTemplate, listTemplates, resolveTemplateSource } from '../core/templates/templates.js';
@@ -112,6 +113,21 @@ export function createCliProgram({ version, startServer }: CliProgramOptions): C
     )
     .action(async (agent, opts) => {
       await chatCommand(agent, opts);
+    });
+
+  // The declarative apply workflow (the published `ant apply` pattern):
+  // frontmatter manifests for agents, environments, and scheduled deployments,
+  // applied idempotently against a running runtime with the resolved ids
+  // recorded in `managed-agents-lock.json` beside the manifests.
+  program
+    .command('apply <file...>')
+    .description('Create or update the agents, environments, and deployments the given manifest files describe')
+    .option('-p, --port <port>', 'Server port to connect to', '3000')
+    .option('-k, --api-key <key>', 'API key if the server has auth enabled')
+    .option('--lock-file <file>', 'Lock file recording resolved ids (default: ./managed-agents-lock.json)')
+    .option('--json', 'Print the applied resources as JSON', false)
+    .action(async (files: string[], opts) => {
+      await applyCommand(files, opts);
     });
 
   program

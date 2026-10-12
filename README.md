@@ -219,11 +219,23 @@ test fails when it drifts from the matrix.
 ```bash
 managed-agents init
 managed-agents start [--host 127.0.0.1] [--port 3000]
+managed-agents apply <file...>   # create or update agents/environments/deployments from manifests
 managed-agents list
 managed-agents reload
 managed-agents chat <agent-id> --message "hello" [--tool-approval ask|allow|deny]
 managed-agents template list | install <name> | create <name>
 ```
+
+`apply` is the declarative form of the same API: a Markdown file whose
+frontmatter is the agent definition (the body below `---` becomes the system
+prompt), a `.yaml` environment document, or a Markdown deployment manifest
+(frontmatter carries `name`, `agent`, `environment`, `schedule`; the body
+becomes the initial `user.message`). The resolved ids land in
+`managed-agents-lock.json` beside the files, so re-running `apply` after an
+edit updates the same resource instead of creating a duplicate — commit the
+lock file with the manifests. A later file may reference an earlier one by
+name, so `apply coding-assistant.md environment.yaml deployment.md` wires the
+deployment to the rows the first two files created.
 
 A turn whose tool needs approval parks instead of failing, and `chat` asks before
 running it, then lets the runtime continue the same turn. `--tool-approval allow`

@@ -128,6 +128,7 @@ full response-shape, lifecycle, or provider conformance.
 | CLI group | Coverage |
 | --- | --- |
 | `managed-agents init/start/list/reload/chat` | Core local lifecycle and chat workflows. |
+| `managed-agents apply <file...>` | Declarative manifest application (the `ant apply` pattern): Markdown frontmatter documents for agents (body = system prompt) and deployments (body = the initial `user.message`, `agent`/`environment` resolved by name), and `.yaml`/`.json` documents for environments. Each file creates its resource on the first apply and updates it afterwards; resolved ids are recorded in `managed-agents-lock.json` keyed by the file's path relative to the lock, so a re-run after editing updates the same row rather than creating a duplicate. |
 | `managed-agents session ...` | Create, list, message, tail, inspect, and logs. |
 | `managed-agents worker poll` / `worker run` | Advanced self-hosted environment worker queue execution. `--on-work` spawns a per-claim sandbox handler; `worker run` is the single-session in-sandbox counterpart. |
 | `managed-agents settings ...` | Get, set model boundary, and validate canonical runtime settings. |

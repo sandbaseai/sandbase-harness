@@ -58,6 +58,13 @@ vi.mock('@/cli/runtime-management-commands.js', () => ({
   }),
 }));
 
+vi.mock('@/cli/apply-command.js', () => ({
+  applyCommand: vi.fn(async (...args: unknown[]) => {
+    recorded.calls.push(['apply', ...args]);
+    return [];
+  }),
+}));
+
 vi.mock('@/cli/workspace-commands.js', () => ({
   workspaceListCommand: vi.fn((...args: unknown[]) => {
     recorded.calls.push(['ws-list', ...args]);
@@ -90,6 +97,7 @@ describe('CLI program', () => {
       'list',
       'reload',
       'chat',
+      'apply',
       'deploy',
       'settings',
       'environments',
@@ -223,6 +231,27 @@ describe('CLI program', () => {
     ]);
     expect(await run('inspect', 'sess_1')).toMatchObject(['inspect', 'sess_1', { port: '3000', json: false }]);
     expect(await run('logs', 'sess_1')).toMatchObject(['logs', 'sess_1', { port: '3000' }]);
+  });
+
+  it('maps the apply file arguments and flags onto the command call', async () => {
+    // `apply` takes a variadic file list, so the mapping pins that both files
+    // arrive in order and that the connection and lock options land in `opts`.
+    // The manifest parsing and wire behavior are pinned against the real routes
+    // in `tests/integration/apply-command.test.ts`.
+    recorded.calls.length = 0;
+    const program = createCliProgram({
+      version: '0.1.0',
+      startServer: async () => undefined,
+    });
+    await program.parseAsync(
+      ['node', 'managed-agents', 'apply', 'agent.md', 'env.yaml', '-p', '4000', '--lock-file', 'lock.json', '--json'],
+      { from: 'node' },
+    );
+    expect(recorded.calls.at(-1)).toMatchObject([
+      'apply',
+      ['agent.md', 'env.yaml'],
+      { port: '4000', lockFile: 'lock.json', json: true },
+    ]);
   });
 
   it('maps the documented environments flags onto the command arguments', async () => {

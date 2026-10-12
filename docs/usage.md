@@ -541,6 +541,7 @@ matches on it keeps working.
 ```bash
 managed-agents init
 managed-agents start --host 127.0.0.1 --port 3000
+managed-agents apply <file...>
 managed-agents list
 managed-agents reload
 managed-agents chat agent_assistant --message "hello"
@@ -585,6 +586,23 @@ object per line. Every command accepts `--port` and `--api-key`.
 `chat` starts a session on the first loaded agent (or the id you pass), streams
 each reply as it is produced, and keeps reading until you interrupt it. `--message`
 sends exactly one message and exits, which is the form a script uses.
+
+`apply` is the declarative counterpart of the create/update calls — the `ant
+apply` pattern. Each argument is one manifest file: a Markdown agent document
+whose `---` frontmatter is the definition (`name`, `model`, `tools`, …) with
+the body below becoming the system prompt; a `.yaml`/`.json` environment
+document (`name` plus `config`); or a Markdown deployment manifest whose
+frontmatter declares `name`, `agent`, `environment`, and `schedule`
+(`{type: cron, expression, timezone}`), with the body becoming the
+deployment's initial `user.message`. Apply creates the resource the first
+time and updates it afterwards; the resolved ids are recorded in
+`managed-agents-lock.json` in the working directory (override with
+`--lock-file`), keyed by the file's relative path, so committing the lock file
+makes a re-run an update rather than a second create. Files apply in argument
+order, and a later file may name an earlier one — a deployment's `agent:` and
+`environment:` accept the manifest names as well as `agent_…`/`env_…` ids — so
+`apply coding-assistant.md environment.yaml deployment.md` stands up the whole
+set in one command.
 
 A turn whose tool needs approval does not fail — it **parks**. The runtime ends the
 turn with a `session.status_idle` whose `stop_reason.type` is `requires_action` and
