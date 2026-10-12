@@ -1334,19 +1334,22 @@ function sessionsTokenFromSecret(secret: string | null | undefined): string | nu
 const MAX_SKILL_PACKAGE_BYTES = 8 * 1024 * 1024;
 
 /**
- * Download the session's attached files and assigned skill packages into the
- * worker's root.
+ * Download the session's assigned skill packages into the worker's root.
  *
- * A `file` resource lands at its `mount_path` under `<root>/mnt/session/...`
- * — the canonical upload path mapped into the worker's own root, the same
- * mapping every work-item path takes — and a skill package lands under
- * `<root>/skills/<name>/`, the same location the runtime's own provisioning
- * writes for `local`/`docker` sessions, so a packaged script runs the same
- * way on every backend. Discovery and fetch both go through the claim's
- * `mawt_` token: `GET /v1/sessions/{id}` names the attached resources and the
- * agent's skill references, and the file/skill content routes are scoped to
- * exactly those. An unpinned skill reference resolves through the `latest`
- * alias the route accepts, pinned references fetch their exact version.
+ * A skill package lands under `<root>/skills/<name>/` — the same location the
+ * runtime's own provisioning writes for `local`/`docker` sessions, so a
+ * packaged script runs the same way on every backend. Discovery and fetch go
+ * through the claim's `mawt_` token: `GET /v1/sessions/{id}` names the agent's
+ * skill references, and the skill content route is scoped to exactly those.
+ * An unpinned skill reference resolves through the `latest` alias the route
+ * accepts, pinned references fetch their exact version.
+ *
+ * `file` resources are not materialized: the published contract allows only
+ * `memory_store` on a self-hosted environment, so a session declaring one was
+ * refused at creation with `resource_not_mountable`. A session row that still
+ * carries a `file` (written before that rule landed, or inserted out of band)
+ * fails the item rather than silently serving a mount the contract says does
+ * not exist.
  *
  * Attached memory stores materialize the same way — a real directory under
  * `<root>/mnt/memory/<mount_path>/` per store, reconciled against the API on
@@ -1356,7 +1359,7 @@ const MAX_SKILL_PACKAGE_BYTES = 8 * 1024 * 1024;
  * credential with which to ask. A download failure throws: a session whose
  * declared resources cannot be materialized is running against a different
  * contract than the caller asked for, so the item reports failed rather than
- * executing short a file or a package.
+ * executing short a package.
  */
 async function materializeSessionResources(
   config: ResolvedWorkerPollOptions,
@@ -1387,13 +1390,14 @@ async function materializeSessionResources(
   for (const rawResource of resources) {
     if (!rawResource || typeof rawResource !== 'object') continue;
     const resource = rawResource as Record<string, unknown>;
-    if (resource.type !== 'file' || typeof resource.file_id !== 'string' || typeof resource.mount_path !== 'string') {
-      continue;
+    // `file` resources are refused at session admission on a self-hosted
+    // environment — the published contract allows only `memory_store` there —
+    // so a session row carrying one is either pre-refusal history or arrived
+    // out of band. Serving it anyway would materialize a mount the contract
+    // says does not exist; failing the item keeps the discrepancy visible.
+    if (resource.type === 'file') {
+      throw new Error('resource materialization: file resources are not mountable on a self-hosted environment');
     }
-    const res = await fetchScoped(`/v1/files/${resource.file_id}/content`);
-    const target = safePath(config.root, resource.mount_path);
-    await mkdir(dirname(target), { recursive: true });
-    await writeFile(target, Buffer.from(await res.arrayBuffer()));
   }
 
   const refs = Array.isArray(session.agent?.skills) ? session.agent!.skills! : [];

@@ -350,12 +350,12 @@ Its settings come from the forwarded environment rather than `--port`; the
 timeout flags are shared with `worker poll`.
 
 Before the first item of a session runs, the worker also materializes the
-session's resources using only the claim's `sessions_token`: each attached
-`file` lands at its `mount_path` under the worker root
-(`<workdir>/mnt/session/uploads/...` — the canonical upload path mapped into
-the worker's own root, the same mapping work-item paths take), and each
-assigned skill package lands under `<workdir>/skills/<name>/` — the same
-layout `local`/`docker` sessions get at provisioning. The session retrieve
+session's assigned skill packages using only the claim's `sessions_token`:
+each package lands under `<workdir>/skills/<name>/` — the same
+layout `local`/`docker` sessions get at provisioning. (`file` resources are
+not part of this materialization — the published contract allows only
+`memory_store` on a self-hosted environment, so a session declaring one is
+refused at creation with `resource_not_mountable` before a work item exists.) The session retrieve
 names the attachments, and the file/skill content routes are scoped to
 exactly those: an unpinned skill reference fetches the `latest` alias, a
 pinned one its exact version, and the archive's executable bits are preserved

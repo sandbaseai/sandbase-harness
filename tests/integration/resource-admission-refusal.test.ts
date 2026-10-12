@@ -5,9 +5,10 @@
  * sandbox directory, and `docker` serves them verbatim inside the container —
  * a file or repository resource mounts on both. `kubernetes` resolves an
  * absolute path inside its own `/workspace` and so refuses the upload root.
- * `self_hosted` serves `file` resources now that its worker downloads them
- * under its own root at the canonical mount path; only its
- * `github_repository` mount stays refused. A session that
+ * `self_hosted` refuses both mounted types: the published contract allows only
+ * `memory_store` on self-hosted environments, so an attached file or repository
+ * is refused at admission rather than promising a mount the contract says does
+ * not exist. A session that
  * declares a `file` or `github_repository` resource on one of those used to be
  * accepted with a `201` and then fail at provisioning, with a path error the
  * caller had no way to connect to the environment they chose.
@@ -230,16 +231,34 @@ describe('resource admission against the session backend', () => {
     expect(JSON.stringify(created.body)).not.toContain('ghp_admission_token');
   });
 
-  it('refuses a file resource on kubernetes but admits it on self_hosted', async () => {
+  it('refuses a file resource on kubernetes and on self_hosted alike', async () => {
     const fileId = await uploadFile('notes.txt', 'attached bytes');
     const refused = await createSession('env_kubernetes', [{ ...FILE_RESOURCE, file_id: fileId }]);
     expect(refused.status, 'env_kubernetes').toBe(400);
     expect(refused.body.error.code, 'env_kubernetes').toBe('resource_not_mountable');
-    // The shipped worker downloads the file under its own root at the
-    // canonical mount path, so self_hosted is a serving backend now.
-    const admitted = await createSession('env_self_hosted', [{ ...FILE_RESOURCE, file_id: fileId }]);
-    expect(admitted.status, JSON.stringify(admitted.body)).toBe(201);
-    expect(counts()).toEqual({ sessions: 1, instances: 1, events: 0 });
+    // The published contract allows only `memory_store` on self-hosted
+    // environments — "包含 `file` 或 `github_repository` 资源的会话会被拒绝并
+    // 返回 400" — so a file is refused at creation even though the shipped
+    // worker could have downloaded it under its own root.
+    const alsoRefused = await createSession('env_self_hosted', [{ ...FILE_RESOURCE, file_id: fileId }]);
+    expect(alsoRefused.status, JSON.stringify(alsoRefused.body)).toBe(400);
+    expect(alsoRefused.body.error.code).toBe('resource_not_mountable');
+    expect(counts()).toEqual({ sessions: 0, instances: 0, events: 0 });
+  });
+
+  it('still admits a memory_store resource on self_hosted, the one type the contract serves there', async () => {
+    // The refusal is scoped to the sandbox-mounted types; memory stores reach
+    // the worker through their own materialization and are the contract's
+    // only self-hosted resource.
+    const created = await createSession('env_self_hosted', [
+      { type: 'memory_store', memory_store_id: 'mem_1' },
+    ]);
+    // `mem_1` exists in no store table, so the mount itself may be refused for
+    // a different reason — what matters is that it is NOT resource_not_mountable:
+    // the memory_store type is admissible on self_hosted.
+    if (created.status !== 201) {
+      expect(created.body.error.code).not.toBe('resource_not_mountable');
+    }
   });
 
   it('refuses POST /v1/runs before the session exists', async () => {

@@ -90,11 +90,10 @@ Mounting is composed and blocked by the container backends:
   so a session on it is not served — it is **refused when it is created**, with
   `resource_not_mountable`, before any session row, resource instance, or event is
   written, so the caller learns which backend refused and why instead of meeting
-  the path error at provisioning. `self_hosted` is refused the same way, on the
-  narrower ground that the runtime cannot promise the root rather than that the
-  worker refuses it: its worker maps an absolute path into its own root, so the
-  operator's process decides where the bytes land and the runtime can neither
-  verify nor enforce that it is the canonical root (measured in
+  the path error at provisioning. `self_hosted` is refused the same way — the
+  published contract allows only `memory_store` on self-hosted environments, so
+  an attached file is refused at admission rather than promised a mount the
+  contract says does not exist (measured in
   `tests/integration/resource-admission-refusal.test.ts`).
   This capability's scope is the `local` and `docker` backends, and it is
   recorded as `supported` for that scope.
@@ -120,7 +119,7 @@ spelling and, on the local backend, the shell-usable one.
 | Mount root | SandBase mounts under its own sandbox root layout. The published contract specifies a logical path, not a host directory. |
 | What a scoped listing contains | `scope_id` selects files whose recorded session is that session. A file created directly through `POST /v1/files` records no session, so it appears in the unscoped listing and in **no** scoped one — it is not attributed to a session that did not create it. The published contract describes session outputs; it does not state where a session-less upload should appear, so the choice is to leave it unattributed rather than guess an owner. |
 | The listing excludes `role = 'artifact'` | Rows written with `role = 'artifact'` are outside this listing in both scoped and unscoped form. That predates the scope parameter and is unchanged by it; recorded here because a caller reasoning about "every file for this session" should know the listing is not the whole table. |
-| Backends that cannot serve the mount root | The mount path is derived and validated, the reader is wired, and the local and docker backends write the bytes at `/mnt/session/uploads` and announce the path — on docker the canonical path is a real path inside the container. A `self_hosted` worker downloads each attached file through its session work token and writes it at the mount path under its own root. Kubernetes rejects anything under `/mnt`, so the runtime refuses a session that declares a file resource on it at creation, with `resource_not_mountable`; the supported scope is `local`, `docker`, and `self_hosted`. |
+| Backends that cannot serve the mount root | The mount path is derived and validated, the reader is wired, and the local and docker backends write the bytes at `/mnt/session/uploads` and announce the path — on docker the canonical path is a real path inside the container. Kubernetes rejects anything under `/mnt`, and `self_hosted` follows the published contract's scope — only `memory_store` mounts on a self-hosted environment — so a session that declares a file resource on either is refused at creation with `resource_not_mountable`; the supported scope is `local` and `docker`. |
 
 ## 5. Reason for the difference
 

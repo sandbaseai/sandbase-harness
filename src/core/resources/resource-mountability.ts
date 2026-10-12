@@ -39,13 +39,15 @@ export type SandboxMountedResourceType = (typeof SANDBOX_MOUNTED_RESOURCE_TYPES)
  * a backend that can serve one of the two resources is not a backend that
  * can serve a session's resources.
  *
- * `self_hosted` serves `file` resources: the shipped worker downloads each
- * attached file through its session work token and writes it under its own
- * root at the canonical mount path (`/mnt/session/uploads/x` becomes
- * `<worker root>/mnt/session/uploads/x`), so the refusal is not about files.
- * `github_repository` stays refused on the same "not the runtime's to
- * promise" reasoning it always carried: cloning belongs to the operator's
- * process and its credentials, and no worker-side clone was ever exercised.
+ * `self_hosted` refuses both mounted resource types. The published contract
+ * is categorical — "自托管沙箱仅支持 `memory_store` 资源…包含 `file` 或
+ * `github_repository` 资源的会话会被拒绝并返回 400" — so a file resource on
+ * a self-hosted environment is refused at creation even though the shipped
+ * worker could download it under its own root: serving it would promise a
+ * mount the contract says does not exist, and a worker that implemented the
+ * materialization differently would silently diverge from a session that was
+ * admitted. `memory_store` is unaffected — it is not a sandbox-mounted
+ * resource type and reaches the worker through its own materialization.
  *
  * `Map`s rather than object literals: a provider name is caller-supplied
  * configuration, and `'toString' in {}` is true, which would turn an unknown
@@ -65,7 +67,8 @@ const UNSERVING_BACKENDS = new Map<string, ReadonlyMap<SandboxMountedResourceTyp
   [
     'self_hosted',
     new Map<SandboxMountedResourceType, string>([
-      ['github_repository', 'the worker maps the path into its own root, which the runtime cannot hold to the canonical roots'],
+      ['file', 'self-hosted environments serve only memory_store resources, so an attached file would promise a mount the contract says does not exist'],
+      ['github_repository', 'self-hosted environments serve only memory_store resources; cloning a repository belongs to the operator\'s process and its credentials'],
     ]),
   ],
 ]);

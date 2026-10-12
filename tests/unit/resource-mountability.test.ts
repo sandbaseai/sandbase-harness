@@ -28,14 +28,17 @@ const REPO = { type: 'github_repository', url: 'https://github.com/example/widge
 describe('resource mountability', () => {
   it('names only the resource types a backend cannot serve', () => {
     // `docker` serves both roots verbatim inside the container, so nothing is
-    // refused on it; kubernetes keeps its per-type refusals, and self_hosted
-    // serves files through its worker but still cannot promise a clone.
+    // refused on it; kubernetes keeps its per-type refusals; and self_hosted
+    // refuses both mounted types — the published contract allows only
+    // `memory_store` on self-hosted environments, so an attached file is
+    // refused at admission rather than promised a mount the contract says
+    // does not exist.
     expect(unmountableResourceTypes([FILE, REPO], 'docker')).toEqual([]);
     expect(unmountableResourceTypes([REPO], 'kubernetes')).toEqual(['github_repository']);
     // Both, in the order the runtime materializes them, when both are declared.
     expect(unmountableResourceTypes([REPO, FILE], 'kubernetes')).toEqual(['file', 'github_repository']);
-    expect(unmountableResourceTypes([REPO, FILE], 'self_hosted')).toEqual(['github_repository']);
-    expect(unmountableResourceTypes([FILE], 'self_hosted')).toEqual([]);
+    expect(unmountableResourceTypes([REPO, FILE], 'self_hosted')).toEqual(['file', 'github_repository']);
+    expect(unmountableResourceTypes([FILE], 'self_hosted')).toEqual(['file']);
   });
 
   it('leaves a backend that can serve the canonical roots alone', () => {
@@ -90,16 +93,23 @@ describe('resource mountability', () => {
     const bothError = both as Error;
     expect(bothError.message).toContain('cannot mount file and github_repository resources');
     expect(bothError.message).toContain('without those resources');
-    // The self-hosted repository reason states what the runtime cannot promise,
-    // not that the worker refuses the path: cloning belongs to the operator's
-    // process and its credentials.
+    // The self-hosted file reason is the contract scope, not the worker's
+    // ability: only `memory_store` mounts there, so an attached file names a
+    // resource the contract refuses.
+    let fileOnSelfHosted: unknown;
+    try {
+      assertResourcesMountable([FILE], 'self_hosted');
+    } catch (error) {
+      fileOnSelfHosted = error;
+    }
+    expect((fileOnSelfHosted as Error).message).toContain('memory_store');
     let repoOnly: unknown;
     try {
       assertResourcesMountable([REPO], 'self_hosted');
     } catch (error) {
       repoOnly = error;
     }
-    expect((repoOnly as Error).message).toContain('maps the path into its own root');
+    expect((repoOnly as Error).message).toContain('memory_store');
   });
 
   it('returns instead of throwing where the backend serves the resource', () => {

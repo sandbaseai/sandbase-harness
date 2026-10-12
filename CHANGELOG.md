@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Changed
+
+- `file` resources are now refused at session admission on `self_hosted`
+  environments, matching the published contract ("自托管沙箱仅支持
+  `memory_store` 资源；包含 `file` 或 `github_repository` 资源的会话会被
+  拒绝并返回 400"). Previously the shipped worker downloaded an attached file
+  under its own root, which admitted a resource the contract says does not
+  exist on that backend and diverged from the official 400. The refusal is the
+  same `resource_not_mountable` the `kubernetes` path rule produces — at
+  creation and on `POST /v1/sessions/{id}/resources`, before any record is
+  written — and a session row that predates the rule fails its work item
+  rather than silently materializing the mount. `memory_store` resources are
+  unaffected: they reach the worker through their own materialization and are
+  the contract's only self-hosted resource.
+
 ### Added
 
 - `managed-agents apply <file...>` — the declarative manifest workflow (the

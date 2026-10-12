@@ -791,9 +791,10 @@ under `/workspace/<repo>` the same way. The backends that cannot serve the
 mount are refused at
 creation instead: `kubernetes` resolves an absolute path against its own
 `/workspace` and so refuses the upload root (and its acceptance of the
-repository root was never exercised against a cluster), and a `self_hosted`
-worker resolves the path inside its own root, which the runtime can neither
-verify nor enforce. A
+repository root was never exercised against a cluster), and `self_hosted`
+follows the published contract's scope — only `memory_store` mounts on a
+self-hosted environment, so a `file` or `github_repository` is refused at
+admission rather than promised a mount the contract says does not exist. A
 session that declares a resource its backend cannot serve is refused when it is
 created, with `resource_not_mountable` and `400`, and nothing is created — no
 session row, no resource instance, no event — so the failure names the backend
@@ -1688,13 +1689,11 @@ Environment's `sandbox_provider` after a session is bound does not change what
 that session's instructions say: the sandbox in hand is the one serving it.
 On `docker` the container's filesystem is the sandbox, so the canonical path is
 the real path and the mount lands verbatim; `kubernetes` rejects anything
-outside `/workspace`. A self-hosted worker downloads each attached file through
-its session work token and writes it at the mount path under its own root
-(`<workdir>/mnt/session/uploads/...`). A session that
-attaches a file resource on `kubernetes` is refused
-when it is created with `resource_not_mountable` and `400`, before any record
-exists, instead of being accepted and failing at provisioning
-(`Path escapes sandbox workspace`). The same refusal answers an attempt to attach
+outside `/workspace`. On a self-hosted environment the published contract
+allows only `memory_store` resources, so a `file` is refused at admission
+rather than promised a mount the contract says does not exist — the same
+refusal the kubernetes path rule produces, `resource_not_mountable` and `400`,
+before any record exists. The same refusal answers an attempt to attach
 the resource to an existing session on such a backend.
 
 ## Session Artifacts
@@ -1775,7 +1774,8 @@ instance in the same call, so it appears in the list above immediately and can
 be addressed by id; attaching one to an existing session uses the `POST` route.
 A `file` or `github_repository` resource is materialized at a canonical absolute
 in-sandbox path, so a session whose Environment selects a backend that cannot
-serve that path (`kubernetes`, `self_hosted`) is refused with `400` and
+serve that path (`kubernetes`) — or selects `self_hosted`, where the published
+contract allows only `memory_store` — is refused with `400` and
 code `resource_not_mountable` — at creation, and on the `POST` route above — and
 nothing is written: no session row, no resource instance, no event. The message
 names the backend, the resource type, and the alternative, so the caller does not
