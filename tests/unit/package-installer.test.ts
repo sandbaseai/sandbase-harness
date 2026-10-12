@@ -122,14 +122,22 @@ describe('assertPackagesAdmitted', () => {
   });
 
   it('refuses limited without allow_package_managers', () => {
-    expect(() =>
+    let thrown: unknown;
+    try {
       assertPackagesAdmitted(packages, {
         type: 'limited',
         allowed_hosts: [],
         allow_mcp_server_network_access: false,
         allow_package_manager_network_access: false,
-      }),
-    ).toThrowError(/allow_package_managers/);
+      });
+    } catch (error) {
+      thrown = error;
+    }
+    // The refusal carries the code an operator can act on, and names the flag
+    // that would admit the install instead of failing at provisioning.
+    expect(thrown).toBeInstanceOf(PackageInstallError);
+    expect((thrown as { code: string }).code).toBe('package_manager_access_required');
+    expect((thrown as Error).message).toContain('allow_package_managers');
   });
 });
 
@@ -170,9 +178,13 @@ describe('installDeclaredPackages', () => {
       stderr: 'E: Unable to locate package nope',
       timedOut: false,
     }));
-    await expect(
-      installDeclaredPackages({ apt: ['nope'], pip: ['pandas'] }, sandbox),
-    ).rejects.toThrowError(PackageInstallError);
+    let thrown: unknown;
+    await installDeclaredPackages({ apt: ['nope'], pip: ['pandas'] }, sandbox)
+      .catch((error: unknown) => {
+        thrown = error;
+      });
+    expect(thrown).toBeInstanceOf(PackageInstallError);
+    expect((thrown as { code: string }).code).toBe('package_install_failed');
     // The failing manager stopped the rest.
     expect(sandbox.commands).toHaveLength(1);
   });

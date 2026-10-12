@@ -111,6 +111,9 @@ export function declaredEnvironmentPackages(
  * reach registries its policy does not open. The message names the field the
  * operator changes, not the internal key name.
  */
+export const PACKAGE_MANAGER_ACCESS_REQUIRED_CODE = 'package_manager_access_required';
+export const PACKAGE_INSTALL_FAILED_CODE = 'package_install_failed';
+
 export function assertPackagesAdmitted(
   packages: Partial<Record<PackageManager, string[]>>,
   policy: EnvironmentNetworkPolicy | undefined,
@@ -118,7 +121,7 @@ export function assertPackagesAdmitted(
   if (!packages) return;
   if (policy?.type === 'limited' && policy.allow_package_manager_network_access !== true) {
     throw new PackageInstallError(
-      'package_manager_access_required',
+      PACKAGE_MANAGER_ACCESS_REQUIRED_CODE,
       'config.packages cannot run under a limited network policy unless '
         + 'config.networking.allow_package_managers is true — the declared '
         + 'managers would be refused egress to their registries.',
@@ -146,7 +149,7 @@ export async function installDeclaredPackages(
     const result: ExecResult = await sandbox.execute(command);
     if (result.exitCode !== 0) {
       throw new PackageInstallError(
-        'package_install_failed',
+        PACKAGE_INSTALL_FAILED_CODE,
         `${manager} install failed (exit ${result.exitCode}): `
           + (result.stderr || result.stdout || 'no output').trim().slice(0, 500),
       );
@@ -156,7 +159,9 @@ export async function installDeclaredPackages(
 
 export class PackageInstallError extends Error {
   constructor(
-    readonly code: 'package_manager_access_required' | 'package_install_failed',
+    readonly code:
+      | typeof PACKAGE_MANAGER_ACCESS_REQUIRED_CODE
+      | typeof PACKAGE_INSTALL_FAILED_CODE,
     message: string,
   ) {
     super(message);

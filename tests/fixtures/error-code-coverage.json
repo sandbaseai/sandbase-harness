@@ -151,6 +151,12 @@
       "tests/unit/session-error-shape.test.ts",
       "tests/unit/unpinned-wire-codes.test.ts"
     ],
+    "package_install_failed": [
+      "tests/unit/package-installer.test.ts"
+    ],
+    "package_manager_access_required": [
+      "tests/unit/package-installer.test.ts"
+    ],
     "pi_always_ask_not_supported": [
       "tests/integration/session-error-paths.test.ts",
       "tests/unit/session-error-shape.test.ts"

@@ -33,6 +33,8 @@
     "outcome_evaluator_unavailable",
     "outcome_grader_unavailable",
     "outcome_rubric_file_not_found",
+    "package_install_failed",
+    "package_manager_access_required",
     "pi_always_ask_not_supported",
     "pi_cleanup_pending",
     "pi_message_content_not_supported",

@@ -2353,7 +2353,7 @@ description: Uploaded from a compressed package.
           network: {
             type: 'limited',
             allow_mcp_server_network_access: false,
-            allow_package_manager_network_access: false,
+            allow_package_manager_network_access: true,
             allowed_hosts: ['api.example.com'],
           },
           packages: [{ manager: 'pip', package: 'pytest==8.3.4' }],
@@ -2370,7 +2370,9 @@ description: Uploaded from a compressed package.
       expect(body.config.network.allowed_hosts).toEqual(['api.example.com']);
       expect(body.config.networking.allowed_hosts).toEqual(['api.example.com']);
       expect(body.config.packages.pip).toEqual(['pytest==8.3.4']);
-      expect(body.packages_enforced).toBe(false);
+      // self_hosted resolves to a backend, so declared packages are enforced;
+      // the limited policy is not — no shipped self-hosted boundary exists.
+      expect(body.packages_enforced).toBe(true);
       expect(body.networking_enforced).toBe(false);
 
       const getRes = await app.request(`/v1/environments/${body.id}`);

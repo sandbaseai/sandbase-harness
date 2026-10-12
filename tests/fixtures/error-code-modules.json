@@ -100,6 +100,12 @@
     "outcome_rubric_file_not_found": [
       "src/core/outcomes/contract.ts"
     ],
+    "package_install_failed": [
+      "src/core/sandbox/package-installer.ts"
+    ],
+    "package_manager_access_required": [
+      "src/core/sandbox/package-installer.ts"
+    ],
     "pi_always_ask_not_supported": [
       "src/core/session/pi-policy.ts"
     ],
@@ -206,14 +212,14 @@
       "src/api/routes/worker.ts",
       "src/sandbox/self-hosted-provider.ts"
     ],
+    "work_lease_precondition_failed": [
+      "src/api/routes/environment-work.ts"
+    ],
     "work_outcome_unknown": [
       "src/sandbox/self-hosted-provider.ts"
     ],
     "work_queue_timeout": [
       "src/sandbox/self-hosted-provider.ts"
-    ],
-    "work_lease_precondition_failed": [
-      "src/api/routes/environment-work.ts"
     ]
   }
 }
