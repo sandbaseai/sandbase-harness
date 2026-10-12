@@ -128,8 +128,11 @@ translation between the two spellings of the hosting axis live in
   declaration the resolution path would refuse — two spellings that disagree,
   or a value that is not a name — projects `effective_sandbox_provider: null`,
   so a record is never reported as runnable while a session on it would be
-  refused. `packages_enforced` is `false` — the declaration is recorded, not
-  installed. `networking_enforced` is `true` only when the policy is `limited`
+  refused. `packages_enforced` is `true` whenever the environment resolves to a
+  backend sessions can actually run on: every shipped provider executes
+  commands, so a resolvable environment installs its declared packages at
+  provisioning and only an unresolvable one reports `false`.
+  `networking_enforced` is `true` only when the policy is `limited`
   *and* the effective backend declares a real boundary; `networking_enforcement`
   reports the strength itself: `enforced`, `best_effort`, `unsupported`, or
   `not_applicable` when no `limited` policy is declared.
@@ -160,6 +163,26 @@ translation between the two spellings of the hosting axis live in
   and `web_fetch` intersects the environment allowlist — `host:port`
   patterns, evaluated per redirect hop — with its existing domain policy and
   SSRF guards.
+- `config.packages` is enforced, not just recorded. Both spellings — the
+  published per-manager object (`{ type: "packages", pip: [...] }`) and the
+  local `{ manager, package }` array — normalize through
+  `declaredEnvironmentPackages` (`src/core/sandbox/package-installer.ts`)
+  into one `manager → package[]` map; keys outside the published manager
+  vocabulary (`apt`, `cargo`, `gem`, `go`, `npm`, `pip`) and the `type`
+  marker are dropped. At provisioning, after snapshot restore and before
+  file-resource materialization, each manager runs one install command
+  through the session sandbox's `execute` channel in alphabetical order —
+  the same channel every shipped provider implements — and a nonzero exit
+  fails the provisioning pass (`package_install_failed`) and tears the
+  sandbox down. Because the install runs *inside* the sandbox boundary it is
+  provider-independent: docker execs into the container, local spawns the
+  manager on the host, and a self-hosted worker receives it as an `exec`
+  work item. A `limited` network policy that denies
+  `allow_package_manager_network_access` refuses a package declaration at
+  write time with `invalid_environment_config` — the install could only
+  fail at provisioning — and is refused again at provisioning
+  (`package_manager_access_required`) if a stored row declares both anyway,
+  the same fail-closed posture the network axis takes.
 
 ## 3. Alignment
 
@@ -180,7 +203,7 @@ caller.
 | Hosting spellings that disagree | Refused with `invalid_environment_config` rather than resolved by precedence. The published shape has one spelling, so a request carrying both is a caller error this runtime cannot guess at. A stored row that already holds both is refused at resolution and reports `effective_sandbox_provider: null`; naming either spelling in an update replaces it. |
 | Workspace default seeding | `env_default` seeds the workspace `sandbox.provider` setting on a workspace that has no settings row. A `cloud` declaration there resolves to `docker`, so it seeds `docker` as the workspace default. An `env_default` declaring a hosting type this build cannot execute at all refuses that seeding rather than substituting `local`, so such a workspace does not start until the row is repaired — with an update, or in the database when the runtime is not running. |
 | Network policy enforcement | Applied at backend-dependent strength. Docker is `enforced` (an `--internal` network whose only reachable egress is the allowlist proxy), local is `best_effort` (proxy variables a subprocess can ignore), and kubernetes/self-hosted are `unsupported` (no boundary installed — the read reports it rather than claiming one). `web_fetch` and the MCP url connect boundary enforce the declared allowlist in the runtime process on every backend. |
-| `config.packages` | Recorded and reported in the published per-manager object shape — the local `{ manager, package }` array is folded into it — and marked `packages_enforced: false`. Nothing installs declared packages for any provider, so the published object shape and the local list are both inert configuration today. |
+| `config.packages` | Installed at provisioning on every resolvable backend: each declared manager runs one install command through the sandbox's own `execute` channel, in alphabetical order, after snapshot restore and before file resources. The declaration is reported in the published per-manager object shape — the local `{ manager, package }` array is folded into it — and `packages_enforced` is `true` while the environment resolves to a backend. A `limited` policy without `allow_package_managers` refuses the declaration at write time; a nonzero install exit fails provisioning rather than starting the session half-installed. |
 | Deletion guard | `DELETE` is mounted and physical, but refused while any session row references the environment — a finished session included — because `sessions.environment_id` is a hard foreign key and history keeps the environment it ran on. `env_default` is refused as `environment_protected`. `POST /v1/environments/{id}/archive` remains the lifecycle verb for an environment that should stop being offered without erasing its record. |
 | Environment listing | Serves its whole set rather than a window, and accepts no query parameter ([`pagination.md`](./pagination.md)). The route surface, with its verbs, is in [`routes.md`](./routes.md). |
 
@@ -206,11 +229,15 @@ caller.
   capability system takes everywhere — declare what the backend can actually
   do — and the Console says "best-effort" beside the policy rather than
   implying a hard boundary where a same-user subprocess can bypass it.
-- `packages` follows the same rule: the declaration is preserved verbatim so no
-  caller loses data, and no install is claimed, because installing a package set
-  is a provider feature with ordering and lockfile semantics that nothing here
-  implements. Refusing the published object shape instead would reject a
-  configuration for a field the runtime can store faithfully but not act on.
+- `packages` is enforced through the sandbox's `execute` channel rather than a
+  provider feature, because every shipped backend already runs commands for the
+  session and the published contract defines no install ordering or lockfile
+  semantics to honour — one command per manager, in the deterministic
+  alphabetical order, is all the declaration asks for. The write-time refusal
+  for `limited` without `allow_package_managers` matches the published rule
+  that a package declaration and a policy denying package-manager egress cannot
+  both hold: accepting it would store a configuration every session on it
+  fails.
 - The two-spelling refusals exist because the runtime has exactly one place to
   run a session and one policy to apply. Accepting two disagreeing declarations
   and picking one would make the effective configuration depend on which
@@ -249,8 +276,11 @@ caller.
   refusal leaving no row behind, a request naming one spelling repairing a stored
   declaration in the other, a damaged stored policy refused with the repair it
   needs and then repaired or cleared, `null` clearing a policy an older row wrote
-  in the published spelling, and the published network spelling accepted as a
-  top-level field.
+  in the published spelling, the published network spelling accepted as a
+  top-level field, and the packages admission: a `limited` policy without
+  `allow_package_managers` refuses a package declaration at write time without
+  storing a row, the same declaration passes with the flag set
+  (`packages_enforced: true`), and an unrestricted policy accepts it outright.
 - `tests/unit/environment-network.test.ts` — the normalizer: alias translation,
   local precedence over an alias, fail-closed defaults, host-pattern filtering,
   unknown keys preserved, non-objects reported as no policy, and key-order
@@ -267,6 +297,12 @@ caller.
   overlays the effective Settings V2 backend — a Docker workspace setting
   resolves the session's provider and image — and the workspace-default seed
   treats `cloud` like an undeclared row.
+- `tests/unit/package-installer.test.ts` — the install phase: both package
+  spellings normalized into the per-manager map, unknown managers and the
+  `type` marker dropped, managers run alphabetically with one `execute` call
+  each, package names shell-quoted against command injection, a nonzero exit
+  failing the pass and stopping later managers, and the `limited`-without-
+  `allow_package_managers` admission refusal.
 - `tests/integration/environment-update-delete.test.ts` — the published update
   and delete verbs: `POST`/`PUT` equivalence, `metadata` patch deletion on
   `null` and `""`, `description` cleared on `null` and preserved when omitted,
@@ -292,7 +328,9 @@ caller.
 both spellings through one vocabulary, `cloud` is accepted and resolved to
 `docker` with the resolution reported as `effective_sandbox_provider`,
 unknown values are refused by name with an actionable message and the
-documented code, the published network vocabulary is accepted, and the response
+documented code, the published network vocabulary is accepted, the published
+`packages` declaration is installed at provisioning on every backend — refused
+at write time when a `limited` policy denies it egress — and the response
 projects the published `config` shape beside the effective backend.
 `partial` overall, for the reason §4 records: the network
 policy is enforced on docker and advisory on local, while the kubernetes and

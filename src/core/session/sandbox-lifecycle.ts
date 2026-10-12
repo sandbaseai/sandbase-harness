@@ -16,6 +16,11 @@ import {
 } from '@/core/resources/github-materializer.js';
 import { repoSkillFilePath } from '@/core/resources/github-repository.js';
 import { environmentNetworkPolicyOf } from '@/core/config/environment-network.js';
+import {
+  assertPackagesAdmitted,
+  declaredEnvironmentPackages,
+  installDeclaredPackages,
+} from '@/core/sandbox/package-installer.js';
 import { assertSkillPackageName, type SkillPackage } from '@/core/skills/package-files.js';
 
 /** Minimal warn sink so the lifecycle can report capability gaps. */
@@ -172,6 +177,17 @@ export class SandboxLifecycle {
         } catch {
           // best-effort restore
         }
+      }
+
+      // Declared packages install before anything the session mounts or runs
+      // can depend on them — the published contract installs before the agent
+      // starts, and provisioning is the runtime's equivalent boundary. On a
+      // self-hosted backend each install is one `exec` work item, so the
+      // worker that claims the session performs it.
+      const declaredPackages = declaredEnvironmentPackages(envConfig);
+      if (declaredPackages) {
+        assertPackagesAdmitted(declaredPackages, environmentNetworkPolicyOf(envConfig));
+        await installDeclaredPackages(declaredPackages, sandbox);
       }
 
       await this.materializeFileResources(session, sandbox);

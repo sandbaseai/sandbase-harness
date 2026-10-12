@@ -72,6 +72,8 @@ export function environmentRoutes(deps: ServerDeps) {
     const config = normalized.config;
     const providerError = sandboxProviderError(config);
     if (providerError) return invalid(c, providerError.message, providerError.code);
+    const packagesError = packagesPolicyError(config);
+    if (packagesError) return invalid(c, packagesError.message, packagesError.code);
     const id = `env_${nanoid(18)}`;
     try {
       deps.db.prepare(
@@ -165,6 +167,8 @@ export function environmentRoutes(deps: ServerDeps) {
     const config = normalized.config;
     const providerError = sandboxProviderError(config);
     if (providerError) return invalid(c, providerError.message, providerError.code);
+    const packagesError = packagesPolicyError(config);
+    if (packagesError) return invalid(c, packagesError.message, packagesError.code);
     if (body.value.metadata !== undefined && body.value.metadata !== null && !isPlainObject(body.value.metadata)) {
       return invalid(c, 'metadata must be an object');
     }
@@ -358,8 +362,13 @@ function toApiEnvironment(row: EnvironmentRow, deps: ServerDeps) {
     description: row.description || null,
     config: projectEnvironmentConfig(config),
     effective_sandbox_provider: effectiveProviderFor(row.id, config, deps),
-    // Declared but not applied: no sandbox provider installs declared packages.
-    packages_enforced: false,
+    // Declared packages are installed at provisioning through the backend's own
+    // execute channel — `docker exec` for a container, a subprocess for local,
+    // an `exec` work item for self-hosted. The only backend this runtime cannot
+    // install on is one it does not ship or one whose provision channel is not
+    // command execution; the projection reports the effective provider's own
+    // answer rather than a global claim.
+    packages_enforced: packagesEnforcedFor(row.id, config, deps),
     // The network policy IS applied — but at the strength the effective
     // backend can deliver, not the strength the declaration implies. A docker
     // session's `--internal` network makes the allowlist a real boundary;
@@ -412,6 +421,26 @@ function projectEnvironmentConfig(config: Record<string, unknown>): Record<strin
     networking: officialNetworkingProjection(config),
     packages: officialPackagesProjection(config.packages),
   };
+}
+
+/**
+ * Whether the effective backend installs the declared `config.packages`.
+ *
+ * Install is one `execute` call per manager at provisioning, so the question
+ * is whether the backend that would serve this Environment can run a command
+ * at all. Every shipped provider implements `execute`; an out-of-tree
+ * provider that does not — or a resolution that already failed — reports
+ * `false` rather than promising an install that will never run.
+ */
+function packagesEnforcedFor(
+  environmentId: string,
+  config: Record<string, unknown>,
+  deps: ServerDeps,
+): boolean {
+  const provider = effectiveProviderFor(environmentId, config, deps);
+  // A resolved backend is the answer: the install runs through its `execute`
+  // channel, so resolving it is the capability the declaration needs.
+  return provider !== null;
 }
 
 /**
@@ -696,6 +725,45 @@ function unreadableStoredPolicy(key: string): { ok: false; message: string; code
       + 'Send config.network with a policy object to replace it, or null to clear it.',
     code: ENVIRONMENT_CONFIG_ERROR_CODES.invalidConfig,
   };
+}
+
+/**
+ * Refuse a `config.packages` declaration the Environment's own network policy
+ * cannot serve.
+ *
+ * The published contract makes this a write-time refusal: a `limited` policy
+ * with package installs and no `allow_package_managers` is answered 400. The
+ * runtime-side check in `core/sandbox/package-installer.ts` catches a stored
+ * row that predates this rule; this earlier refusal is what the published
+ * contract specifies and what keeps the Environment honest about what its
+ * sessions will do.
+ */
+function packagesPolicyError(
+  config: Record<string, unknown>,
+): { message: string; code: string } | undefined {
+  const declared = config.packages;
+  if (declared === undefined || declared === null) return undefined;
+  // Shape: published per-manager object or local {manager, package} array.
+  const hasPackages = Array.isArray(declared)
+    ? declared.some((entry) => entry && typeof entry === 'object' && typeof (entry as Record<string, unknown>).package === 'string')
+    : typeof declared === 'object'
+      ? Object.entries(declared as Record<string, unknown>).some(
+          ([key, list]) => key !== 'type' && Array.isArray(list) && list.length > 0,
+        )
+      : false;
+  if (!hasPackages) return undefined;
+
+  const policy = environmentNetworkPolicyOf(config);
+  if (policy?.type === 'limited' && policy.allow_package_manager_network_access !== true) {
+    return {
+      message:
+        'config.packages cannot be installed under a limited network policy unless '
+        + 'config.networking.allow_package_managers is true. Either allow package-manager '
+        + 'egress, change the policy to unrestricted, or remove the package list.',
+      code: ENVIRONMENT_CONFIG_ERROR_CODES.invalidConfig,
+    };
+  }
+  return undefined;
 }
 
 /**

@@ -445,4 +445,44 @@ describe('environment config admission', () => {
     // `unrestricted` is the only type that widens anything, so anything else is limited.
     expect(body.config.network.type).toBe('limited');
   });
+
+  it('refuses declared packages under limited networking without allow_package_managers', async () => {
+    const { status, body } = await post({
+      name: 'limited-packages',
+      config: {
+        type: 'cloud',
+        packages: { pip: ['pandas'] },
+        networking: { type: 'limited', allowed_hosts: ['example.com'] },
+      },
+    });
+
+    expect(status).toBe(400);
+    expect(body.error.message).toMatch(/allow_package_managers/);
+    expect(environmentCount('limited-packages')).toBe(0);
+  });
+
+  it('accepts declared packages under limited networking when the policy opens package managers', async () => {
+    const { status, body } = await post({
+      name: 'limited-packages-allowed',
+      config: {
+        type: 'cloud',
+        packages: { pip: ['pandas'] },
+        networking: { type: 'limited', allowed_hosts: [], allow_package_managers: true },
+      },
+    });
+
+    expect(status).toBe(201);
+    expect(body.config.packages).toEqual({ type: 'packages', apt: [], cargo: [], gem: [], go: [], npm: [], pip: ['pandas'] });
+    expect(body.packages_enforced).toBe(true);
+    expect(body.config.network.allow_package_manager_network_access).toBe(true);
+  });
+
+  it('accepts declared packages under an unrestricted or absent policy', async () => {
+    const { status, body } = await post({
+      name: 'unrestricted-packages',
+      config: { type: 'cloud', packages: { npm: ['express'] } },
+    });
+    expect(status).toBe(201);
+    expect(body.packages_enforced).toBe(true);
+  });
 });

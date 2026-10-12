@@ -292,6 +292,14 @@ export interface EnvironmentConfig {
     allow_mcp_server_network_access: boolean;
     allow_package_manager_network_access: boolean;
   } & Record<string, unknown>;
+  /**
+   * Declared packages (`config.packages`), in the stored spelling the
+   * Environment row carries. Both the published per-manager object
+   * (`{ pip: [...] }`) and the local `{manager, package}` array reach this
+   * field; `core/sandbox/package-installer.ts` normalizes either into
+   * `manager → package[]` at provisioning. Absent means no install phase.
+   */
+  packages?: Record<string, unknown> | Array<{ manager?: unknown; package?: unknown }>;
   /** Kubernetes-specific settings (kubernetes provider only) */
   kubernetes?: KubernetesEnvironmentConfig;
 }

@@ -17,6 +17,19 @@
   what makes one command able to stand up a whole stack. A stale lock entry or
   a moved file falls back to the live list by name, and a manifest that is
   none of the three kinds is refused before any request is made.
+- `config.packages` on an Environment is now enforced rather than inert. Both
+  spellings — the published per-manager object (`apt`, `cargo`, `gem`, `go`,
+  `npm`, `pip`) and the local `{manager, package}` array — are folded into one
+  declaration and installed when a session provisions: after snapshot restore
+  and before file resources, each manager runs one install command through the
+  sandbox's `execute` channel in alphabetical order, so it works on every
+  backend that runs commands (docker exec, local subprocess, self-hosted work
+  item). A nonzero install exit fails provisioning rather than starting a
+  half-installed session, and a `limited` network policy without
+  `allow_package_managers` refuses the declaration at write time with
+  `invalid_environment_config`, matching the published rule that packages and
+  denied package-manager egress cannot both hold. Environment reads now report
+  `packages_enforced: true` whenever the environment resolves to a backend.
 - An optional external authorization-freshness boundary for long-running
   sessions (#812). Setting `MANAGED_AGENTS_EXTERNAL_AUTHZ_ENDPOINT` makes the
   runtime present every governed tool call the local permission policy

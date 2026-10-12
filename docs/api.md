@@ -1948,12 +1948,21 @@ The published CMA `config` shape is read rather than stored and ignored:
   value that is not a name — is reported with a null `effective_sandbox_provider`
   rather than as a backend, so a listing never presents as runnable an
   environment whose sessions are refused.
-- `config.packages` is preserved as written. No provider in this runtime
-  installs packages, in either the published object shape or the local list
-  shape, so a declaration there does not reach a sandbox — the response marks
-  this with `packages_enforced: false`. The response's `config.packages` field
-  reports the published per-manager object shape; the local array spelling a
-  stored config may carry is folded into it.
+- `config.packages` is enforced. Both spellings — the published per-manager
+  object (`{ "type": "packages", "pip": ["pandas"], ... }`, over `apt`, `cargo`,
+  `gem`, `go`, `npm`, `pip`) and the local `[{ "manager", "package" }]` array —
+  are folded into one map and installed at provisioning: after snapshot restore
+  and before file resources, each manager runs one install command through the
+  session sandbox's `execute` channel in alphabetical order, so the install is
+  provider-independent (docker execs into the container, local runs the manager
+  on the host, a self-hosted worker receives an `exec` work item). A nonzero
+  install exit fails provisioning — the session does not start half-installed —
+  and a `limited` network policy without `allow_package_managers` refuses the
+  declaration at write time with `invalid_environment_config`, since the install
+  could only fail. The response marks enforcement with `packages_enforced: true`
+  on an environment that resolves to a backend (`false` when resolution fails),
+  and its `config.packages` field reports the published per-manager object shape;
+  the local array spelling a stored config may carry is folded into it.
 
 `hosting_type: "cloud"` — and the published `config: {"type": "cloud"}` — is
 accepted and means "the platform decides": sessions on that environment

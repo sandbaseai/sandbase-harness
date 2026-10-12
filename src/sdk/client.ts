@@ -361,7 +361,11 @@ export interface EnvironmentSummary {
    * stored config cannot be resolved.
    */
   effective_sandbox_provider: string | null;
-  /** Local extension: declared packages are recorded but not installed. */
+  /**
+   * Local extension: declared `config.packages` are installed at provisioning.
+   * `true` on an environment that resolves to a backend — every shipped
+   * provider executes commands — and `false` when resolution fails.
+   */
   packages_enforced: boolean;
   /** Local extension: the declared network policy is recorded but not enforced. */
   networking_enforced: boolean;
