@@ -6,6 +6,13 @@ project-owned features only.
 ## Near Term
 
 - Improve API compatibility coverage and documented response shapes.
+- Decide the multiagent surface: the published `multiagent` roster, session
+  threads (`/v1/sessions/{id}/threads*`), the coordinator/advisor roles, and
+  the `session.thread_*` / `agent.thread_message_*` events are all mounted
+  `unsupported_capability` refusals today (see
+  `contracts/anthropic-cma/threads.md`). It is the largest remaining gap to
+  the published contract — implement it, or declare it permanently out of
+  scope the way `/v1/tunnels` and `/v1/user_profiles` already are.
 - Improve template validation and authoring commands.
 - Add richer runtime metrics for model usage, tool duration, and session state.
 
@@ -40,16 +47,31 @@ project-owned features only.
   VM. Remaining hardening: network namespacing (today the egress proxy is
   env-level), resource limits, and a confinement story for Windows hosts.
 - Expand Docker examples and resource-limit coverage.
+- Implement `config.packages` installation: the published per-manager object
+  (`apt`, `cargo`, `gem`, `go`, `npm`, `pip`) is recorded and projected today
+  but `packages_enforced` reports `false`, so a declared package is never
+  installed. Installing means provisioning-time execution on the `docker`,
+  `local`, and `self_hosted` backends (alphabetical manager order, version
+  pins, and the `allow_package_managers` precondition under `limited`
+  networking — see `contracts/anthropic-cma/environments.md`), and a
+  per-backend `packages_enforced` projection.
 - Run the Kubernetes live-cluster suites in CI. They exist and pass against a
   real cluster, but they skip when no cluster is reachable, so nothing currently
   enforces them. See CONTRIBUTING.md for how to run them locally.
 - Handle Pod eviction and node pressure mid-session. Provision now fails fast on
   terminal image and config errors, but a Pod evicted after a session is running
   surfaces only as command failures.
+- Serve `file` resources on the `kubernetes` backend: it currently resolves
+  absolute paths inside its own `/workspace` and refuses the
+  `/mnt/session/uploads` root at session creation (`resource_not_mountable`).
 - Add network egress controls per Environment for the container backends.
 - Add incremental command output (`streamingExec`) once a consumer exists for
   it: today tool results reach the model as a single value, so the capability is
   declared and reported as unsupported rather than implemented.
+- Accept `user.tool_result` on sessions bound to `self_hosted` environments: in
+  the published contract the worker integration posts `agent_toolset` results
+  with it, while this runtime today only takes externally answered calls as
+  `user.custom_tool_result`.
 - Improve self-hosted worker ergonomics.
 - Add provider packages for additional isolated execution backends.
 
@@ -66,6 +88,10 @@ project-owned features only.
 ## CLI and SDK
 
 - Add session lifecycle subcommands.
+- Add a declarative `apply` workflow: a frontmatter manifest (the `ant apply`
+  pattern — agent/environment/deployment documents applied against the
+  runtime, with a lock file recording resolved ids and versions) so a
+  workspace's resources can be reproduced from checked-in files.
 - Add model and environment inspection commands.
 - Add richer SDK examples.
 - Add typed helpers for event filtering and replay cursors.
