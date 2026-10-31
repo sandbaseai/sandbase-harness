@@ -113,6 +113,14 @@ export function sessionsRoutes(deps: ServerDeps) {
       return invalid(c, 'Request body must be an object');
     }
     const { agent, environment_id, title, metadata } = body;
+    // `title` is an optional string on create exactly as on update; a non-string
+    // is refused rather than coerced, because a persisted number or object would
+    // surface back as a title the caller never set. The update path makes the
+    // same refusal (`title must be a string or null`), so the two ingresses
+    // agree on the type.
+    if (title !== undefined && title !== null && typeof title !== 'string') {
+      return invalid(c, 'title must be a string or null');
+    }
     const agentRef = normalizeAgentRef(agent);
     const environment = normalizeEnvironmentId(deps, environment_id);
     const resources = normalizeResources(deps, body.resources);
