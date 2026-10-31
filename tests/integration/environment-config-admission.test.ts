@@ -245,6 +245,36 @@ describe('environment config admission', () => {
     expect(environmentCount('network-array')).toBe(0);
   });
 
+  it('refuses an allowed_hosts entry that breaks the published grammar', async () => {
+    // The write path validates against the published grammar — a bare hostname
+    // or a `*.domain` wildcard, no scheme, port, path, or credentials — in
+    // either spelling, naming the offending index.
+    for (const bad of ['https://x.com', 'x.com:8080', 'x.com/path', 'u@x.com', '*', '*.com']) {
+      const attempt = await post({
+        name: `bad-host-${Math.random().toString(36).slice(2, 7)}`,
+        config: { networking: { type: 'limited', allowed_hosts: ['api.example.com', bad] } },
+      });
+      expect(attempt.status, bad).toBe(400);
+      expect(attempt.body.error.code).toBe('invalid_environment_config');
+      expect(attempt.body.error.message).toContain('allowed_hosts.1');
+    }
+  });
+
+  it('accepts a bare hostname and a leading *. wildcard, in either spelling', async () => {
+    const published = await post({
+      name: 'good-hosts-published',
+      config: { networking: { type: 'limited', allowed_hosts: ['api.example.com', '*.internal.example.org'] } },
+    });
+    expect(published.status).toBe(201);
+    expect(published.body.config.network.allowed_hosts).toEqual(['api.example.com', '*.internal.example.org']);
+
+    const local = await post({
+      name: 'good-hosts-local',
+      config: { network: { type: 'limited', allowed_hosts: ['api.example.com'] } },
+    });
+    expect(local.status).toBe(201);
+  });
+
   it('reports a policy a stored row wrote in the published spelling', async () => {
     db.prepare('INSERT INTO environments (id, name, description, config, metadata) VALUES (?, ?, ?, ?, ?)').run(
       'env_legacy_networking',

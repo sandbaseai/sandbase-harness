@@ -11,6 +11,7 @@
 
 import { describe, it, expect } from 'vitest';
 import {
+  environmentAllowedHostsError,
   environmentAllowsEgressHost,
   environmentEgressAllowlist,
   environmentMcpServerAdmission,
@@ -76,6 +77,34 @@ describe('environment network normalization', () => {
     // back rather than disappear between the request and the response.
     expect(normalizeEnvironmentNetwork({ type: 'limited', future_key: 'kept' }))
       .toMatchObject({ future_key: 'kept' });
+  });
+
+  it('names the offending allowed_hosts entry and index', () => {
+    expect(environmentAllowedHostsError(['api.example.com', 'https://x.com']))
+      .toContain('allowed_hosts.1');
+    expect(environmentAllowedHostsError(['ok.example.com'])).toBeUndefined();
+  });
+
+  it('admits a bare hostname and a leading *. wildcard only', () => {
+    expect(environmentAllowedHostsError(['example.com', '*.example.com', 'a-b.c_d.example.org']))
+      .toBeUndefined();
+    expect(environmentAllowedHostsError(['*.example.com'])).toBeUndefined();
+  });
+
+  it('refuses a scheme, port, path, credentials, whitespace, and a bare *', () => {
+    for (const bad of ['https://x.com', 'x.com:8080', 'x.com/path', 'u@x.com', 'a b.com', '*', 'x.*.com']) {
+      expect(environmentAllowedHostsError([bad]), bad).toBeDefined();
+    }
+    expect(environmentAllowedHostsError(['*.com'])).toBeDefined();
+  });
+
+  it('refuses an empty entry, bad labels, and consecutive dots', () => {
+    // A single trailing dot is normalized away, so `example.com.` is legal;
+    // the rest are malformed at the entry level.
+    expect(environmentAllowedHostsError(['example.com.'])).toBeUndefined();
+    for (const bad of [' ', '.example.com', 'ex..com', '-x.com', 'x-.com']) {
+      expect(environmentAllowedHostsError([bad]), bad).toBeDefined();
+    }
   });
 
   it('reports a value that is not an object as no policy at all', () => {

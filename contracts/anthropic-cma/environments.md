@@ -108,9 +108,12 @@ translation between the two spellings of the hosting axis live in
   `allow_mcp_server_network_access` and `allow_package_managers` becomes
   `allow_package_manager_network_access`; `allowed_hosts` is filtered to usable
   host patterns, and a key outside the documented vocabulary is preserved as
-  written. The defaults are fail-closed: an unrecognized `type` is read as the
-  restrictive `limited`, and a permission flag is granted only by the literal
-  boolean `true`.
+  written. The write path additionally validates each entry against the
+  published grammar — a bare hostname or a `*.domain` wildcard, with no
+  scheme, port, path, credentials, or whitespace — and refuses an entry that
+  breaks it (`environmentAllowedHostsError`). The defaults are fail-closed:
+  an unrecognized `type` is read as the restrictive `limited`, and a
+  permission flag is granted only by the literal boolean `true`.
 - A request that declares both network spellings with different content is
   refused with `invalid_environment_config`, for the same reason the hosting
   spellings are. `null` in either spelling clears the recorded policy, which is
