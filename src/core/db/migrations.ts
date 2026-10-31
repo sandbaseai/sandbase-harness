@@ -1421,6 +1421,25 @@ CREATE TABLE session_work_tokens (
 CREATE INDEX idx_session_work_tokens_session ON session_work_tokens(session_id);
 `;
 
+/**
+ * Scheduled-deployment run jitter (the published load-distribution rule):
+ * `upcoming_runs_at` reflects the exact schedule, but actual execution applies
+ * jitter of up to 15% of the interval between runs, clamped to [5s, 9min].
+ *
+ * `next_run_at` stays the *scheduled* instant — the value the read projection
+ * shows — so jittering it would corrupt both the upcoming-runs display and the
+ * resume logic that treats it as the schedule. `due_at` is the *fire* instant:
+ * `next_run_at` plus a delay drawn once when the instant is armed and then
+ * persisted, so a 60-second due pass reads the same deadline every tick instead
+ * of re-rolling and possibly delaying a run forever. Rows written before this
+ * column have no recorded jitter and are armed lazily on the next pass —
+ * `NULL` means "not yet jittered", not "fire now", or every legacy row would
+ * fire immediately on upgrade.
+ */
+const M062_DEPLOYMENT_RUN_DUE_AT = `
+ALTER TABLE scheduled_deployments ADD COLUMN due_at TEXT;
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: '001_initial', sql: M001_INITIAL },
   { version: 2, name: '002_memory', sql: M002_MEMORY },
@@ -1483,4 +1502,5 @@ export const MIGRATIONS: Migration[] = [
   { version: 59, name: '059_webhook_rotation_window_since', sql: M059_WEBHOOK_ROTATION_WINDOW_SINCE },
   { version: 60, name: '060_dreams', sql: M060_DREAMS },
   { version: 61, name: '061_work_api_surface', sql: M061_WORK_API_SURFACE },
+  { version: 62, name: '062_deployment_run_due_at', sql: M062_DEPLOYMENT_RUN_DUE_AT },
 ];

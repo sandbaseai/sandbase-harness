@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import { isValidTimeZone, nextCronRun as nextCronRunInZone } from './cron.js';
+import { DEPLOYMENT_RUN_JITTER_MAX_MS, deploymentRunJitterMs, isValidTimeZone, nextCronRun as nextCronRunInZone } from './cron.js';
 import type { Database } from '@/core/db/database.js';
 import type { SessionManager } from '@/core/session/session-manager.js';
 
@@ -42,7 +42,7 @@ export function nextCronRun(
  * backfill — a trigger missed while the process was stopped is deliberately not
  * replayed, per the contract — it only restores the forward schedule.
  */
-export function rearmScheduledDeployments(deps: { db: Database }, opts: { now?: Date } = {}): number {
+export function rearmScheduledDeployments(deps: { db: Database }, opts: { now?: Date; random?: () => number } = {}): number {
   const now = opts.now ?? new Date();
   const rows = deps.db.prepare(
     `SELECT *
@@ -54,9 +54,21 @@ export function rearmScheduledDeployments(deps: { db: Database }, opts: { now?: 
     const stale = !row.next_run_at || row.next_run_at <= now.toISOString();
     if (!stale) continue;
     const next = nextCronRun(row.cron, now, row.timezone || 'UTC')?.toISOString() ?? null;
+    // A trigger missed while the process was down is not replayed; the
+    // recomputed instant is armed with its own jittered fire time, drawn
+    // against the interval it now anchors.
+    const dueAt = next
+      ? new Date(
+          Date.parse(next) +
+          deploymentRunJitterMs(
+            Math.max(0, Date.parse(next) - (row.last_run_at ? Date.parse(row.last_run_at) : now.getTime())),
+            opts.random,
+          ),
+        ).toISOString()
+      : null;
     deps.db.prepare(
-      'UPDATE scheduled_deployments SET next_run_at = ?, updated_at = ? WHERE id = ?',
-    ).run(next, now.toISOString(), row.id);
+      'UPDATE scheduled_deployments SET next_run_at = ?, due_at = ?, updated_at = ? WHERE id = ?',
+    ).run(next, dueAt, now.toISOString(), row.id);
     updated += 1;
   }
   return updated;
@@ -67,6 +79,7 @@ type RearmRow = {
   cron: string;
   timezone: string | null;
   next_run_at: string | null;
+  last_run_at?: string | null;
 };
 /**
  * The run event a timed run raises, as the published contract shapes it.
@@ -113,21 +126,82 @@ export type ScheduledDeploymentEventSink = (event: ScheduledDeploymentEvent) => 
  * recorded and retried by the dispatcher, and must never stop a due deployment
  * from running or abandon the rest of the pass.
  */
+/**
+ * Arm a deployment's `due_at` — the persisted fire instant for its current
+ * `next_run_at`.
+ *
+ * `due_at` is `next_run_at + jitter`, drawn once and stored so a 60-second due
+ * pass reads the same deadline every tick. Re-rolling per pass would let an
+ * unlucky schedule postpone itself indefinitely. A row is (re)armed whenever
+ * its `next_run_at` moves: on the lazy backfill for rows armed before the
+ * column existed, and after each run advances the schedule. Rows with no
+ * `next_run_at` — manual-only, or one whose cadence ran out — carry a NULL
+ * `due_at` and never match the due query.
+ *
+ * The delay is `deploymentRunJitterMs` over the interval the run fires into.
+ * `last_run_at` anchors the previous scheduled instant for a timed schedule;
+ * a deployment with no prior run measures the interval from `now` instead.
+ */
+export function armDeploymentDueAt(
+  db: Database,
+  schedule: { id: string; cron: string | null; status?: string | null; timezone?: string | null; next_run_at: string | null; last_run_at?: string | null },
+  opts: { now?: Date; random?: () => number } = {},
+): string | null {
+  const nextRunAt = schedule.next_run_at;
+  // A non-active row is disarmed rather than jittered: `due_at` only ever names
+  // a fire that can happen, and a paused deployment's next instant is the one
+  // resume re-arms for, not this one.
+  if (!schedule.cron || !nextRunAt || (schedule.status !== undefined && schedule.status !== 'active')) {
+    db.prepare('UPDATE scheduled_deployments SET due_at = NULL WHERE id = ?').run(schedule.id);
+    return null;
+  }
+  const now = opts.now ?? new Date();
+  const nextMs = Date.parse(nextRunAt);
+  const anchorMs = schedule.last_run_at ? Date.parse(schedule.last_run_at) : now.getTime();
+  const intervalMs = Number.isFinite(nextMs) && Number.isFinite(anchorMs) ? nextMs - anchorMs : 0;
+  const dueAt = new Date(nextMs + deploymentRunJitterMs(Math.max(0, intervalMs), opts.random));
+  db.prepare('UPDATE scheduled_deployments SET due_at = ? WHERE id = ?').run(dueAt.toISOString(), schedule.id);
+  return dueAt.toISOString();
+}
+
 export async function runDueScheduledDeployments(
   db: Database,
   sessionManager: SessionManager,
-  opts: { now?: Date; onEvent?: ScheduledDeploymentEventSink } = {},
+  opts: { now?: Date; onEvent?: ScheduledDeploymentEventSink; random?: () => number } = {},
 ): Promise<SchedulerRunResult[]> {
   const now = opts.now ?? new Date();
   const nowIso = now.toISOString();
+  // (Re)arming: a row needs a fresh `due_at` whenever the one it holds was not
+  // drawn for its current `next_run_at` — NULL for rows armed before the column
+  // existed, and stale when `next_run_at` moved underneath it (a raw write that
+  // bypassed the armed paths). A `due_at` is only valid for the instant it was
+  // drawn from: it must sit inside `[next_run_at, next_run_at + 9min]`. Outside
+  // that window it describes a different schedule and is re-drawn rather than
+  // trusted, so the pass reads a stable deadline instead of re-rolling per tick.
+  const unarmed = db.prepare(
+    `SELECT id, cron, timezone, next_run_at, last_run_at, due_at
+     FROM scheduled_deployments
+     WHERE archived_at IS NULL
+       AND status = 'active'
+       AND cron IS NOT NULL
+       AND next_run_at IS NOT NULL`,
+  ).all() as Array<{ id: string; cron: string; timezone: string | null; next_run_at: string; last_run_at: string | null; due_at: string | null }>;
+  for (const row of unarmed) {
+    const nextMs = Date.parse(row.next_run_at);
+    const dueMs = row.due_at ? Date.parse(row.due_at) : Number.NaN;
+    const stale = !Number.isFinite(dueMs)
+      || dueMs < nextMs
+      || dueMs > nextMs + DEPLOYMENT_RUN_JITTER_MAX_MS;
+    if (stale) armDeploymentDueAt(db, row, { now, random: opts.random });
+  }
   const rows = db.prepare(
     `SELECT *
      FROM scheduled_deployments
      WHERE archived_at IS NULL
        AND status = 'active'
-       AND next_run_at IS NOT NULL
-       AND next_run_at <= ?
-     ORDER BY next_run_at ASC, created_at ASC
+       AND due_at IS NOT NULL
+       AND due_at <= ?
+     ORDER BY due_at ASC, created_at ASC
      LIMIT 50`,
   ).all(nowIso) as ScheduleRow[];
   const emit = async (event: ScheduledDeploymentEvent): Promise<void> => {
@@ -140,7 +214,7 @@ export async function runDueScheduledDeployments(
   };
   const results: SchedulerRunResult[] = [];
   for (const schedule of rows) {
-    const outcome = runSchedule(db, sessionManager, schedule, 'scheduled', now);
+    const outcome = runSchedule(db, sessionManager, schedule, 'scheduled', now, opts.random);
     // A deployment whose agent is gone is archived rather than run: the
     // published rule records no run for it, so there is no id to emit against.
     // Its archive is still a lifecycle event a subscriber is owed.
@@ -304,6 +378,7 @@ export function runSchedule(
   schedule: ScheduleRow,
   triggerType: string,
   startedAtDate: Date = new Date(),
+  random?: () => number,
 ): ScheduleRunOutcome {
   const runId = `drun_${nanoid(18)}`;
   const startedAt = startedAtDate.toISOString();
@@ -378,13 +453,27 @@ export function runSchedule(
 
   const run = recordRun(sessionId, failure);
   const pause = failure !== null && !RECOVERABLE_RUN_ERRORS.has(failure.type);
+  // The fire instant tracks the schedule instant the run just armed: a timed
+  // run re-draws jitter for the new `next_run_at`, a paused or manual-only
+  // deployment carries none so the due pass leaves it alone. `last_run_at`
+  // anchors the interval this next run fires into.
+  const nextDueAt = pause || !schedule.cron || !nextRun
+    ? null
+    : new Date(
+        Date.parse(nextRun) +
+        deploymentRunJitterMs(
+          Math.max(0, Date.parse(nextRun) - Date.parse(startedAt)),
+          random,
+        ),
+      ).toISOString();
   db.prepare(
     `UPDATE scheduled_deployments
-     SET last_run_at = ?, next_run_at = ?, status = ?, paused_reason = ?, updated_at = ?
+     SET last_run_at = ?, next_run_at = ?, due_at = ?, status = ?, paused_reason = ?, updated_at = ?
      WHERE id = ?`,
   ).run(
     triggerType === 'scheduled' ? startedAt : schedule.last_run_at ?? null,
     nextRun,
+    nextDueAt,
     pause ? 'paused' : schedule.status ?? 'active',
     pause ? JSON.stringify({ type: 'error', error: { type: failure!.type, message: failure!.message } }) : null,
     new Date().toISOString(),
@@ -470,6 +559,7 @@ export type ScheduleRow = {
   status?: string;
   last_run_at?: string | null;
   next_run_at?: string | null;
+  due_at?: string | null;
   initial_events?: string;
   resources?: string;
   vault_ids?: string;
