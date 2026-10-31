@@ -412,9 +412,11 @@ export class DefaultSessionExecutor implements SessionExecutor {
     // When the sandbox owns an egress boundary, a credential enters the
     // environment as an opaque placeholder and the boundary materializes the
     // secret on the wire, scoped to the credential's own allowed_hosts. A
-    // backend with no boundary (kubernetes, self-hosted) cannot substitute, so
-    // it keeps the plaintext materialization it always had — the bundle shape
-    // is the same, only the values differ.
+    // backend with no boundary (kubernetes, self-hosted) cannot substitute,
+    // so environment credentials are refused outright — the published
+    // contract does not support them without a substitution boundary, and
+    // plaintext in the process is the exposure the placeholder model rules
+    // out.
     const usePlaceholders = typeof sandbox.configureEgressSubstitutions === 'function';
     const resolvedCredentials = this.deps.resolveCredentialInjections?.(
       session.id,

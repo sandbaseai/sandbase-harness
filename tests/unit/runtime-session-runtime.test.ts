@@ -603,7 +603,10 @@ describe('runtime session services', () => {
 
     // A provider that reports the environment it was handed rather than running a
     // shell, so the assertion does not depend on the host's expansion semantics.
+    // The sandbox owns an egress boundary, so the credential arrives as a
+    // placeholder — the boundary's substitution table is what carries the value.
     let commandEnv: Record<string, string> | undefined;
+    const registered: Array<{ placeholder: string; value: string }> = [];
     const provider: SandboxProvider = {
       type: 'local',
       capabilities: sandboxCapabilities(),
@@ -618,6 +621,9 @@ describe('runtime session services', () => {
               stderr: '',
               timedOut: false,
             };
+          },
+          configureEgressSubstitutions(substitutions: ReadonlyArray<{ placeholder: string; value: string }>) {
+            registered.push(...substitutions.map((s) => ({ ...s })));
           },
           async writeFile() {},
           async readFile() { return ''; },
@@ -676,9 +682,11 @@ describe('runtime session services', () => {
       // no-op
     }
 
-    // The session's vault reached the command environment…
-    expect(commandEnv).toEqual({ TOKEN: SECRET });
-    // …and the value the strategy sees is scrubbed rather than carried through.
+    // The session's vault reached the command environment as a placeholder…
+    expect(commandEnv).toEqual({ TOKEN: '__cred_crd_runtime__' });
+    // …the boundary was registered to substitute the real value on the wire…
+    expect(registered).toEqual([{ placeholder: '__cred_crd_runtime__', value: SECRET, allowedHosts: null }]);
+    // …and the token the strategy sees back is scrubbed rather than carried through.
     expect(observed).toBe('TOKEN=[REDACTED]');
     db.close();
   });
