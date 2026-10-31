@@ -2,8 +2,9 @@
 
 Contract area: `/v1/agents` — agent definitions, model profile, toolsets.
 Status: `supported` for CRUD; `partial` for the model object profile; the
-canonical `multiagent` block is `unavailable` and the local delegation
-extension is separate. See §4.
+canonical `multiagent` block is `not_applicable` (declared out of scope by
+[`decisions/0001`](../../decisions/0001-multiagent-out-of-scope.md)) and the
+local delegation extension is separate. See §4.
 Source: `src/core/agent/schema.ts`, `src/core/agent/update.ts`,
 `src/core/agent/model-object.ts`, `src/api/routes/agents.ts`,
 `src/api/routes/session-normalizers.ts`.
@@ -11,7 +12,7 @@ Source: `src/core/agent/schema.ts`, `src/core/agent/update.ts`,
 <!-- capability-status
 agent-crud: supported
 model-object-profile: partial
-multiagent-roster: unavailable
+multiagent-roster: not_applicable
 local-delegation-subagent: supported
 -->
 
@@ -198,6 +199,8 @@ model object profile: `effort` and `speed` are executed on the Anthropic
 provider under the capability table — with admission refusing what a listed
 model cannot take — and stored-not-sent elsewhere, while `inference_geo` is
 refused rather than honoured. The canonical
-`multiagent` block is `unavailable` and refused by name; the local delegation
+`multiagent` block is `not_applicable` — declared out of scope by
+[`decisions/0001`](../../decisions/0001-multiagent-out-of-scope.md) — and
+refused by name; the local delegation
 extension is `supported` and is recorded as an extension, never as the
 published multiagent surface.

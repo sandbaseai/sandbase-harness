@@ -104,9 +104,9 @@ unsupported capability and its reason, and separating "not implemented" from
 
 Mixed, per the table in §2. Two entries are `not_applicable` by design and the
 rest are `unavailable`. Every one is recorded in the capability matrix with its
-reason rather than being omitted. Four entries that used to be here are no
+reason rather than being omitted. Five entries that used to be here are no
 longer: session budget, `web_search` execution, dreams, and
 `mcp_oauth_validate` each have their own coverage because they were
-implemented. Threads and the rest of the
-multiagent surface stayed out: they are `unavailable`, not `partial`, and they
-too have their own file rather than a paragraph in this one.
+implemented, and the multiagent surface is `not_applicable` by decision
+([`decisions/0001`](../../decisions/0001-multiagent-out-of-scope.md)) rather
+than `unavailable` — its file is [`threads.md`](./threads.md).

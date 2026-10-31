@@ -6,14 +6,15 @@ project-owned features only.
 ## Near Term
 
 - Improve API compatibility coverage and documented response shapes.
-- Decide the multiagent surface: the published `multiagent_20261001` block
-  (subagents, dynamic workflows with `workflow_run.*` events, advisor),
-  session threads (`/v1/sessions/{id}/threads*`), and the `session.thread_*` /
-  `agent.thread_message_*` events are all mounted `unsupported_capability`
-  refusals today (see `contracts/anthropic-cma/threads.md`). It is the largest
-  remaining gap to the published contract — implement it, or declare it
-  permanently out of scope the way `/v1/tunnels` and `/v1/user_profiles`
-  already are.
+- The multiagent surface is declared **permanently out of scope**
+  (`decisions/0001-multiagent-out-of-scope.md`): the published
+  `multiagent_20261001` block, session threads
+  (`/v1/sessions/{id}/threads*`), and the `session.thread_*` /
+  `agent.thread_message_*` / `workflow_run.*` events are `not_applicable` in
+  the capability matrix and stay mounted `unsupported_capability` refusals
+  (see `contracts/anthropic-cma/threads.md`), the way `/v1/tunnels` and
+  `/v1/user_profiles` already are. Reversal is a new decision record, not
+  backlog work.
 - Improve template validation and authoring commands.
 - Add richer runtime metrics for model usage, tool duration, and session state.
 
