@@ -110,10 +110,15 @@ import {
   PI_RPC_PROTOCOL_ERROR_CODE,
   PI_RPC_TIMEOUT_CODE,
 } from '@/strategy/pi/rpc-wire.js';
+import type { EnvironmentConfig } from '@/types/sandbox.js';
 import {
   parseEnvironmentConfig,
   sandboxProviderForEnvironmentConfig,
 } from '@/sandbox/provider-names.js';
+import {
+  environmentNetworkPolicyOf,
+  environmentWebDomainAdmission,
+} from '@/core/config/environment-network.js';
 import {
   WORK_LEASE_LOST_CODE,
   WORK_OUTCOME_UNKNOWN_CODE,
@@ -190,6 +195,8 @@ export interface SessionExecutor {
 
 type Subscriber = (event: SessionEvent) => void;
 type EnvironmentSandboxProviderResolver = (environmentId: string) => string | undefined;
+/** The resolved Environment config, in whatever shape the composition layer returns. */
+type EnvironmentConfigResolver = (environmentId: string) => EnvironmentConfig | undefined;
 
 export interface SessionStorage {
   artifactStore?: ArtifactStore;
@@ -203,6 +210,7 @@ export interface SessionStorage {
 export class SessionManager {
   private readonly eventLogger: EventLogger;
   private readonly resolveEnvironmentSandboxProvider: EnvironmentSandboxProviderResolver;
+  private readonly resolveEnvironmentConfig: EnvironmentConfigResolver;
   private readonly isLoopEngineExecutable: (engine: SessionLoopEngine) => boolean;
   private subscribers = new Map<string, Set<Subscriber>>();
   /**
@@ -238,6 +246,13 @@ export class SessionManager {
     private readonly defaultLoopEngine: SessionLoopEngine = 'builtin',
     environmentSandboxProviderResolver?: EnvironmentSandboxProviderResolver,
     loopEngineAvailability?: (engine: SessionLoopEngine) => boolean,
+    /**
+     * Full Environment config lookup for admission checks the provider string
+     * cannot answer — the `allowed_domains ⊆ allowed_hosts` rule reads the
+     * Environment's network policy, not its backend. Defaults to the declared
+     * config the provider resolver already reads.
+     */
+    environmentConfigResolver?: EnvironmentConfigResolver,
   ) {
     this.isLoopEngineExecutable = loopEngineAvailability ?? ((engine) => engine === this.defaultLoopEngine);
     this.eventLogger = new EventLogger(db);
@@ -246,6 +261,8 @@ export class SessionManager {
     // the authoritative effective-provider decision (including env_default).
     this.resolveEnvironmentSandboxProvider = environmentSandboxProviderResolver
       ?? ((environmentId) => this.declaredEnvironmentSandboxProvider(environmentId));
+    this.resolveEnvironmentConfig = environmentConfigResolver
+      ?? ((environmentId) => this.declaredEnvironmentConfig(environmentId));
   }
 
   getCapabilityRegistry(): RuntimeCapabilityRegistry {
@@ -254,6 +271,27 @@ export class SessionManager {
 
   assertAgentCapabilities(agent: AgentDefinition): void {
     this.capabilityRegistry.assertAgentSupported(agent);
+  }
+
+  /**
+   * The `allowed_domains ⊆ allowed_hosts` session admission rule.
+   *
+   * A `limited` Environment refuses a session whose enabled `web_fetch` /
+   * `web_search` declares an `allowed_domains` entry the Environment's
+   * `allowed_hosts` does not cover — on create, and on the update that adds
+   * such an entry. Refusing before the row changes keeps a rejected tool
+   * surface from ever being stored, which is the same before-the-row
+   * reasoning the capability and resource-mount checks use.
+   */
+  private assertWebDomainsWithinEnvironment(
+    environmentId: string,
+    agent: AgentDefinition,
+  ): void {
+    const policy = environmentNetworkPolicyOf(this.resolveEnvironmentConfig(environmentId));
+    const violation = environmentWebDomainAdmission(policy, agent);
+    if (violation) {
+      throw sessionOperationError('web_domain_outside_allowed_hosts', violation.message);
+    }
   }
 
   /**
@@ -661,6 +699,10 @@ export class SessionManager {
     if (agentDefinitionsEqual(current, result.data)) return undefined;
 
     this.assertAgentCapabilities(result.data);
+    // The update that adds an `allowed_domains` entry outside the Environment's
+    // `allowed_hosts` is refused the same way create is, against the session's
+    // bound Environment.
+    this.assertWebDomainsWithinEnvironment(session.environmentId, result.data);
     if (session.loopEngine === 'pi') {
       assertPiAgentCanExecute(result.data);
     }
@@ -786,6 +828,9 @@ export class SessionManager {
     // resolve must be refused before the row exists, so a session is never
     // created that can only fail once it tries to provision a sandbox.
     const environmentProvider = this.resolveEnvironmentSandboxProvider(params.environmentId ?? 'env_default');
+    // The `allowed_domains ⊆ allowed_hosts` admission rule reads the
+    // Environment's network policy, which the provider string cannot carry.
+    this.assertWebDomainsWithinEnvironment(params.environmentId ?? 'env_default', effectiveDefinition);
     // A mounted resource is written to a canonical absolute in-sandbox path, so a
     // backend that refuses that path has to be refused here, on the same
     // before-the-row reasoning: accepting it would promise a mount that only
@@ -974,6 +1019,22 @@ export class SessionManager {
     if (!row) return undefined;
     const context = `Environment ${environmentId}`;
     return sandboxProviderForEnvironmentConfig(parseEnvironmentConfig(row.config, context), context);
+  }
+
+  /**
+   * The declared Environment config an admission check reads, or `undefined`
+   * for `env_default` (the workspace default carries no stored row; its
+     * effective policy resolves to nothing to check against).
+   */
+  private declaredEnvironmentConfig(environmentId: string): EnvironmentConfig | undefined {
+    if (environmentId === 'env_default') return undefined;
+    const row = this.db.prepare(
+      'SELECT config FROM environments WHERE id = ? AND archived_at IS NULL',
+    ).get(environmentId) as { config: string } | undefined;
+    if (!row) return undefined;
+    // The stored config is a parsed bag; the network policy normalizer reads
+    // `network`/`networking` from it regardless of the wider shape.
+    return parseEnvironmentConfig(row.config, `Environment ${environmentId}`) as unknown as EnvironmentConfig;
   }
 
   /**

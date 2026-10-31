@@ -135,6 +135,9 @@ export function createRuntimeSessionServices(options: RuntimeSessionServicesOpti
     options.loopEngine ?? 'builtin',
     (environmentId: string) => options.runtimeComposition.resolveEnvironmentConfig(environmentId)?.sandbox_provider,
     options.isLoopEngineAvailable,
+    // The `allowed_domains ⊆ allowed_hosts` admission reads the Environment's
+    // network policy, which the provider string alone cannot carry.
+    (environmentId: string) => options.runtimeComposition.resolveEnvironmentConfig(environmentId),
   );
   const eventLogger = sessionManager.getEventLogger();
   const snapshots = new SnapshotManager(options.db, options.artifactStore.path('snapshots'));

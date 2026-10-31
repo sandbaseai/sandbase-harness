@@ -227,6 +227,12 @@ export function sessionsRoutes(deps: ServerDeps) {
       if (isEnvironmentConfigError(err)) {
         return invalidWithCode(c, err.code, err.message);
       }
+      // Every other coded refusal is a well-formed request asking for something
+      // the contract does not allow — here, an `allowed_domains` entry outside
+      // the Environment's `allowed_hosts` — never an internal failure.
+      if (typeof (err as { code?: unknown }).code === 'string') {
+        return invalidWithCode(c, (err as { code: string }).code, (err as Error).message);
+      }
       if (err instanceof Error && err.message.includes('Agent not found')) {
         return c.json({ error: { type: 'not_found', message: err.message } }, 404);
       }
