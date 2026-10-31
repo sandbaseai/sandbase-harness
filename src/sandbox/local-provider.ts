@@ -339,8 +339,10 @@ class LocalSandboxInstance implements SandboxInstance {
 
       // Confinement wraps the resolved shell invocation: the seatbelt/bwrap
       // boundary is about writes outside the workdir, not about which shell
-      // runs the command.
-      const shell = this.confinement()?.wrap(shellInvocation(command)) ?? shellInvocation(command);
+      // runs the command. The command's own cwd is carried in, because bwrap
+      // replaces the spawn cwd with its `--chdir` — without it a declared
+      // subdirectory would be silently dropped to the workdir root.
+      const shell = this.confinement()?.wrap(shellInvocation(command), cwd) ?? shellInvocation(command);
       const proc = spawn(shell.file, shell.args, {
         cwd,
         env,

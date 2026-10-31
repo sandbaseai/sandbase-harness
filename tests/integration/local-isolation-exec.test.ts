@@ -45,4 +45,15 @@ describe('local provider bubblewrap confinement', () => {
     expect(outside.exitCode).not.toBe(0);
     expect(existsSync(join(process.env.HOME ?? '', 'bwrap-escape-test'))).toBe(false);
   });
+
+  itBwrap('runs a declared subdirectory cwd under confinement', async () => {
+    const sandbox = await provision();
+    await sandbox.writeFile('/workspace/project/marker.txt', 'here');
+    // `execute({cwd})` resolves inside the workdir; bwrap's own `--chdir`
+    // must carry that same directory or the command silently runs at the
+    // workdir root — the failure the canonical-cwd unit case first caught.
+    const result = await sandbox.execute('pwd', { cwd: '/workspace/project' });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout.trim()).toContain('workspace/project');
+  });
 });

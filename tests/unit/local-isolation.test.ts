@@ -63,8 +63,20 @@ describe('local isolation plan', () => {
     // the shell runs after `--` with its cwd inside the workdir.
     expect(wrapped.args.join(' ')).toContain('--bind /work/sess1 /work/sess1');
     expect(wrapped.args.join(' ')).toContain('--bind /tmp /tmp');
+    // `--chdir` names the directory the wrapped command actually runs in —
+    // the workdir root when no subdirectory is declared.
+    expect(wrapped.args.join(' ')).toContain('--chdir /work/sess1');
     const after = wrapped.args.slice(wrapped.args.indexOf('--') + 1);
     expect(after).toEqual(['/bin/bash', '-c', 'echo hi']);
+  });
+
+  it('carries the command cwd into --chdir instead of demoting it to the workdir root', () => {
+    const plan = localIsolationPlan('/work/sess1', {}, 'linux', { bubblewrap: () => true });
+    const wrapped = plan!.wrap(shell, '/work/sess1/workspace/project');
+    // A bare `--chdir workDir` would silently run `execute({cwd: sub})` in the
+    // workdir root — the bug that dropped `cwd` on hosts carrying bwrap.
+    expect(wrapped.args.join(' ')).toContain('--chdir /work/sess1/workspace/project');
+    expect(wrapped.args.join(' ')).not.toContain('--chdir /work/sess1 --');
   });
 
   it('returns null when off, and when no tool exists under auto', () => {
