@@ -13,6 +13,10 @@
     "already_exists": [
       "tests/integration/memory-already-exists.test.ts"
     ],
+    "credential_backend_unsupported": [
+      "tests/unit/credential-injection-placeholders.test.ts",
+      "tests/unit/credential-policy.test.ts"
+    ],
     "cycle": [
       "tests/unit/orchestrator.test.ts"
     ],
@@ -250,6 +254,9 @@
       "tests/unit/memory-semantics-wiring.test.ts",
       "tests/unit/memory-semantics.test.ts"
     ],
+    "request_too_large": [
+      "tests/integration/initial-events-transaction.test.ts"
+    ],
     "required": [
       "tests/integration/api.test.ts",
       "tests/integration/sdk-settings-resource.test.ts",
@@ -257,9 +264,6 @@
     ],
     "requires_action_timeout": [
       "tests/unit/parked-wait.test.ts"
-    ],
-    "request_too_large": [
-      "tests/integration/initial-events-transaction.test.ts"
     ],
     "resource_not_mountable": [
       "tests/integration/resource-admission-refusal.test.ts",

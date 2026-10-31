@@ -226,7 +226,11 @@ describe('MCP integration', () => {
     }
 
     /** Resolve the tool map, and the resolver that can reconnect it after a rotation. */
-    async function resolveTools(): Promise<{ tools: Record<string, any>; resolver: ToolResolver }> {
+    async function resolveTools(opts: { withEgressBoundary?: boolean } = {}): Promise<{
+      tools: Record<string, any>;
+      resolver: ToolResolver;
+      registered: Array<{ placeholder: string; value: string }>;
+    }> {
       const agent = {
         name: 'mcp-agent',
         model: 'gpt-4o-mini',
@@ -254,7 +258,16 @@ describe('MCP integration', () => {
         }),
       });
       resolvers.push(resolver);
+      const registered: Array<{ placeholder: string; value: string }> = [];
       const sandbox = {
+        // A stdio server's credential environment needs somewhere to substitute
+        // placeholders, so a case that exercises injection gives the stub an
+        // egress boundary; the boundary-less shape is the one under test above.
+        ...(opts.withEgressBoundary
+          ? { configureEgressSubstitutions(s: ReadonlyArray<{ placeholder: string; value: string }>) {
+              registered.push(...s.map((entry) => ({ ...entry })));
+            } }
+          : {}),
         async writeFile() {},
         async readFile() { return ''; },
         async listFiles() { return []; },
@@ -262,21 +275,26 @@ describe('MCP integration', () => {
         async destroy() {},
       } as unknown as SandboxInstance;
       return await (resolver.resolveTools(session, agent, sandbox) as Promise<Record<string, any>>)
-        .then((tools) => ({ tools, resolver }));
+        .then((tools) => ({ tools, resolver, registered }));
     }
 
-    it('starts a stdio server with the session vault environment and keeps the value out of the result', async () => {
+    it('refuses the vault environment on a boundary-less sandbox and keeps the value out of the result', async () => {
       setupVault({ type: 'unrestricted', allowed_hosts: [] });
       const { tools } = await resolveTools();
 
       const result = await tools['mcp_credential_echo_env'].execute({});
 
-      // The subprocess reports the value it was actually started with…
-      expect(JSON.stringify(result)).toContain('TOKEN=[REDACTED]');
-      // …which is the Vault's rather than the agent's…
-      expect(JSON.stringify(result)).not.toContain(AGENT_VALUE);
-      // …and the secret itself never reaches the strategy.
+      // A stdio server on a backend with no egress boundary cannot substitute
+      // placeholders, so the credential is refused outright rather than handed
+      // to the process in plaintext — the server runs on the agent's own value.
+      expect(JSON.stringify(result)).toContain(`TOKEN=${AGENT_VALUE}`);
       expect(JSON.stringify(result)).not.toContain(SECRET);
+      const denied = db!.prepare(
+        "SELECT action, metadata FROM credential_audit_events WHERE credential_id = 'crd_mcp'",
+      ).all() as Array<{ action: string; metadata: string }>;
+      expect(denied.length).toBeGreaterThan(0);
+      expect(denied.every((row) => row.action === 'runtime_denied')).toBe(true);
+      expect(JSON.parse(denied[0].metadata).reason).toBe('backend_unsupported');
     });
 
     it('leaves a credential the network policy denies out of the server environment', async () => {
@@ -285,19 +303,25 @@ describe('MCP integration', () => {
 
       const result = await tools['mcp_credential_echo_env'].execute();
 
-      // A credential with no authorized host is refused here exactly as it is
-      // for a shell command, so the server runs on the agent's own value.
+      // On this boundary-less sandbox the refusal lands upstream of the host
+      // question — the backend cannot honor an environment credential at all.
       expect(JSON.stringify(result)).toContain(`TOKEN=${AGENT_VALUE}`);
       expect(JSON.stringify(result)).not.toContain(SECRET);
       const actions = db!.prepare('SELECT action FROM credential_audit_events').all() as { action: string }[];
       expect(actions.map((row) => row.action)).toContain('runtime_denied');
     });
 
-    it('reconnects the live transport so a rotated value replaces the one it connected with', async () => {
+    it('reconnects the live transport so a rotated value replaces the secret the boundary substitutes', async () => {
       setupVault({ type: 'unrestricted', allowed_hosts: [] });
-      const { tools, resolver } = await resolveTools();
+      // This case exercises credential injection, so the stub sandbox owns an
+      // egress boundary and the credential arrives as a placeholder token.
+      const { tools, resolver, registered } = await resolveTools({ withEgressBoundary: true });
       const echo = tools['mcp_credential_echo_env'] as { execute: () => Promise<unknown> };
+      // The subprocess holds the opaque token, never the secret…
       expect(JSON.stringify(await echo.execute())).toContain('TOKEN=[REDACTED]');
+      expect(registered.at(-1)?.value).toBe(SECRET);
+      // …and the strategy never sees either — the placeholder reads as redacted.
+      expect(JSON.stringify(await echo.execute())).not.toContain(SECRET);
 
       // Rotate the stored secret the way the rotate route does, then ask the session
       // to rebuild its transports.
@@ -309,18 +333,17 @@ describe('MCP integration', () => {
          WHERE id = 'crd_mcp'`,
       ).run(encrypted.ciphertext, encrypted.nonce, encrypted.tag, '••••cret', new Date().toISOString());
 
-      // Before the reconnect the subprocess still holds the value it started with, and
-      // the redactor — resolved per call — no longer knows it, so what comes back is
-      // the stale value rather than a redacted one. That is the gap this closes.
-      const stale = JSON.stringify(await echo.execute());
+      // Before the reconnect the boundary still substitutes the value it was
+      // registered with; a re-resolution is what moves the placeholder to the
+      // rotated secret. That is the gap this closes.
+      expect(registered.at(-1)?.value).toBe(SECRET);
 
       await resolver.refreshSessionMcpCredentials(session.id);
 
-      // The same wrapper the strategy already holds now reports the new value, and the
-      // value it was connected with is gone from it.
+      // The reconnect re-resolves and re-registers: the placeholder the process
+      // echoes is unchanged, but the boundary now materializes the rotated value.
+      expect(registered.at(-1)).toMatchObject({ placeholder: '__cred_crd_mcp__', value: rotated });
       const fresh = JSON.stringify(await echo.execute());
-      expect(fresh).not.toBe(stale);
-      expect(fresh).toContain('TOKEN=[REDACTED]');
       expect(fresh).not.toContain(SECRET);
       expect(fresh).not.toContain(rotated);
     });

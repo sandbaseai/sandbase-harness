@@ -291,12 +291,18 @@ Session execution:
   inside the sandbox should be reached through a `static_bearer`/`mcp_oauth`
   credential on a url transport or through in-process injection.
 - A backend with no egress boundary (`kubernetes`, `self-hosted`) cannot
-  substitute, so its resolver keeps producing plaintext — the provider's
-  `configureEgressSubstitutions` absence is what the executor reads, and the
-  bundle shape is identical either way.
+  substitute, so its environment credentials are **refused**, not degraded to
+  plaintext. The published contract does not support `environment_variable`
+  on a self-hosted sandbox, and the only honorable local reading of that rule
+  is that a caller with no substitution boundary has nothing that can honor
+  the credential — plaintext in the process is the very exposure the
+  placeholder model rules out. The refusal (`credential_backend_unsupported`,
+  `runtime_denied`) lands before decryption, at the same point a network
+  denial would.
 - A shell command declares no target host, so only credentials the policy admits
-  without one reach the environment. Under plaintext that denies every `limited`
-  credential; under placeholders it admits them scoped to their own
+  without one reach the environment. On a boundary-less backend none reach it
+  at all — the environment credential is refused upstream — while on a backend
+  with a boundary a `limited` credential is admitted scoped to its own
   `allowed_hosts`, as above.
 - The same resolved `environment` starts a stdio MCP server the agent declares,
   and a vault value wins over the `env` the agent configured itself. A
@@ -402,7 +408,7 @@ their own boundary.
 
 | Difference | Detail |
 | --- | --- |
-| Credential exposure in the sandbox | Closed for backends with an egress boundary: the local and docker providers run a per-session egress proxy, and environment credentials enter processes only as `__cred_<id>__` placeholders the proxy replaces on the wire toward a host the credential's own `allowed_hosts` covers. Two residual limits, both recorded rather than hidden: substitution happens on the proxy's HTTP forward path only — a CONNECT tunnel is opaque, so a placeholder inside an HTTPS request is sent literally and fails closed — and a backend with no boundary (`kubernetes`, `self-hosted`) has nowhere to substitute, so it keeps the plaintext materialization it always had. On those backends `vault_ids` still means "export these secrets into the process". |
+| Credential exposure in the sandbox | Closed for backends with an egress boundary: the local and docker providers run a per-session egress proxy, and environment credentials enter processes only as `__cred_<id>__` placeholders the proxy replaces on the wire toward a host the credential's own `allowed_hosts` covers. One residual limit, recorded rather than hidden: substitution happens on the proxy's HTTP forward path only — a CONNECT tunnel is opaque, so a placeholder inside an HTTPS request is sent literally and fails closed. A backend with no boundary (`kubernetes`, `self-hosted`) is not an exposure case anymore: the published contract does not support `environment_variable` where nothing substitutes it, so the credential is refused (`credential_backend_unsupported`, `runtime_denied`) before decryption rather than materialized as plaintext. `vault_ids` on such a backend still means "export these secrets" only for the MCP-keyed types, which ride request headers the runtime itself presents. |
 | OAuth refresh | Implemented for `mcp_oauth` at the injection boundary: when a url-transport MCP connect resolves its headers, a credential whose `expires_at` is past (minus a 30-second skew) is refreshed against its `token_endpoint` before the bundle is built — the transport only ever sees the resulting access token. Token-endpoint authentication follows `token_endpoint_auth.type` (`client_secret_basic` default, `client_secret_post`, `none`), a rotated `refresh_token` is persisted encrypted in place, and a response without one keeps the stored token. A failure stamps the row's `oauth_state` (`last_refresh_at`, status, a sanitized error — never token material), appends a `refresh_failed` audit event, publishes `vault_credential.refresh_failed`, and still lets the connect proceed with the stored value; a 60-second per-credential window deduplicates attempts so concurrent sessions and reconnect storms cannot hammer the endpoint. A credential with no `expires_at` or no refresh token is used until replaced — the runtime cannot know it is due, and the create/update response says so. `mcp_oauth_validate` reuses the same exchange: a 401 probe triggers one refresh attempt under the same audit/publish bookkeeping, deliberately ignoring the dedup window because a diagnostic must report a refresh that ran. |
 | Legacy ingress | The flat `auth_type` spelling and the `injection_locations` token list are accepted for backward compatibility. The published contract defines neither. |
 | Read projection | The canonical `auth` object is additive on read: it is returned beside the local `auth_type` / `name` / `variable_name` / `injection_locations` fields. The Console credential pages render and search on those local fields (`CredentialPages.tsx`, `CredentialVaultPages.tsx`) and `tests/integration/api.test.ts` asserts them, so dropping them is a Console migration rather than a wire change. |
@@ -418,10 +424,13 @@ their own boundary.
   backends that own a boundary because those are the only places the runtime can
   truthfully materialize a value. A CONNECT tunnel is ciphertext from the
   proxy's seat — rewriting inside it would require terminating TLS, which a
-  loopback boundary cannot honestly do — and a provider without a proxy has no
-  wire to substitute on. Both residuals are stated plainly rather than folded
-  into "supported", because on a boundary-less backend a caller's secret still
-  reaches the process.
+  loopback boundary cannot honestly do. A provider without a proxy has no wire
+  to substitute on, and the published contract does not support
+  `environment_variable` on a self-hosted sandbox at all, so the credential is
+  refused rather than degraded to a plaintext export the caller never asked for.
+  Both residuals are stated plainly rather than folded into "supported",
+  because pretending a boundary-less backend honors the credential would be the
+  silent materialization this boundary exists to prevent.
 - OAuth refresh runs at the injection boundary rather than on a timer because
   that is the only point the runtime knows a token is about to be presented: a
   background loop would refresh credentials no session is using, and refreshing
@@ -451,25 +460,27 @@ their own boundary.
   the wire, the persisted `refresh`/`expires_at` echo with its warnings, the
   mixed-shape refusal, the legacy flat alias,
   the missing-field refusals, and that no response carries the secret.
-- `tests/integration/credential-execution.test.ts` — the executor resolves the
-  session's vault, the bash tool receives `{env: {TOKEN: …}}`, the string the
-  strategy sees is redacted, and no persisted event carries the secret; the
-  same path on a sandbox that owns an egress boundary receives
-  `{env: {TOKEN: '__cred_crd_exec__'}}` while the boundary is handed the real
-  value in its substitution table.
+- `tests/integration/credential-execution.test.ts` — the executor refuses the
+  environment credential on a boundary-less sandbox (denial audited, no secret
+  in the command environment), and a sandbox that owns an egress boundary
+  receives `{env: {TOKEN: '__cred_crd_exec__'}}` while the boundary is handed
+  the real value in its substitution table.
 - `tests/unit/credential-injection-placeholders.test.ts` — the placeholder
-  emission rules: the stable `__cred_<id>__` token, the plaintext fallback for
-  a boundary-less caller, a `limited` credential admitted under placeholders
-  with its own `allowed_hosts` scope, a named-but-uncovered host still denied,
-  and the delegated-vault override resolving an unpersisted child to exactly
-  the vault ids it is handed.
+  emission rules: the stable `__cred_<id>__` token, the `credential_backend_unsupported`
+  refusal for a boundary-less caller, a `limited` credential admitted under
+  placeholders with its own `allowed_hosts` scope, a named-but-uncovered host
+  still denied, and the delegated-vault override resolving an unpersisted child
+  to exactly the vault ids it is handed.
 - `tests/unit/egress-proxy.test.ts` — the substitution half of the boundary:
   a placeholder materialized in a request header and a request body with its
   recomputed length, a scoped credential not materializing outside its
   `allowed_hosts`, the upsert that makes a rotation re-resolution update the
   value a live process's token resolves to, and substitution working in the
   allow-all mode a policy-less environment binds.
-- `tests/unit/credential-policy.test.ts` — network policy normalization.
+- `tests/unit/credential-policy.test.ts` — network policy normalization and
+  the enforcement half: host-policy denial, the boundary-less environment
+  refusal recorded as `credential_backend_unsupported`, bearer-token
+  request-header injection, and the URL-keyed applicability rules.
 - `tests/unit/credential-redaction.test.ts` — secret material never appears in
   a response.
 - `tests/integration/api.test.ts` — vault and credential CRUD, rotation,
@@ -539,7 +550,8 @@ their own boundary.
 `supported` for the wire profile, write-only handling, locked fields,
 rotation, injection execution — placeholder emission, egress
 substitution, delegated vault inheritance, and model request headers, with
-the CONNECT-opacity and boundary-less-backend residuals recorded in §4 — and
+the CONNECT-opacity residual recorded in §4 and the boundary-less-backend
+environment credential refused rather than materialized — and
 `mcp_oauth` refresh: expiry-tracked tokens refreshed at the connect boundary,
 rotated refresh tokens persisted, failures audited, stamped, and published.
 `mcp_oauth_validate` is `supported` under both prefixes — a live
