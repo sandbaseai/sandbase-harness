@@ -361,8 +361,20 @@ row.
 
 - `nextCronRun` refuses an unrecognized zone rather than defaulting to UTC and
   delegates the arithmetic to `cron.ts`.
-- `runDueScheduledDeployments` selects active, unarchived rows whose
-  `next_run_at` is due and runs each one.
+- `runDueScheduledDeployments` selects active, unarchived rows whose fire
+  instant `due_at` has arrived and runs each one. `due_at` is `next_run_at`
+  plus the published execution jitter — up to 15% of the interval between
+  runs, clamped to [5 s, 9 min] (`official-docs/scheduled-deployments.md`:
+  "actual execution applies jitter of up to 15 percent of the interval
+  between runs, with a minimum of 5 seconds and a maximum of 9 minutes") —
+  drawn once when the instant is armed and persisted (`M062`), so a
+  60-second pass reads the same deadline every tick rather than re-rolling.
+  `next_run_at` stays the exact scheduled instant, because
+  `upcoming_runs_at` must "reflect the exact schedule configured" — jitter
+  lives only in `due_at`. A row whose `due_at` was not drawn for its current
+  `next_run_at` (NULL on rows written before `M062`, or stale after a raw
+  `next_run_at` write) is re-armed lazily inside the same pass before the
+  due query runs.
 - `runSchedule` **preflights** the deployment's dependencies before touching a
   session: the bound agent, the environment, every vault id, every file
   resource, and the memory store are each checked, and each failure maps onto
@@ -383,8 +395,13 @@ row.
   the deployment's pinned agent version, environment, title, resources,
   `vault_ids`, memory-store context, budget and `initial_events`, and the run
   row records `scheduled_at` — the due instant the trigger matched — alongside
-  `started_at`. Success advances `last_run_at` / `next_run_at`; a manual run
-  advances neither the last-run timestamp nor the cadence.
+  `started_at`. Success advances `last_run_at` on a timed run and recomputes
+  `next_run_at` to the next cron instant after the run, re-arming `due_at`
+  for the instant the row now names. A manual run keeps `last_run_at` —
+  the schedule field reports the most recent *scheduled* start — while
+  `next_run_at` still resolves to the next instant after the run: unchanged
+  when the schedule was already ahead of it, skipped forward when it was
+  overdue. `due_at` follows whichever value is written.
 
 `timezone` is a real column on `scheduled_deployments` (migration `M037`) and
 `scheduleTimeZone` reads it, falling back to `UTC` for a row written before the
@@ -460,6 +477,7 @@ and the entries §4 records.
 | Session startup | Implemented: the deployment's `initial_events` are admitted at create (with `system.message` allowed alongside `user.message` and `user.define_outcome`) and each run calls `sessionManager.createWithInitialEvents`, which injects a `system.message` as context without opening a turn and queues the user events that do. A `system.message`-only list creates an idle session by design. |
 | Failure behaviour | Asymmetric, per the published design: a missing or archived bound agent archives the deployment and records no run; a recoverable `session_rate_limited_error` records a failed run and nothing else; every other classified failure records a failed run **and** auto-pauses the deployment with `paused_reason.error` mirroring `run.error`. The cadence advances on every outcome so a failing deployment does not retry inside one pass. |
 | Re-arming after downtime | A startup step: the operations bridge recomputes the forward `next_run_at` of every active deployment whose stored time is missing or has passed (`rearmScheduledDeployments`), and its 60-second tick runs the rows that fall due. A trigger missed while the process was stopped is deliberately not replayed. |
+| Execution jitter | Implemented. The published rule jitters the *execution* while `upcoming_runs_at` keeps the exact schedule (`official-docs/scheduled-deployments.md` — "actual execution applies jitter of up to 15 percent of the interval between runs, with a minimum of 5 seconds and a maximum of 9 minutes"), so the delay lives on a separate persisted `due_at` column (`M062`) rather than on `next_run_at`, which the read projection and resume logic still treat as the schedule. The delay is drawn once when each instant is armed — uniform in `[0, 15%]` of the interval the run fires into (`next_run_at − last_run_at`, or `next_run_at − now` before a first run), clamped to [5 s, 9 min] — and persisted, because re-rolling per tick could postpone a run indefinitely. The due pass re-arms lazily any row whose stored `due_at` does not sit inside `[next_run_at, next_run_at + 9min]` — covering rows written before `M062` and any `next_run_at` moved outside the arming paths. A run's `scheduled_at` keeps the cron instant it answered while `started_at` records the actual (jittered) start, which is the distinction the published run object draws. Pause disarms `due_at`; resume re-arms it for the recomputed instant. The draw is injectable (`opts.random`) so the scheduler tests pin it rather than sampling. |
 | Outcome evaluation | The published contract has no deterministic outcome evaluator; `evaluateDeterministicOutcome` is a local extension used by the operations routes. |
 | Collection envelope | The operations collections are canonical `/v1` resources: under `/v1` they carry `{data, prev_page, next_page}`, and the `/v1/x` mirror they were first published on keeps the local `has_more` / `first_id` / `last_id` shape for its existing consumers. The shape is chosen per mount rather than per endpoint. |
 
@@ -549,8 +567,12 @@ and the entries §4 records.
 - `tests/unit/scheduler.test.ts` — the next cron run, running due schedules
   while advancing `next_run_at`, the classified preflight failures, the
   auto-pause with a mirrored `paused_reason.error`, the recoverable
-  `session_rate_limited_error` that does not pause, and the missing-agent
-  archive that records no run.
+  `session_rate_limited_error` that does not pause, the missing-agent
+  archive that records no run, and the jitter block: the drawn delay's
+  5 s–9 min clamp against the interval, a schedule holding until its
+  jittered `due_at` and then firing with `scheduled_at` on the cron instant
+  and `started_at` on the jittered one, and `due_at` re-arming as
+  `next_run_at` advances without touching the displayed schedule.
 - `tests/integration/scheduled-deployment-timezone.test.ts` — the stored
   `timezone` column and its `NOT NULL DEFAULT 'UTC'` shape, the zone being
   resolved into `next_run_at`, both accepted wire shapes (`cron` + `timezone`,

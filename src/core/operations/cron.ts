@@ -273,3 +273,37 @@ export function upcomingCronRuns(
   }
   return out;
 }
+
+/**
+ * The load-distribution delay applied to a scheduled run's fire instant.
+ *
+ * The published rule jitters execution by up to 15% of the interval between
+ * runs, clamped to a minimum of 5 seconds and a maximum of 9 minutes
+ * (`official-docs/scheduled-deployments.md`: "to distribute load, actual
+ * execution applies jitter of up to 15 percent of the interval between runs,
+ * with a minimum of 5 seconds and a maximum of 9 minutes"). The delay is drawn
+ * uniformly in `[0, 0.15 × intervalMs]` then clamped — a schedule whose
+ * interval is under ~33 s still waits at least 5 s, and one whose interval is
+ * over an hour never waits more than 9 min.
+ *
+ * `intervalMs` is the gap the run fires into: `next_run_at − last_run_at` when
+ * a previous scheduled instant exists, else `next_run_at − now`. A caller that
+ * cannot measure an interval passes `0`, and the delay collapses to the 5 s
+ * floor — a degenerate schedule still spreads rather than firing on the exact
+ * instant.
+ *
+ * `random` is injectable so a test can pin the draw and assert the clamp
+ * bounds instead of sampling the distribution.
+ */
+export const DEPLOYMENT_RUN_JITTER_MIN_MS = 5_000;
+export const DEPLOYMENT_RUN_JITTER_MAX_MS = 9 * 60_000;
+export const DEPLOYMENT_RUN_JITTER_FRACTION = 0.15;
+
+export function deploymentRunJitterMs(
+  intervalMs: number,
+  random: () => number = Math.random,
+): number {
+  const span = Math.max(0, intervalMs) * DEPLOYMENT_RUN_JITTER_FRACTION;
+  const drawn = Math.floor(random() * span);
+  return Math.min(DEPLOYMENT_RUN_JITTER_MAX_MS, Math.max(DEPLOYMENT_RUN_JITTER_MIN_MS, drawn));
+}

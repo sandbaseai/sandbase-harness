@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { nanoid } from 'nanoid';
 import type { ServerDeps } from '../server.js';
 import { collectionPager } from '../standard.js';
-import { nextCronRun, runDueScheduledDeployments, runSchedule } from '@/core/operations/scheduler.js';
+import { armDeploymentDueAt, nextCronRun, runDueScheduledDeployments, runSchedule } from '@/core/operations/scheduler.js';
 import { isValidTimeZone } from '@/core/operations/cron.js';
 import {
   archiveById,
@@ -149,6 +149,10 @@ export function deploymentRoutes(deps: ServerDeps, options: OperationMountOption
       now(),
       now(),
     );
+    // The scheduled instant is armed with its jittered fire time here, from the
+    // row just written — the interval for a first run measures from now, since
+    // there is no `last_run_at` yet.
+    armDeploymentDueAt(deps.db, deploymentRow(deps, id)!);
     const row = deploymentRow(deps, id)!;
     // Published after the row exists, so a receiver that follows the reference
     // immediately finds the deployment rather than a 404. A create that failed
@@ -219,6 +223,10 @@ export function deploymentRoutes(deps: ServerDeps, options: OperationMountOption
       now(),
       id,
     );
+    // Re-arm the fire instant from the stored row whenever `next_run_at` could
+    // have moved — a cadence change, an explicit `next_run_at`, or a status
+    // write — so `due_at` never trails the schedule it fires against.
+    armDeploymentDueAt(deps.db, deploymentRow(deps, id)!);
     const row = deploymentRow(deps, id)!;
     // Every comparison below is structural because the stored columns are
     // serializations: a text comparison would report a change for the same
@@ -268,6 +276,10 @@ export function deploymentRoutes(deps: ServerDeps, options: OperationMountOption
     // would make a retried request fail for no reason.
     deps.db.prepare('UPDATE scheduled_deployments SET status = ?, paused_reason = ?, updated_at = ? WHERE id = ?')
       .run('paused', pauseReasonFor('paused'), now(), id);
+    // A paused deployment keeps its `next_run_at` — resume needs it to detect a
+    // schedule that elapsed while paused — but its fire instant is disarmed, so
+    // `due_at` only ever names a fire that can happen.
+    armDeploymentDueAt(deps.db, deploymentRow(deps, id)!);
     const row = deploymentRow(deps, id)!;
     await publishPauseTransition(deps, id, normalizeScheduleStatus(existing.status), 'paused');
     return c.json(toApiDeployment(row));
@@ -280,6 +292,8 @@ export function deploymentRoutes(deps: ServerDeps, options: OperationMountOption
     const resumeAt = nextRunAfterResume(existing);
     deps.db.prepare('UPDATE scheduled_deployments SET status = ?, paused_reason = ?, next_run_at = ?, updated_at = ? WHERE id = ?')
       .run('active', null, resumeAt, now(), id);
+    // Resuming re-arms the fire instant for the schedule it just restored.
+    armDeploymentDueAt(deps.db, deploymentRow(deps, id)!);
     const row = deploymentRow(deps, id)!;
     await publishPauseTransition(deps, id, normalizeScheduleStatus(existing.status), 'active');
     return c.json(toApiDeployment(row));
@@ -648,6 +662,8 @@ type ScheduledDeploymentRow = {
   paused_reason: string | null;
   last_run_at: string | null;
   next_run_at: string | null;
+  /** Jittered fire instant for `next_run_at`; NULL until armed. */
+  due_at?: string | null;
   initial_events: string;
   resources: string;
   vault_ids: string;
