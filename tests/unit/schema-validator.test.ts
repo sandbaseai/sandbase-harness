@@ -144,6 +144,52 @@ describe('Agent Definition Schema Validation', () => {
       expect(result.valid).toBe(false);
     });
 
+    it('rejects an mcp_server name over 255 characters on both arms', () => {
+      const longName = 's'.repeat(256);
+      expect(validateAgentDefinition({
+        ...validMinimal,
+        mcp_servers: [{ type: 'url', name: longName, url: 'http://x.test' }],
+      }).valid).toBe(false);
+      expect(validateAgentDefinition({
+        ...validMinimal,
+        mcp_servers: [{ type: 'stdio', name: longName, command: 'run' }],
+      }).valid).toBe(false);
+      // 255 is the bound — it must still pass the name check. The stdio arm
+      // also needs a toolset reference for the whole definition to validate,
+      // so only the name error is asserted absent here.
+      const okName = 's'.repeat(255);
+      const res = validateAgentDefinition({
+        ...validMinimal,
+        mcp_servers: [{ type: 'url', name: okName, url: 'http://x.test' }],
+        tools: [{ type: 'mcp_toolset', mcp_server_name: okName, configs: [] }],
+      });
+      expect(res.valid, JSON.stringify(res.errors)).toBe(true);
+    });
+
+    it('rejects an mcp_server url over 2048 characters', () => {
+      const url = `http://x.test/${'p'.repeat(2048)}`;
+      expect(validateAgentDefinition({
+        ...validMinimal,
+        mcp_servers: [{ type: 'url', name: 's', url }],
+      }).valid).toBe(false);
+    });
+
+    it('rejects more than 20 declared mcp_servers', () => {
+      const servers = Array.from({ length: 21 }, (_, i) => ({
+        type: 'stdio', name: `srv_${i}`, command: 'run',
+      }));
+      expect(validateAgentDefinition({ ...validMinimal, mcp_servers: servers }).valid).toBe(false);
+    });
+
+    it('accepts exactly 20 declared mcp_servers', () => {
+      const servers = Array.from({ length: 20 }, (_, i) => ({
+        type: 'stdio' as const, name: `srv_${i}`, command: 'run',
+      }));
+      const tools = servers.map((s) => ({ type: 'mcp_toolset' as const, mcp_server_name: s.name, configs: [] }));
+      const res = validateAgentDefinition({ ...validMinimal, mcp_servers: servers, tools });
+      expect(res.valid, JSON.stringify(res.errors)).toBe(true);
+    });
+
     it('rejects completely empty object', () => {
       const result = validateAgentDefinition({});
       expect(result.valid).toBe(false);

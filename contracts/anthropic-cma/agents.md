@@ -69,6 +69,10 @@ the model profile is `src/core/agent/model-object.ts`, and the routes are
 - Toolsets (`builtin` / `custom` / `mcp` / `skill`) are validated against a Zod
   schema before an agent is persisted; a definition that fails validation is
   rejected instead of being stored partially.
+- `mcp_servers` is bounded to the published declaration: at most 20 servers,
+  each `name` 1–255 characters and unique within the agent, and a `url`-type
+  server's `url` at most 2,048 characters. The same bounds apply on both the
+  `url` and `stdio` arms of the discriminated union.
 - `web_tool.configuration` is fully validated (domain grammar, allowed/blocked
   exclusivity, empty-list rejection). See [`tools.md`](./tools.md).
 - The update precondition is accepted under both names: `version` is the
@@ -149,6 +153,9 @@ field the runtime cannot honour instead of dropping it.
 
 - `tests/integration/api.test.ts` — agent create/list/read/version behaviour and
   toolset rejection cases.
+- `tests/unit/schema-validator.test.ts` — the declaration bounds: the
+  `mcp_servers` 20-server cap, the 1–255 server-name bound on both union arms,
+  and the 2,048-character url bound.
 - `tests/unit/agent-model-object.test.ts` — the model object profile: each
   field's acceptance or refusal, `effort` carried through validation into the
   profile, and `inference_geo` refused by name.
