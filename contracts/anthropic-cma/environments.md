@@ -32,7 +32,11 @@ environment-network-policy: partial
     published shape declares no other config field.
 - `networking` is either `{ type: "unrestricted" }` or
   `{ type: "limited" }` with optional `allowed_hosts`, `allow_mcp_servers`, and
-  `allow_package_managers`.
+  `allow_package_managers`. Under `limited` with `allow_mcp_servers` off,
+  session creation fails with a 400 when the agent declares a `url` MCP
+  server whose host `allowed_hosts` does not cover; the same applies to a
+  session update that adds such an entry. `allowed_hosts` entries are bare
+  hostnames or `*.domain` wildcards — no scheme, port, or path.
 - `packages` is an object of package-manager declarations
   (`{ type: "packages", apt?, cargo?, gem?, go?, npm?, pip? }`).
 - Environments are listed, retrieved, archived, and deleted, and this surface is
@@ -157,12 +161,13 @@ translation between the two spellings of the hosting axis live in
     installed; the capability gap is reported on the environment read and in
     the session logs rather than silently served.
 
-  Independently of the provider, the runtime applies the policy at two
-  in-process boundaries: a `url` MCP server whose endpoint the policy does
-  not cover is refused at connect time (unless `allow_mcp_servers` is set),
-  and `web_fetch` intersects the environment allowlist — `host:port`
-  patterns, evaluated per redirect hop — with its existing domain policy and
-  SSRF guards.
+  Independently of the provider, the runtime applies the policy at three
+  in-process boundaries: session create and update refuse a declared `url`
+  MCP server whose endpoint `allowed_hosts` does not cover (unless
+  `allow_mcp_servers` is set), the connect boundary enforces the same check
+  for a session admitted earlier, and `web_fetch` intersects the environment
+  allowlist — `host:port` patterns, evaluated per redirect hop — with its
+  existing domain policy and SSRF guards.
 - `config.packages` is enforced, not just recorded. Both spellings — the
   published per-manager object (`{ type: "packages", pip: [...] }`) and the
   local `{ manager, package }` array — normalize through
@@ -191,8 +196,10 @@ Aligned for: the published hosting axis (`type` with both values understood,
 the published `networking` object including its `limited` / `unrestricted`
 forms and its two permission keys, the fail-closed reading of a policy
 (limited, and a permission denied, unless the caller declared otherwise),
-refusing an environment this runtime cannot execute instead of accepting it
-and failing at session start, and reporting a declared policy back to the
+the `allowed_hosts` admission of a declared `url` MCP server at session
+create and update under `limited`, refusing an environment this runtime
+cannot execute instead of accepting it and failing at session start, and
+reporting a declared policy back to the
 caller.
 
 ## 4. Differences
@@ -267,8 +274,7 @@ caller.
 ## 6. Corresponding tests
 
 - `tests/integration/environment-config-admission.test.ts` — every branch of the
-  write path: the published `type` accepted and resolved, `cloud` accepted in
-  both spellings and unknown values refused with `unsupported_hosting_type`,
+  write path: the published `type` accepted and resolved, `cloud` accepted in  both spellings and unknown values refused with `unsupported_hosting_type`,
   disagreeing hosting spellings
   refused with `invalid_environment_config`, non-string declarations refused,
   `networking` normalized into the local key with the published key consumed,
@@ -283,6 +289,11 @@ caller.
   (`packages_enforced: true`), and an unrestricted policy accepts it outright.
 - `tests/unit/environment-network.test.ts` — the normalizer: alias translation,
   local precedence over an alias, fail-closed defaults, host-pattern filtering,
+- `tests/integration/mcp-server-admission.test.ts` — the `url` MCP-server
+  admission at the session boundary: create refused with no row, create
+  admitted when covered, the `allow_mcp_servers` escape, stdio never checked,
+  `unrestricted` not limiting, and update refused for a swapped-in uncovered
+  endpoint.
   unknown keys preserved, non-objects reported as no policy, and key-order
   independent comparison.
 - `tests/unit/sandbox-provider-names.test.ts` — the alias at the naming
