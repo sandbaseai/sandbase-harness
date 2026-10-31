@@ -280,6 +280,58 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+/**
+ * The `allowed_hosts` grammar the published contract fixes: a bare hostname or
+ * a `*.domain` wildcard — no scheme, port, path, credentials, or whitespace.
+ * `hostMatchesPattern` accepts a wider `host:port` shape for the credential
+ * policy, but the Environment declaration is narrower, so the write path
+ * validates against this before storing. Returns the refusal message, or
+ * `undefined` when every entry is a usable pattern.
+ */
+export function environmentAllowedHostsError(hosts: readonly string[]): string | undefined {
+  for (const [index, entry] of hosts.entries()) {
+    const host = entry.trim().toLowerCase().replace(/\.$/, '');
+    if (host.length === 0) return `allowed_hosts.${index}: host must not be empty`;
+    if (/\s/.test(host)) return `allowed_hosts.${index}: host must not contain whitespace`;
+    if (host.includes('://')) {
+      return `allowed_hosts.${index}: do not include a URL scheme; provide a hostname like "example.com"`;
+    }
+    if (host.includes('/')) {
+      return `allowed_hosts.${index}: do not include a path; provide a hostname like "example.com"`;
+    }
+    if (host.includes('@')) {
+      return `allowed_hosts.${index}: do not include credentials; provide a hostname like "example.com"`;
+    }
+    if (host.includes(':')) {
+      return `allowed_hosts.${index}: do not include a port; provide a hostname like "example.com"`;
+    }
+    const wildcard = host.startsWith('*.');
+    const bare = wildcard ? host.slice(2) : host;
+    if (host.includes('*') && !wildcard) {
+      return `allowed_hosts.${index}: a wildcard must be a leading "*." prefix, like "*.example.com"`;
+    }
+    if (bare.length === 0 || bare.includes('*')) {
+      return `allowed_hosts.${index}: a wildcard must name a suffix, like "*.example.com"`;
+    }
+    if (!/^[a-z0-9._-]+$/.test(bare)) {
+      return `allowed_hosts.${index}: provide a plain hostname like "example.com"`;
+    }
+    if (bare.startsWith('.') || bare.endsWith('.') || bare.includes('..')) {
+      return `allowed_hosts.${index}: provide a valid hostname like "example.com"`;
+    }
+    if (!bare.includes('.')) {
+      return `allowed_hosts.${index}: provide a fully qualified hostname like "example.com"`;
+    }
+    for (const label of bare.split('.')) {
+      if (label.length === 0) return `allowed_hosts.${index}: host must not contain empty labels`;
+      if (label.startsWith('-') || label.endsWith('-')) {
+        return `allowed_hosts.${index}: host labels must not start or end with a hyphen`;
+      }
+    }
+  }
+  return undefined;
+}
+
 function toStringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value
