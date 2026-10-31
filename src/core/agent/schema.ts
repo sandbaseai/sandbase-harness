@@ -21,13 +21,18 @@ import type { AgentDefinition, AgentModelConfig, AgentModelSpeed, AgentToolset }
 export const mcpServerConfigSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('url'),
-    name: z.string().min(1, 'MCP server name is required'),
-    url: z.string().url(),
+    // The published bound is a 1–255 character server name, unique within the
+    // agent. Both entries name the same field, so one bounded schema serves
+    // the url and stdio arms alike.
+    name: z.string().min(1, 'MCP server name is required').max(255, 'MCP server name must be at most 255 characters'),
+    // The published endpoint bound is 2,048 characters; an over-long url is a
+    // shape error, not a connectivity failure.
+    url: z.string().url().max(2048, 'MCP server url must be at most 2048 characters'),
     timeout: z.number().positive().optional(),
   }),
   z.object({
     type: z.literal('stdio'),
-    name: z.string().min(1, 'MCP server name is required'),
+    name: z.string().min(1, 'MCP server name is required').max(255, 'MCP server name must be at most 255 characters'),
     command: z.string().min(1, 'stdio MCP server command is required'),
     args: z.array(z.string()).optional(),
     env: z.record(z.string(), z.string()).optional(),
@@ -200,7 +205,9 @@ export const agentDefinitionSchema = z.object({
   system: z.string().nullish().transform((system) => system ?? ''),
   description: z.string().optional(),
   skills: z.array(skillRefSchema).optional(),
-  mcp_servers: z.array(mcpServerConfigSchema).optional(),
+  // The published bound is 20 declared servers per agent; an over-large
+  // roster is refused rather than partially connected.
+  mcp_servers: z.array(mcpServerConfigSchema).max(20, 'The mcp_servers array accepts at most 20 servers').optional(),
   // The published bound is 256 entries: each wrapped tool is one entry and the
   // built-in toolset is one more, so an over-large array is refused rather than
   // truncated into a surface the model could not navigate.
