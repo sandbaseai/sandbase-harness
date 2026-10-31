@@ -37,6 +37,10 @@ mcp-oauth-validation: supported
 - Structural fields — `mcp_server_url`, `secret_name`, `token_endpoint`,
   `client_id` — are locked after creation. Changing one requires archiving the
   credential and creating a new one.
+- A vault holds at most **20 active credentials** (`MAX_CREDENTIALS_PER_VAULT`):
+  archived rows do not draw the bound down, so a vault that archived its way
+  under the limit admits new credentials, and the 21st active credential is
+  refused with `400` before it is persisted.
 - `injection_location` is an optional object with `header` and `body` booleans,
   sibling to `networking`:
   - On create, **omitting it enables both positions**; supplying the object

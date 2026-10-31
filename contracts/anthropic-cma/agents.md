@@ -73,6 +73,10 @@ the model profile is `src/core/agent/model-object.ts`, and the routes are
   each `name` 1–255 characters and unique within the agent, and a `url`-type
   server's `url` at most 2,048 characters. The same bounds apply on both the
   `url` and `stdio` arms of the discriminated union.
+- The `skills` array is bounded at 500 entries. The published bound is the
+  deduplicated set across every agent in a session; this runtime runs one
+  agent per session, so the agent's own array is the whole set and the bound
+  lands on the declaration.
 - `web_tool.configuration` is fully validated (domain grammar, allowed/blocked
   exclusivity, empty-list rejection). See [`tools.md`](./tools.md).
 - The update precondition is accepted under both names: `version` is the

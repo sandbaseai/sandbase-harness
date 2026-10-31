@@ -204,7 +204,11 @@ export const agentDefinitionSchema = z.object({
   model_config: agentModelConfigSchema.optional(),
   system: z.string().nullish().transform((system) => system ?? ''),
   description: z.string().optional(),
-  skills: z.array(skillRefSchema).optional(),
+  // The published session bound is 500 skills, counted as the deduplicated set
+  // across every agent in the session. This runtime runs one agent per
+  // session, so the agent's own skills array is the whole set and the bound
+  // lands here.
+  skills: z.array(skillRefSchema).max(500, 'The skills array accepts at most 500 skills').optional(),
   // The published bound is 20 declared servers per agent; an over-large
   // roster is refused rather than partially connected.
   mcp_servers: z.array(mcpServerConfigSchema).max(20, 'The mcp_servers array accepts at most 20 servers').optional(),
