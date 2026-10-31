@@ -219,7 +219,7 @@ describe('capability matrix', () => {
     // placeholder, so the missing pieces are pinned rather than trusted.
     const reason = capabilityEntry('threads-and-coordinator').reason.toLowerCase();
     expect(reason).toContain('not implemented');
-    expect(reason).toContain('no coordinator or advisor role');
+    expect(reason).toContain('no subagent, workflow-run, or advisor surface');
     expect(reason).toContain('enable_general_subagent');
   });
 
