@@ -42,8 +42,16 @@ export interface ShellInvocation {
 
 export interface LocalIsolationPlan {
   tool: LocalIsolationTool;
-  /** Wrap a resolved shell invocation into the confined one. */
-  wrap(shell: ShellInvocation): ShellInvocation;
+  /**
+   * Wrap a resolved shell invocation into the confined one.
+   *
+   * `cwd` is the directory the command is meant to run in — already resolved
+   * inside the workdir by the caller. Bubblewrap replaces the spawn `cwd`
+   * with its own `--chdir`, so the real directory has to be carried here or
+   * the command would silently run in the workdir root instead of the
+   * declared subdirectory.
+   */
+  wrap(shell: ShellInvocation, cwd?: string): ShellInvocation;
 }
 
 interface IsolationEnv {
@@ -103,7 +111,7 @@ function seatbeltProfile(workDir: string, writePaths: string[], tmpRoot: string)
   );
 }
 
-function bubblewrapArgs(workDir: string, writePaths: string[], shell: ShellInvocation): string[] {
+function bubblewrapArgs(workDir: string, writePaths: string[], shell: ShellInvocation, cwd?: string): string[] {
   const args = [
     // Host filesystem read-only, then carve the writable subtrees back in.
     '--ro-bind', '/', '/',
@@ -115,9 +123,11 @@ function bubblewrapArgs(workDir: string, writePaths: string[], shell: ShellInvoc
   for (const path of writePaths) {
     args.push('--bind', path, path);
   }
-  // The command's cwd is already inside the workdir, so `--chdir` there keeps
-  // the invocation identical to an unconfined run.
-  args.push('--chdir', workDir, '--', shell.file, ...shell.args);
+  // The caller's spawn `cwd` is the process cwd bubblewrap itself starts in,
+  // but `--chdir` wins over it for the wrapped command. Carrying the real
+  // directory here keeps `execute({cwd: '/workspace/project'}`) honest; a
+  // bare `--chdir workDir` would silently demote it to the workdir root.
+  args.push('--chdir', cwd ?? workDir, '--', shell.file, ...shell.args);
   return args;
 }
 
@@ -153,7 +163,7 @@ export function localIsolationPlan(
   if (bubblewrap()) {
     return {
       tool: 'bwrap',
-      wrap: (shell) => ({ file: 'bwrap', args: bubblewrapArgs(workDir, writable, shell) }),
+      wrap: (shell, cwd) => ({ file: 'bwrap', args: bubblewrapArgs(workDir, writable, shell, cwd) }),
     };
   }
   if (mode === 'require') {
