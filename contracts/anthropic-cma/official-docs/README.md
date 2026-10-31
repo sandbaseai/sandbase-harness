@@ -2,7 +2,9 @@
 
 A verbatim snapshot of the public Claude Managed Agents documentation,
 crawled from `https://platform.claude.com/docs/en/managed-agents/*.md` (and
-`agents-and-tools/mcp-tunnels/*.md`) on **2026-10-31**.
+`agents-and-tools/mcp-tunnels/*.md`) on **2026-10-31**, and verified
+byte-identical on a **2026-11-01** re-crawl (41 managed-agents pages plus 9
+mcp-tunnels pages; no page added, removed, or changed upstream).
 
 Purpose:
 

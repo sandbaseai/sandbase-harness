@@ -683,6 +683,11 @@ and the entries §4 records.
   to end over HTTP: `beta.deployments.create` → `run` → the run's session
   executing its `initial_events` to an agent reply, the `deploymentRuns`
   collection and item routes, and `update` through the published verb.
+- `tests/conformance/doc-curl-examples.test.ts` — the doc's deployment bodies
+  replayed verbatim through `?beta=true`: the cron-schedule create reading back
+  `upcoming_runs_at` on the exact (un-jittered) schedule with its zoned
+  instants, the budget update body through the published POST verb, and the
+  `deployment_runs` list under the doc's `deployment_id`/`has_error` spelling.
 - `tests/integration/deployment-path-aliases.test.ts` — both deployment spellings
   over HTTP: a deployment created at the published path read back at both,
   identical lists, update and archive at the published path with archive hiding it
