@@ -27,6 +27,7 @@
     "missing_env",
     "model_auth_failed",
     "model_config_invalid",
+    "model_does_not_support_mid_conversation_system",
     "model_not_found",
     "model_provider_not_configured",
     "not_found",

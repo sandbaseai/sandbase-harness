@@ -180,7 +180,7 @@ test fails when it drifts from the matrix.
 | tools | `auto-permission-policy` | Supported |  |
 | custom-tools | `custom-tool-declaration` | Supported |  |
 | custom-tools | `custom-tool-worker-execution` | Supported |  |
-| system-message | `system-message-events` | Partial | system.message is accepted and persisted as its own event domain, but the admitted content vocabulary is broader than the published text-only rule (image, document, tool_use, and tool_result blocks are also accepted), and the published model-support and requires_action-ordering refusals are not produced. |
+| system-message | `system-message-events` | Supported |  |
 | memory-stores | `memory-crud` | Supported |  |
 | memory-stores | `memory-limits-and-preconditions` | Supported |  |
 | memory-stores | `memory-version-audit` | Supported |  |

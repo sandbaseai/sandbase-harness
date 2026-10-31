@@ -110,6 +110,9 @@
       "tests/unit/model-error-hints.test.ts",
       "tests/unit/session-error-shape.test.ts"
     ],
+    "model_does_not_support_mid_conversation_system": [
+      "tests/integration/system-message-admission.test.ts"
+    ],
     "model_not_found": [
       "tests/integration/model-qualified-reference.test.ts",
       "tests/unit/model-auth-failed.test.ts",

@@ -293,8 +293,8 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
   {
     area: 'system-message',
     id: 'system-message-events',
-    status: 'partial',
-    reason: 'system.message is accepted and persisted as its own event domain, but the admitted content vocabulary is broader than the published text-only rule (image, document, tool_use, and tool_result blocks are also accepted), and the published model-support and requires_action-ordering refusals are not produced.',
+    status: 'supported',
+    reason: 'system.message is accepted and persisted as its own event domain and projected as a system role turn that persists. content admits the published 1-1,000 text items only. The published model gate produces model_does_not_support_mid_conversation_system on a model the capability table cannot prove supports mid-conversation injection, and the requires_action ordering rule refuses a system.message that does not trail a tool-answer event in the same request.',
     contract: 'contracts/anthropic-cma/system-message.md',
   },
   {
