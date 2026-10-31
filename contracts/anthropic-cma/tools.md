@@ -37,6 +37,14 @@ auto-permission-policy: supported
   are refused. `web_fetch` forbids a path; `web_search` permits a path suffix.
 - An empty domain list is ambiguous and is refused: supply at least one domain
   or omit the field.
+- Under a `limited` Environment, session create and update also check
+  `allowed_domains` against the Environment's `allowed_hosts`: an entry the
+  allowlist does not cover fails the request with a 400. The two lists match
+  differently — a tool entry covers its subdomains, but an `allowed_hosts`
+  entry is one exact host unless it starts with `*.` — so `docs.example.com`
+  is within `["docs.example.com"]` and `["*.example.com"]`, not
+  `["example.com"]`. `unrestricted` and self-hosted environments do not limit
+  the tools, and `blocked_domains` is never checked against `allowed_hosts`.
 - Tool output beyond the published threshold is automatically written to a
   sandbox file; the model receives a truncated preview plus the file path.
 - A tool config's `permission_policy` also accepts `auto`: each invocation is
@@ -120,6 +128,12 @@ Domain policy (`web-tool-policy.ts`):
   `? # $ , | ^ !` and an empty path.
 - Error message paths point at `tools.<i>.configs.<j>.allowed_domains.<k>` so a
   caller can find the offending entry in a nested toolset.
+- The `allowed_domains ⊆ allowed_hosts` admission runs at session create and
+  update (`environmentWebDomainAdmission`, `core/config/environment-network.ts`)
+  against the session's bound Environment under a `limited` policy. The check
+  reuses `hostMatchesPattern`, so an `allowed_hosts` entry is one exact host
+  unless it starts `*.`, while a `web_search` entry's path suffix is reduced
+  to its host before matching — the asymmetry the published rule names.
 
 Two layers are deliberately distinguished: **expression** (the schema can
 represent the configuration) and **execution** (the runtime can act on it).
@@ -227,6 +241,8 @@ Tool event fields (`src/api/standard.ts`):
 ## 3. Alignment
 
 Aligned for: the domain grammar and exclusivity rules, the empty-list rejection,
+the `allowed_domains ⊆ allowed_hosts` admission on session create and update
+under a `limited` Environment (including the host/subdomain matching asymmetry),
 the refusal to accept configuration the runtime cannot execute, a single
 unified overflow path rather than per-tool truncation at the published
 100,000-character threshold, the
@@ -283,6 +299,14 @@ client loop reads — `evaluated_permission` and `evaluation` included.
   adapter availability, and `searchProviderFromSettings`'s fail-safe returns.
 - `tests/unit/web-tool-policy.test.ts` — 46 cases covering the domain grammar,
   exclusivity, empty-list rejection, path rules, and error paths.
+- `tests/unit/environment-network.test.ts` — the `allowed_domains ⊆
+  allowed_hosts` admission: coverage by exact host and wildcard, the published
+  asymmetry, the path-suffix reduction, the disabled/`blocked_domains` skips,
+  and the every-enabled-entry walk.
+- `tests/integration/web-domain-admission.test.ts` — the admission at the HTTP
+  surface: session create refused with no row left, create admitted when
+  covered, the bare-host/subdomain asymmetry, `unrestricted` not limiting, and
+  session update refused/admitted for an added `allowed_domains` entry.
 - `tests/integration/web-fetch-execution.test.ts` — the executed half against a
   real local HTTP server: the address guard refusing a private target, the
   domain policy applied before the request, a redirect revalidated at each hop,

@@ -15,6 +15,7 @@ import {
   environmentEgressAllowlist,
   environmentMcpServerAdmission,
   environmentNetworkPolicyOf,
+  environmentWebDomainAdmission,
   normalizeEnvironmentNetwork,
   PACKAGE_MANAGER_EGRESS_HOSTS,
   sameEnvironmentNetwork,
@@ -188,5 +189,73 @@ describe('environment MCP server admission', () => {
     const url = { type: 'url', url: 'https://mcp.evil.com/sse' };
     expect(environmentMcpServerAdmission(normalizeEnvironmentNetwork({ type: 'unrestricted' }), url)).toBeUndefined();
     expect(environmentMcpServerAdmission(undefined, url)).toBeUndefined();
+  });
+});
+
+describe('environment web domain admission', () => {
+  const limited = (allowed_hosts: string[] = ['api.example.com', '*.example.org']) =>
+    normalizeEnvironmentNetwork({ type: 'limited', allowed_hosts })!;
+
+  const agent = (allowed_domains: unknown, tool = 'web_fetch') => ({
+    tools: [{
+      type: 'agent_toolset_20260401',
+      configs: [{ name: tool, allowed_domains }],
+    }],
+  });
+
+  it('refuses an allowed_domains entry the allowlist does not cover', () => {
+    const refusal = environmentWebDomainAdmission(limited(), agent(['docs.other.com']));
+    expect(refusal?.tool).toBe('web_fetch');
+    expect(refusal?.domain).toBe('docs.other.com');
+    expect(refusal?.message).toContain('allowed_hosts');
+  });
+
+  it('admits an entry covered by an exact host and by a wildcard', () => {
+    expect(environmentWebDomainAdmission(limited(), agent(['api.example.com']))).toBeUndefined();
+    expect(environmentWebDomainAdmission(limited(), agent(['docs.example.org']))).toBeUndefined();
+  });
+
+  it('applies the published matching asymmetry: a bare host does not cover a subdomain', () => {
+    // `docs.example.com` is within `["docs.example.com"]` and `["*.example.com"]`
+    // but not `["example.com"]` — the tool entry covers its subdomains, an
+    // allowed_hosts entry covers only the exact host unless it starts `*.`.
+    expect(environmentWebDomainAdmission(limited(['example.com']), agent(['docs.example.com']))?.domain)
+      .toBe('docs.example.com');
+    expect(environmentWebDomainAdmission(limited(['docs.example.com']), agent(['docs.example.com'])))
+      .toBeUndefined();
+    expect(environmentWebDomainAdmission(limited(['*.example.com']), agent(['docs.example.com'])))
+      .toBeUndefined();
+  });
+
+  it('reduces a web_search path suffix to its host before matching', () => {
+    expect(environmentWebDomainAdmission(limited(['docs.example.org']), agent(['docs.example.org/search'], 'web_search')))
+      .toBeUndefined();
+    expect(environmentWebDomainAdmission(limited(['docs.example.org']), agent(['other.com/search'], 'web_search'))?.domain)
+      .toBe('other.com/search');
+  });
+
+  it('skips a disabled entry and a blocked_domains list', () => {
+    expect(environmentWebDomainAdmission(limited(), {
+      tools: [{ type: 'agent_toolset_20260401', configs: [{ name: 'web_fetch', enabled: false, allowed_domains: ['x.com'] }] }],
+    })).toBeUndefined();
+    expect(environmentWebDomainAdmission(limited(), {
+      tools: [{ type: 'agent_toolset_20260401', configs: [{ name: 'web_fetch', blocked_domains: ['x.com'] }] }],
+    })).toBeUndefined();
+  });
+
+  it('checks every enabled web-tool entry across toolsets', () => {
+    const multi = {
+      tools: [
+        { type: 'agent_toolset_20260401', configs: [{ name: 'web_fetch', allowed_domains: ['api.example.com'] }] },
+        { type: 'agent_toolset_20260401', configs: [{ name: 'web_search', allowed_domains: ['outside.net'] }] },
+      ],
+    };
+    expect(environmentWebDomainAdmission(limited(), multi)?.tool).toBe('web_search');
+  });
+
+  it('admits everything under an unrestricted or absent policy', () => {
+    const def = agent(['anything.example.net']);
+    expect(environmentWebDomainAdmission(normalizeEnvironmentNetwork({ type: 'unrestricted' }), def)).toBeUndefined();
+    expect(environmentWebDomainAdmission(undefined, def)).toBeUndefined();
   });
 });

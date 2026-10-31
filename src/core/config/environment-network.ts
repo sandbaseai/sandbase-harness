@@ -196,6 +196,64 @@ export function environmentMcpServerAdmission(
     + 'allowed_hosts and the policy does not allow MCP server network access';
 }
 
+/**
+ * The `allowed_domains ⊆ allowed_hosts` session admission decision.
+ *
+ * The published rule: under a `limited` policy, a session create or update
+ * that enables `web_fetch` or `web_search` fails with a 400 when the tool's
+ * `allowed_domains` carries an entry the Environment's `allowed_hosts` does
+ * not cover. The two lists match differently — a tool entry covers its
+ * subdomains, but an `allowed_hosts` entry is one exact host unless it starts
+ * with `*.` — so `docs.example.com` is within `["docs.example.com"]` and
+ * `["*.example.com"]` but not `["example.com"]`. `hostMatchesPattern` already
+ * implements exactly that, so each entry is reduced to its host part (a
+ * `web_search` entry may carry a path suffix) and matched the same way the
+ * egress boundary matches a target.
+ *
+ * `unrestricted`, an absent policy, and self-hosted environments do not limit
+ * the web tools, so only `limited` produces a refusal. `blocked_domains` is
+ * not checked: blocking a host outside the allowlist is a no-op, never a
+ * permission the policy did not grant.
+ *
+ * Walked structurally rather than through `resolveWebToolExecutionPolicy`
+ * because the rule names every enabled web-tool entry, and a definition may
+ * declare the same tool in more than one toolset.
+ */
+export function environmentWebDomainAdmission(
+  policy: EnvironmentNetworkPolicy | undefined,
+  agent: { tools?: ReadonlyArray<unknown> },
+): { tool: string; domain: string; message: string } | undefined {
+  if (!policy || policy.type !== 'limited') return undefined;
+
+  for (const toolset of agent.tools ?? []) {
+    if (!toolset || typeof toolset !== 'object' || Array.isArray(toolset)) continue;
+    const configs = (toolset as Record<string, unknown>).configs;
+    if (!Array.isArray(configs)) continue;
+    for (const config of configs) {
+      if (!config || typeof config !== 'object' || Array.isArray(config)) continue;
+      const record = config as Record<string, unknown>;
+      const tool = record.name;
+      if (tool !== 'web_fetch' && tool !== 'web_search') continue;
+      if (record.enabled === false) continue;
+      const list = record.allowed_domains;
+      if (!Array.isArray(list)) continue;
+      for (const entry of list) {
+        if (typeof entry !== 'string') continue;
+        const host = entry.split('/')[0].toLowerCase().replace(/\.$/, '');
+        if (!host) continue;
+        if (!policy.allowed_hosts.some((pattern) => hostMatchesPattern(host, pattern))) {
+          return {
+            tool,
+            domain: entry,
+            message: `${tool} allowed_domains entry "${entry}" is not within the environment's allowed_hosts`,
+          };
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
 /** Read the policy a resolved EnvironmentConfig carries, whatever spelling it arrived in. */
 export function environmentNetworkPolicyOf(
   config: { network?: unknown; networking?: unknown } | undefined,
