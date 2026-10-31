@@ -41,6 +41,14 @@ The append path and the row shape are `src/core/session/session-manager.ts` and
   precision and two events in the same second must still order deterministically.
 - Event payloads are stored in `events.metadata` and projected through
   `toApiEvent`, so a new field does not require a schema migration.
+- `GET /v1/sessions/{id}/events` filters by the published repeatable `types[]`
+  (and bare `types`) parameter: each value must be an event type the runtime
+  can emit (`CMA_EVENT_TYPES` in `src/types/cma-protocol.ts`), an unknown value
+  is refused `400` rather than silently filtered, and the normalized filter is
+  bound into the page cursor so a replay under a different filter fails the
+  shared `cursorQueryMismatch` check. `after_id`/`page` keep their position
+  semantics — the filter applies to the events after that position, not to
+  which positions are legal.
 - `processed_at` is recorded once an inbound event is admitted.
 - `session.error` carries a structured payload whose `error.type` is one of the
   eight official values, whose `error.retry_status` is the published

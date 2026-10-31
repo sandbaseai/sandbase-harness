@@ -63,6 +63,51 @@ export type CMAEventType =
   // Terminal event (1)
   | 'turn_complete';
 
+/**
+ * The runtime set of every {@link CMAEventType} value, for query-parameter
+ * validation that has to refuse an event-type string the union does not
+ * declare. Kept as a literal list beside the union rather than derived from
+ * it — a union has no runtime presence — so the two stay next to each other in
+ * review and a new member added to one and not the other is an obvious miss.
+ */
+export const CMA_EVENT_TYPES: ReadonlySet<string> = new Set<CMAEventType>([
+  'system.message',
+  'user.message',
+  'user.interrupt',
+  'user.tool_confirmation',
+  'user.custom_tool_result',
+  'user.define_outcome',
+  'user.steer',
+  'agent.message',
+  'agent.thinking',
+  'agent.tool_use',
+  'agent.tool_result',
+  'agent.mcp_tool_use',
+  'agent.mcp_tool_result',
+  'agent.custom_tool_use',
+  'agent.thread_context_compacted',
+  'agent.external_authorization',
+  'agent.message_stream_start',
+  'agent.message_chunk',
+  'agent.message_stream_end',
+  'agent.thinking_stream_start',
+  'agent.thinking_chunk',
+  'session.status_idle',
+  'session.status_running',
+  'session.status_rescheduled',
+  'session.status_terminated',
+  'session.error',
+  'session.deleted',
+  'session.updated',
+  'session.usage',
+  'span.model_request_start',
+  'span.model_request_end',
+  'span.outcome_evaluation_start',
+  'span.outcome_evaluation_ongoing',
+  'span.outcome_evaluation_end',
+  'turn_complete',
+]);
+
 // ============================================================
 // Content Blocks
 // ============================================================
