@@ -140,7 +140,7 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
     area: 'agents',
     id: 'multiagent-roster',
     status: 'unavailable',
-    reason: 'A canonical `multiagent` roster is refused by name on both agent create and agent update, because no thread, coordinator, or advisor surface exists to honour it; accepting it would let a caller believe delegation by roster is in effect. Local delegation is registered separately as an extension.',
+    reason: 'A canonical `multiagent` block (`multiagent_20261001` or any other shape) is refused by name on both agent create and agent update, because no thread, subagent, workflow, or advisor surface exists to honour it; accepting it would let a caller believe delegation or workflow runs are in effect. Local delegation is registered separately as an extension.',
     contract: 'contracts/anthropic-cma/agents.md',
   },
   {
@@ -293,8 +293,8 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
   {
     area: 'system-message',
     id: 'system-message-events',
-    status: 'supported',
-    reason: 'system.message is accepted and persisted as its own event domain.',
+    status: 'partial',
+    reason: 'system.message is accepted and persisted as its own event domain, but the admitted content vocabulary is broader than the published text-only rule (image, document, tool_use, and tool_result blocks are also accepted), and the published model-support and requires_action-ordering refusals are not produced.',
     contract: 'contracts/anthropic-cma/system-message.md',
   },
   {
@@ -476,7 +476,7 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
     area: 'threads',
     id: 'threads-and-coordinator',
     status: 'unavailable',
-    reason: 'Not implemented: there is no thread resource, no thread lifecycle or per-thread event isolation, no coordinator or advisor role, and no thread-scoped budget event. The five published thread routes are mounted `unsupported_capability` refusals naming this capability, so an SDK caller decodes a 400 rather than hitting a 404. A request carrying a `multiagent` roster is refused by name rather than silently stripped. Delegation exists only as the local single-level `delegations` / `enable_general_subagent` extension, which is not this surface.',
+    reason: 'Not implemented: there is no thread resource, no thread lifecycle or per-thread event isolation, no subagent, workflow-run, or advisor surface, and no thread-scoped budget event. The five published thread routes are mounted `unsupported_capability` refusals naming this capability, so an SDK caller decodes a 400 rather than hitting a 404. A request carrying a `multiagent` block is refused by name rather than silently stripped. Delegation exists only as the local single-level `delegations` / `enable_general_subagent` extension, which is not this surface.',
     contract: 'contracts/anthropic-cma/threads.md',
   },
   {

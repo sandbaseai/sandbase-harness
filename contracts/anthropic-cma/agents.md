@@ -2,7 +2,7 @@
 
 Contract area: `/v1/agents` — agent definitions, model profile, toolsets.
 Status: `supported` for CRUD; `partial` for the model object profile; the
-canonical `multiagent` roster is `unavailable` and the local delegation
+canonical `multiagent` block is `unavailable` and the local delegation
 extension is separate. See §4.
 Source: `src/core/agent/schema.ts`, `src/core/agent/update.ts`,
 `src/core/agent/model-object.ts`, `src/api/routes/agents.ts`,
@@ -24,8 +24,9 @@ local-delegation-subagent: supported
 - The pinned official SDK declares `system` optional and nullable on create.
 - `model` may be a plain string, or an object carrying `id` plus optional
   `speed`, `effort`, and `inference_geo`.
-- An agent may declare a `multiagent` roster describing other agents it can
-  delegate to.
+- An agent may declare a `multiagent` block (`multiagent_20261001`) with
+  `subagents`, `workflows`, and `advisor` members describing the delegation and
+  orchestration it may use. See [`threads.md`](./threads.md).
 - Tool entries may carry per-tool configuration, including the domain policy for
   `web_fetch` and `web_search`.
 
@@ -77,7 +78,7 @@ the model profile is `src/core/agent/model-object.ts`, and the routes are
   the update unconditionally; that is exactly the local behaviour, so only the
   name differs. Both are read, and sending both with different values is refused
   rather than resolved by precedence.
-- A canonical `multiagent` roster is **refused by name** on both write paths. An
+- A canonical `multiagent` block is **refused by name** on both write paths. An
   agent's create path checks the caller's own payload in
   `validateAgentDefinition`, because the Zod schema strips keys it does not
   declare and a stripped roster would answer 201 while doing nothing. The update
@@ -103,7 +104,7 @@ field the runtime cannot honour instead of dropping it.
 | `model.speed` | Executed on the Anthropic provider when the model supports it: `fast` is sent as `speed: "fast"` and the provider attaches the `fast-mode-2026-02-01` beta. The capability table (`src/model/anthropic-capabilities.ts`) holds the published fast-mode list — Opus 5.5, Opus 5, Opus 4.8 — and `fast` on a listed model that cannot take it is refused at create/update with `unsupported_model_speed` rather than stored and silently degraded. `standard` and the local `extended` produce no wire field. A model id the table does not know is accepted and sends nothing. |
 | `model.effort` | Parsed, validated, stored in the model profile, and returned by every read projection (agent, version, and session snapshot). On the Anthropic provider the level reaches the request as `output_config.effort` — capability-gated per level, because the published lists are not uniform (Opus 4.6 and Sonnet 4.6 take `max` but not `xhigh`; Opus 4.5 tops out at `high`; Haiku 4.5 takes no effort). A listed model refused its level fails create/update with `unsupported_model_effort` naming the allowed set; a level outside the published vocabulary is `invalid_model_effort`. Models outside the table, and every non-Anthropic provider, accept the field and send nothing. A deployment may also set `reasoning_effort` in its own model settings — operator-level, applying to the model rather than to an agent. |
 | `model.inference_geo` | Refused by name with `unsupported_model_field` when a well-formed pin is sent: this runtime has no inference-geography control, so accepting it would promise a pin it cannot hold. An unknown value is `invalid_inference_geo` first. |
-| `multiagent` roster | Refused by name on create and update (capability `multiagent-roster`) because no thread, coordinator, or advisor surface exists. The published roster is not implemented. See [`threads.md`](./threads.md). |
+| `multiagent` block | Refused by name on create and update (capability `multiagent-roster`) because no thread, subagent, workflow, or advisor surface exists. The published `multiagent_20261001` shape is not implemented. See [`threads.md`](./threads.md). |
 | `max_turns` | Local extension, not a published field: the published model counts turns client-side, so no server cap exists there. Here it is a positive-integer server-side turn limit validated on create and update, stored on the definition, executed by the builtin strategy (agent value, else the workspace `default_max_steps`), and echoed on every agent projection. It is absent — never `null` — on definitions that do not set it. |
 | Local delegation extension | `delegations` plus `enable_general_subagent` is a local one-level parent/child mechanism with its own tool names (`delegate_to_<name>`, `general_subagent`). The published contract defines neither field, and this is not presented as the canonical roster. |
 | Version retention | SandBase keeps prior agent versions readable in its own archive table. The published contract states versioning but not the retention mechanism. |
@@ -131,11 +132,11 @@ field the runtime cannot honour instead of dropping it.
   `thinking: {type: "adaptive", display: "omitted"}` for the models that
   support it and nothing for the rest. `omitted` keeps thinking content out of
   the response, matching the policy of never persisting reasoning traces.
-- The `multiagent` roster is a substantial protocol surface (threads,
-  coordinator role, advisor role). Mapping a local delegation helper onto it
-  would overstate coverage, and accepting the field would let a caller build on
-  delegation by roster that never happens. Refusing it is the only answer that
-  cannot be misread.
+- The `multiagent` block is a substantial protocol surface (threads, subagent
+  delegation, dynamic workflows, advisor consultations). Mapping a local
+  delegation helper onto it would overstate coverage, and accepting the field
+  would let a caller build on delegation or workflow runs that never happen.
+  Refusing it is the only answer that cannot be misread.
 - The local delegation fields are documented in the contract rather than hidden,
   because a caller reading only the published contract would otherwise not know
   how to reach the one delegation mechanism this runtime has.
@@ -183,5 +184,6 @@ model object profile: `effort` and `speed` are executed on the Anthropic
 provider under the capability table — with admission refusing what a listed
 model cannot take — and stored-not-sent elsewhere, while `inference_geo` is
 refused rather than honoured. The canonical
-`multiagent` roster is `unavailable` and refused by name; the local delegation
-extension is `supported` and is recorded as an extension, never as the roster.
+`multiagent` block is `unavailable` and refused by name; the local delegation
+extension is `supported` and is recorded as an extension, never as the
+published multiagent surface.

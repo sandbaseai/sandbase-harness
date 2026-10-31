@@ -31,12 +31,13 @@ mcp-tunnel: not_applicable
 Session budget is implemented and has its own file, [`budget.md`](./budget.md).
 Dreams are implemented too — a session-backed memory-consolidation job — and
 have their own file, [`dreams.md`](./dreams.md).
-Threads, the coordinator, the advisor, and the canonical `multiagent` roster are
-**not** implemented either; they have their own file,
+Threads, subagent delegation, dynamic workflows, the advisor, and the canonical
+`multiagent` block are **not** implemented either; they have their own file,
 [`threads.md`](./threads.md), which records the gap and the refusal that keeps a
 caller from assuming otherwise. The five published thread routes are mounted
 `unsupported_capability` refusals, so the SDK's `sessions.threads` methods get a
-decodable 400 rather than a 404.
+decodable 400 rather than a 404; the `multiagent` block is refused on the agent
+write path, which is where workflow runs are enabled.
 
 Failure mechanism:
 
@@ -68,7 +69,7 @@ unsupported capability and its reason, and separating "not implemented" from
 | Scope decisions | MCP tunnel and session-budget alerts are `not_applicable`: SandBase is local-first and single-tenant, so a hosted connectivity or billing-notification feature has no local analogue. The published contract describes them as available capabilities. |
 | Failure envelope | `unsupported_capability` with `details.capabilities` is a SandBase error shape. The published contract requires the refusal, not this envelope. |
 | Planned vs. unavailable | Nothing in this file is `planned` any more. `web_search` execution moved out of this file once a provider-backed adapter shipped, dreams moved out when the session-backed pipeline shipped, and `mcp_oauth_validate` moved out when the live `initialize` probe shipped (see [`credentials.md`](./credentials.md)). |
-| Coverage moved out of this file | Session budget was implemented, so it now has its own contract file. Threads, coordinator, and advisor were never implemented and also have their own file, so this file does not have to speak for a surface it cannot describe. |
+| Coverage moved out of this file | Session budget was implemented, so it now has its own contract file. Threads and the rest of the multiagent surface were never implemented and also have their own file, so this file does not have to speak for a surface it cannot describe. |
 
 ## 5. Reason for the difference
 
@@ -96,7 +97,7 @@ unsupported capability and its reason, and separating "not implemented" from
 - `tests/unit/loop-engine-truthfulness.test.ts` — no capability is reported as
   available when it cannot execute.
 - `tests/integration/agent-roster-refusal.test.ts` — the related refusal this
-  file's threads gap depends on: a canonical `multiagent` roster is rejected by
+  file's threads gap depends on: a canonical `multiagent` block is rejected by
   name before anything is persisted.
 
 ## 7. Status
@@ -106,6 +107,6 @@ rest are `unavailable`. Every one is recorded in the capability matrix with its
 reason rather than being omitted. Four entries that used to be here are no
 longer: session budget, `web_search` execution, dreams, and
 `mcp_oauth_validate` each have their own coverage because they were
-implemented. Threads, the coordinator, and the
-advisor stayed out: they are `unavailable`, not `partial`, and they too have
-their own file rather than a paragraph in this one.
+implemented. Threads and the rest of the
+multiagent surface stayed out: they are `unavailable`, not `partial`, and they
+too have their own file rather than a paragraph in this one.

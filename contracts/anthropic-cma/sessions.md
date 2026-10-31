@@ -44,7 +44,7 @@ session-update: supported
 - The session object carries `budget` in every state — the ceiling or `null` —
   a `stats` object with `active_seconds` and `duration_seconds`, and a
   materialized `agent` whose `version` pins the snapshot the session runs and
-  whose `multiagent` resolves the roster or is `null`.
+  whose `multiagent` resolves the declared block or is `null`.
 - The session-scoped event stream is the canonical way to observe progress.
 
 ## 2. Current SandBase shape
@@ -116,7 +116,8 @@ bulk status-transition query rather than a full event read per row), and
 `duration_seconds` counts from creation to the last update for a terminated
 or archived session and to the read for a live one. The materialized `agent`
 pins `version` to the session snapshot and reports `multiagent: null` — a
-declared roster is refused by name, so a populated value can never appear.
+declared `multiagent` block is refused by name, so a populated value can never
+appear.
 `outcome_evaluations` is derived from the event log on every read path: one
 entry per `user.define_outcome`, in declaration order, reporting `pending`,
 `running`, or `evaluating` while in progress and the terminal end-span verdict
@@ -436,10 +437,13 @@ materialized `agent` with a pinned `version` and `multiagent: null`.
   gateway that does not understand `cache_control` from seeing it — an
   Anthropic-compatible endpoint reached through the `openai` or
   `openai_compatible` provider receives an unmarked request.
-- Delete is logical because the event log is append-only by project rule: a
-  physical delete would remove events a resumable stream or an audit may still
-  read. Stopping a running session instead of refusing it keeps delete usable
-  as the single cleanup call a local operator makes.
+- Delete is permanent — the session row, event history, session-owned
+  resources, snapshots, and generated files are physically removed, matching
+  the published contract. The append-only rule still applies *while the session
+  exists*: the log is never mutated in place, so a resumable stream's cursor
+  stays valid for as long as the session is readable. Refusing a `running`
+  session (rather than auto-stopping it) keeps delete a deliberate, two-step
+  operation — interrupt to `idle` first, then delete.
 - An override that cannot be honoured is refused rather than repaired: a session
   that quietly ran the base agent after a caller asked for a different one is the
   failure the override exists to prevent, and the same reasoning makes a

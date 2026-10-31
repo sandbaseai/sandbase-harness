@@ -42,7 +42,7 @@ deviation. If the reason stops being true, the difference should be removed.
 | [`agents.md`](./agents.md) | Agent definitions, model profile, toolsets |
 | [`sessions.md`](./sessions.md) | Session lifecycle, status, initial events |
 | [`budget.md`](./budget.md) | Session budget, local cost profile, usage and pause semantics |
-| [`threads.md`](./threads.md) | Session threads, multi-agent roster, thread lifecycle and archive |
+| [`threads.md`](./threads.md) | Session threads, the `multiagent` block (subagents, workflows, advisor), thread lifecycle and archive |
 | [`events.md`](./events.md) | Event log, ordering, `processed_at`, `session.error` |
 | [`streaming.md`](./streaming.md) | SSE delivery, resume, delta previews |
 | [`tools.md`](./tools.md) | Built-in tools, web domain policy, output overflow |

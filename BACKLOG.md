@@ -6,13 +6,14 @@ project-owned features only.
 ## Near Term
 
 - Improve API compatibility coverage and documented response shapes.
-- Decide the multiagent surface: the published `multiagent` roster, session
-  threads (`/v1/sessions/{id}/threads*`), the coordinator/advisor roles, and
-  the `session.thread_*` / `agent.thread_message_*` events are all mounted
-  `unsupported_capability` refusals today (see
-  `contracts/anthropic-cma/threads.md`). It is the largest remaining gap to
-  the published contract — implement it, or declare it permanently out of
-  scope the way `/v1/tunnels` and `/v1/user_profiles` already are.
+- Decide the multiagent surface: the published `multiagent_20261001` block
+  (subagents, dynamic workflows with `workflow_run.*` events, advisor),
+  session threads (`/v1/sessions/{id}/threads*`), and the `session.thread_*` /
+  `agent.thread_message_*` events are all mounted `unsupported_capability`
+  refusals today (see `contracts/anthropic-cma/threads.md`). It is the largest
+  remaining gap to the published contract — implement it, or declare it
+  permanently out of scope the way `/v1/tunnels` and `/v1/user_profiles`
+  already are.
 - Improve template validation and authoring commands.
 - Add richer runtime metrics for model usage, tool duration, and session state.
 

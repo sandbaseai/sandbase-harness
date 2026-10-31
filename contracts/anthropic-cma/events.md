@@ -19,8 +19,26 @@ model-request-span-pair: supported
 ## 1. Official definition
 
 - The event log is append-only. Events are never rewritten or removed.
-- Events belong to domains: inbound user events, outbound agent events,
-  lifecycle events, tool events, and system events.
+- Events belong to domains: inbound user events (`user.message`,
+  `user.interrupt`, `user.custom_tool_result`, `user.tool_confirmation`,
+  `user.define_outcome`, `user.tool_result`), outbound agent events
+  (`agent.message`, `agent.thinking`, `agent.tool_use`, `agent.tool_result`,
+  `agent.mcp_tool_use`, `agent.mcp_tool_result`, `agent.custom_tool_use`,
+  `agent.thread_context_compacted`, `agent.thread_message_received`,
+  `agent.thread_message_sent`), lifecycle events (`session.status_*`,
+  `session.thread_*`, `workflow_run.*`, `session.error`, `session.usage`,
+  `session.updated`, `session.deleted`), span events
+  (`span.model_request_start`/`end`, `span.outcome_evaluation_*`), and system
+  events (`system.message`). Stream-only `event_start`/`event_delta` previews
+  are never persisted. [`official-docs/reference.md`](./official-docs/reference.md)
+  "Event types".
+- `agent.thinking` is a persisted progress signal that the agent is making
+  forward progress through extended thinking; it carries no thinking content.
+- `agent.thread_context_compacted` records that conversation history was
+  compacted to fit the context window.
+- `user.tool_result` is the self-hosted-environment answer channel for
+  `agent_toolset` calls — on cloud sandboxes the platform executes the
+  built-in tools itself; on `self_hosted` the worker posts results through it.
 - Inbound events carry `processed_at` once admitted, so a client can tell queued
   from handled.
 - `session.error` carries a structured error object rather than a bare string.
@@ -79,6 +97,14 @@ The append path and the row shape are `src/core/session/session-manager.ts` and
   success.
 - `session.usage` is emitted before the session goes idle, so a client reading
   the stream observes usage before the terminal status.
+- `agent.thinking` is emitted as a persisted progress signal during extended
+  thinking, carrying no thinking content — the runtime's policy of never
+  persisting reasoning traces means the block is a marker, not a transcript.
+  `agent.thread_context_compacted` is emitted when a turn's context had to be
+  compacted; thread-scoped variants do not exist because no thread surface
+  does. `user.tool_result` is admitted on self-hosted-environment sessions as
+  the `agent_toolset` result channel (`src/core/auth/session-work-scope.ts`
+  authorizes it to the worker's `mawt_` token) and refused elsewhere.
 - Every model request is bracketed by a `span.model_request_start` /
   `span.model_request_end` pair. The builtin strategy opens the start when the
   SDK prepares the step's request and the Pi translator opens its own; the end

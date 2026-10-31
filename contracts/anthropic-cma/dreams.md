@@ -18,23 +18,26 @@ dreams: supported
   result to a memory store.
 - `POST /v1/dreams` takes `inputs` (exactly one `{type:'memory_store'}` entry
   and one `{type:'sessions', session_ids}` entry with 1–100 unique ids),
-  optional `instructions` (1–4096 characters), `model` (an id string or
-  `{id, speed}` — only `standard` is accepted), and `output_behavior`
-  (`create_new` default, or `update_existing` targeting the input store).
+  optional `instructions` (1–4096 characters), and `model` (an id string).
 - Lifecycle: `pending → running → completed | failed | canceled`. Terminal
   statuses never move again. `POST .../cancel` applies to `pending` or
   `running`; `POST .../archive` applies to terminal statuses only.
 - `outputs` names the memory store holding the result — empty until the dream
-  records one. `create_new` output **starts as a copy of the input store**; the
-  input is never modified. A `failed` or `canceled` dream keeps whatever the
-  output store already holds.
+  records one. The output is a **new store** that starts as a copy of the
+  input; the input is never modified. A `failed` or `canceled` dream keeps
+  whatever the output store already holds.
 - `session_id` names the session running the pipeline; streaming that session's
   events follows the run. `usage` mirrors its token counters and can still move
   briefly after a cancel.
-- `GET /v1/dreams` lists newest-first and supports `include_archived`,
-  repeatable `statuses`, `created_at[gt]` / `created_at[lt]`, `limit`, and
-  `page`. `GET /v1/dreams/{id}` retrieves one. `update_existing` on a store
-  another still-active `update_existing` dream targets is a conflict.
+- `GET /v1/dreams` lists newest-first and supports `limit` (default 20, max
+  100), `page`, and `include_archived`. `GET /v1/dreams/{id}` retrieves one.
+
+The published documentation as crawled 2026-10-31
+([`official-docs/dreams.md`](./official-docs/dreams.md)) describes only these
+parameters. `output_behavior`, a `{id, speed}` model object, repeatable
+`statuses` filters, and `created_at` bounds are **not in the published doc**;
+the pinned SDK may accept them, but this contract treats them as
+local-extension surface until a published source confirms them.
 
 ## 2. Current SandBase shape
 
@@ -72,17 +75,19 @@ The routes live in `src/api/routes/dreams.ts`; the job lifecycle lives in
 
 ## 3. Alignment
 
-Aligned for: the request shape (`inputs`, `instructions`, `model`,
-`output_behavior`), the lifecycle vocabulary and terminal rules, `create_new`
-seeded-copy semantics, `update_existing` targeting and single-active-writer
-conflict, cancel and archive state rules, the `session_id` audit surface, the
-usage projection, and sorted-session-id echoes.
+Aligned for: the request shape (`inputs`, `instructions`, `model`), the
+lifecycle vocabulary and terminal rules, the new-store seeded-copy output
+semantics, cancel and archive state rules, the `session_id` audit surface, the
+usage projection, and sorted-session-id echoes. The `output_behavior` field
+(including `update_existing`), repeatable `statuses`/`statuses[]` list filters,
+and `created_at[gt|lt]` bounds are **local extensions** — accepted and
+implemented, but not part of the published definition.
 
 ## 4. Differences
 
 | Difference | Detail |
 | --- | --- |
-| Beta gate | None. The published `dreaming-2026-04-21` gate is a hosted rollout control; the local-first compatibility stance admits the resource directly, matching the documented `compatibility-header-admission` posture. |
+| Beta gate | None. The published contract requires `dreaming-2026-04-21` and states the `managed-agents-2026-04-01` header alone does not grant access (`official-docs/dreams.md` "Required beta headers"). The local stance admits the resource directly because the official SDK's dreams client already sends the family beta, and refusing a request whose beta header is correct would break that client for no local gain. |
 | Session id prefix | The pipeline session id uses the local `sess_` prefix rather than the published `sesn_`, matching every other session this runtime creates. |
 | Dream webhooks | No `dream.*` operation events are published; the lifecycle is observable through the resource itself and the session event stream. |
 | Console UI | None in this phase; dreams are reachable through the API and SDK only. |
@@ -106,6 +111,11 @@ usage projection, and sorted-session-id echoes.
   the dream table already carries the durable state, and both readers and the
   existing operations timer can converge it without a second scheduling
   system.
+- `output_behavior` (with `update_existing`) and the list filters are kept as
+  accepted local extensions: they were added against an SDK surface ahead of
+  the published doc, and a caller holding an SDK that already sends them sees
+  working behaviour rather than an unexpected refusal. If the published doc
+  later documents them, this section's wording moves, not the behaviour.
 
 ## 6. Corresponding tests
 
