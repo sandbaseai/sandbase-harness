@@ -46,7 +46,14 @@ session-budget: partial
   record per model request — into exact **microcents** (1e-6 cent), so the
   between-requests comparison never depends on float rounding. Reported cents are
   that total rounded **up**, so a client reading `list_cost` is never told it
-  spent less than it did.
+  spent less than it did. The published rule rounds the **reported** figure to
+  the **nearest** cent — "rounded to the nearest cent, so a reported figure can
+  read up to half a cent either side of the exact amount enforcement uses"
+  ([`official-docs/budgets.md`](./official-docs/budgets.md) "Enforcement uses the
+  exact, unrounded list cost") — while enforcement compares the unrounded value.
+  This runtime rounds the reported figure up instead: the two agree that
+  enforcement uses the exact total, and rounding the read up cannot understate
+  spend the way nearest can, so the divergence is on the safe side of the rule.
 - A session may declare a `budget` at creation. The budget is stored in a
   nullable `sessions.budget` column added by migration `035_session_budget`: SQL
   NULL means the session never had one, the JSON literal `null` means it had one
@@ -110,6 +117,7 @@ session-budget: partial
 | Prices are local, not official | `list_cost` is computed from an operator-supplied `CostProfile`. SandBase never embeds vendor prices. With the default empty profile, no model is priced and a session cannot be budgeted at all. |
 | Unpriced model ⇒ no budget | A model the profile does not list makes the session unbudgetable (`model_not_budgetable`). The published contract has authoritative prices, so the case does not arise for it. |
 | `list_cost` withheld when incomplete | When any model used is unpriced, `usage.list_cost` is omitted rather than reported as a lower bound. Reporting a lower bound as a total would understate spend to a caller that is about to choose a new cap. |
+| `list_cost` rounding direction | The published rule rounds the **reported** figure to the nearest cent (±0.5¢ of the exact value enforcement uses). This runtime rounds it **up** — a reported `list_cost` never understates spend, while enforcement still compares the exact microcent total. The two agree on the unrounded enforcement; the divergence is only in the read direction, and round-up errs toward over-reporting rather than under-. |
 | Cache-bucket rates when the profile lists none | A profile may list `cache_read_per_mtok_cents` / `cache_write_per_mtok_cents` per model. When it does not, the buckets are priced at the multipliers Anthropic publishes for prompt caching — cache read at 0.1x the model's input rate, five-minute cache write at 1.25x — rather than at the full input rate or free. |
 | The thread-level `budget_reached` signal has no thread surface | The session pauses exactly as published — idle with `stop_reason: budget_reached`, automatic resume when an update lifts the ceiling — but the reason is carried on the session's own `session.status_idle`. The published model also reports it per thread, and this runtime has no thread surface to report it on. A work-starting event at the cap is still refused with the `budget_reached` code rather than queued, because a resumed-at-once turn would charge spend the client did not raise the ceiling for. |
 | An outcome stops at the ceiling with its own verdict | A declared outcome whose session reaches the ceiling closes with `result: "budget_reached"` on its terminal `span.outcome_evaluation_end`. The published contract has no outcome-loop surface, so this is a local rule rather than a published one; `sessions.md` §4 records the outcome side of it. |

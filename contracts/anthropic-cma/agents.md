@@ -54,7 +54,9 @@ the model profile is `src/core/agent/model-object.ts`, and the routes are
   version listing, and a session's frozen snapshot — as `model_config`
   (`id`, `speed`, and `effort` when one was set). It is omitted for the ordinary
   case (the local `standard` speed and no `effort`), so a plain model id looks
-  the same as it always did. On the Anthropic provider `effort` and `speed`
+  the same as it always did. The published contract instead echoes `model` as
+  the resolved object with defaults filled; that divergence and the reason for
+  keeping the string are recorded in §4. On the Anthropic provider `effort` and `speed`
   are also executed: the level reaches the request as `output_config.effort`
   and `fast` as `speed` with the published `fast-mode-2026-02-01` beta, each
   gated by the model capability table in `src/model/anthropic-capabilities.ts`,
@@ -109,6 +111,7 @@ field the runtime cannot honour instead of dropping it.
 
 | Difference | Detail |
 | --- | --- |
+| `model` read shape | The published response echoes `model` as the **resolved object with defaults filled** — `{"id": "claude-opus-5-5", "effort": {"type": "medium"}, "speed": "standard"}` even when the caller sent a bare string (`official-docs/agent-setup.md` "Create an agent" response). This runtime returns `model` as the **string it was given** and reports the profile on `model_config` (`id`, `speed`, `effort` when set), omitted for the ordinary `standard`-no-effort case. Changing `model` to an object would be a breaking wire change for every existing reader; keeping the string and carrying the resolved profile on `model_config` preserves the information the published echo carries without re-shaping a field callers already branch on. Recorded as a deliberate divergence, not parity. |
 | `model.speed` | Executed on the Anthropic provider when the model supports it: `fast` is sent as `speed: "fast"` and the provider attaches the `fast-mode-2026-02-01` beta. The capability table (`src/model/anthropic-capabilities.ts`) holds the published fast-mode list — Opus 5.5, Opus 5, Opus 4.8 — and `fast` on a listed model that cannot take it is refused at create/update with `unsupported_model_speed` rather than stored and silently degraded. `standard` and the local `extended` produce no wire field. A model id the table does not know is accepted and sends nothing. |
 | `model.effort` | Parsed, validated, stored in the model profile, and returned by every read projection (agent, version, and session snapshot). On the Anthropic provider the level reaches the request as `output_config.effort` — capability-gated per level, because the published lists are not uniform (Opus 4.6 and Sonnet 4.6 take `max` but not `xhigh`; Opus 4.5 tops out at `high`; Haiku 4.5 takes no effort). A listed model refused its level fails create/update with `unsupported_model_effort` naming the allowed set; a level outside the published vocabulary is `invalid_model_effort`. Models outside the table, and every non-Anthropic provider, accept the field and send nothing. A deployment may also set `reasoning_effort` in its own model settings — operator-level, applying to the model rather than to an agent. |
 | `model.inference_geo` | Refused by name with `unsupported_model_field` when a well-formed pin is sent: this runtime has no inference-geography control, so accepting it would promise a pin it cannot hold. An unknown value is `invalid_inference_geo` first. |
