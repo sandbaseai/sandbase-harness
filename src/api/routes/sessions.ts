@@ -44,7 +44,7 @@ import { activeSecondsFromEvents, activeSecondsFromTicks } from '@/core/session/
 import { outcomeEvaluationsFromEvents } from '@/core/outcomes/session-outcomes.js';
 import { SESSION_WORK_SENDABLE_EVENTS, sessionWorkAuthFromHeader } from '@/core/auth/session-work-scope.js';
 import { parseIncludeArchived, rejectUnexpectedQueryParams } from './query-params.js';
-import { normalizeDefineOutcome, normalizeInitialEvents } from './initial-events.js';
+import { MAX_SESSION_CREATE_BODY_BYTES, normalizeDefineOutcome, normalizeInitialEvents } from './initial-events.js';
 import { isBudgetError, parseSessionBudget, BUDGET_ERROR_CODES } from '@/core/session/session-budget.js';
 import { isOutcomeGraderUnavailableError } from '@/core/outcomes/loop.js';
 import { isPiSessionAdmissionError } from '@/core/session/pi-policy.js';
@@ -105,10 +105,47 @@ export function sessionsRoutes(deps: ServerDeps) {
 
   // POST / - Create session
   app.post('/', async (c) => {
+    // The published contract answers 413 for a create body over 32 MB. The
+    // Content-Length header is the cheap check; when it is absent or
+    // unreliable the parsed body's serialized length is the backstop, so an
+    // over-large payload is refused either way before a session row exists.
+    const declared = Number(c.req.header('content-length'));
+    if (Number.isFinite(declared) && declared > MAX_SESSION_CREATE_BODY_BYTES) {
+      return c.json(
+        {
+          error: {
+            type: 'invalid_request_error',
+            code: 'request_too_large',
+            message: `Request body exceeds the ${MAX_SESSION_CREATE_BODY_BYTES}-byte limit`,
+          },
+        },
+        413,
+      );
+    }
     let body: any;
     try {
       body = await c.req.json();
     } catch {
+      return invalid(c, 'Request body must be valid JSON');
+    }
+    // Content-Length is advisory — a chunked or header-less request can still
+    // exceed the bound, so the parsed body's own size is the authoritative
+    // backstop. Reserializing costs one pass over a body already in memory.
+    try {
+      if (Buffer.byteLength(JSON.stringify(body), 'utf8') > MAX_SESSION_CREATE_BODY_BYTES) {
+        return c.json(
+          {
+            error: {
+              type: 'invalid_request_error',
+              code: 'request_too_large',
+              message: `Request body exceeds the ${MAX_SESSION_CREATE_BODY_BYTES}-byte limit`,
+            },
+          },
+          413,
+        );
+      }
+    } catch {
+      // A body that cannot be reserialized is malformed regardless of size.
       return invalid(c, 'Request body must be valid JSON');
     }
     if (!body || typeof body !== 'object' || Array.isArray(body)) {

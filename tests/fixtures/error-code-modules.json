@@ -177,6 +177,9 @@
     "requires_action_timeout": [
       "src/core/session/parked-wait.ts"
     ],
+    "request_too_large": [
+      "src/api/routes/sessions.ts"
+    ],
     "resource_not_mountable": [
       "src/core/resources/resource-mountability.ts"
     ],
