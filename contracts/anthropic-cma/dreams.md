@@ -87,7 +87,7 @@ implemented, but not part of the published definition.
 
 | Difference | Detail |
 | --- | --- |
-| Beta gate | None. The published contract requires `dreaming-2026-04-21` and states the `managed-agents-2026-04-01` header alone does not grant access (`official-docs/dreams.md` "Required beta headers"). The local stance admits the resource directly because the official SDK's dreams client already sends the family beta, and refusing a request whose beta header is correct would break that client for no local gain. |
+| Beta gate | None. The published contract is explicit: "Dream endpoints require the `dreaming-2026-04-21` beta header. The `managed-agents-2026-04-01` header on its own doesn't grant access to dreams" (`official-docs/dreams.md` "Required beta headers"). The local stance admits the resource directly because the official SDK's dreams client already sends the family beta — "The SDK sets the right header on each call" — so refusing a request whose beta header is correct would break that client for no local gain. Recorded as a deliberate divergence rather than a claimed parity with the published gate. |
 | Session id prefix | The pipeline session id uses the local `sess_` prefix rather than the published `sesn_`, matching every other session this runtime creates. |
 | Dream webhooks | No `dream.*` operation events are published; the lifecycle is observable through the resource itself and the session event stream. |
 | Console UI | None in this phase; dreams are reachable through the API and SDK only. |

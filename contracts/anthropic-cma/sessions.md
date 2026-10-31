@@ -114,9 +114,17 @@ definition and its tool admission rule.
 
 The session object itself always carries `budget` — the ceiling, or `null` in
 both the never-set and removed states, which the published shape does not
-distinguish — and a `stats` object: `active_seconds` sums the session's
-`running` intervals from the event log (the list route derives it from one
-bulk status-transition query rather than a full event read per row), and
+distinguish — and a `stats` object: `active_seconds` and `duration_seconds`.
+The published `stats.active_seconds` sums **each thread's** own active time —
+overlapping activity from concurrent threads is counted per thread, so the
+sum can exceed wall-clock — while `usage.active_seconds` counts that activity
+once ([`official-docs/session-observability.md`](./official-docs/session-observability.md)
+"The session's `stats` object has its own `active_seconds`, which sums each
+thread's own active time instead of counting overlapping activity once").
+This runtime runs one thread per session — the multiagent surface is refused —
+so the two figures coincide, and the field is computed as the sum of the
+session's `running` intervals from the event log (the list route derives it
+from one bulk status-transition query rather than a full event read per row).
 `duration_seconds` counts from creation to the last update for a terminated
 or archived session and to the read for a live one. The materialized `agent`
 pins `version` to the session snapshot and reports `multiagent: null` — a
