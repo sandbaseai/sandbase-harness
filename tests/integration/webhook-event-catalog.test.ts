@@ -95,8 +95,9 @@ describe('webhook event catalog', () => {
     });
 
     it('refuses the SDK-declared names nothing produces', async () => {
-      // `session.thread_*` waits on the deferred multiagent surface and
-      // `agent.deleted` on a delete route that does not exist. Accepting them
+      // `session.thread_*` belongs to the multiagent surface declared out of
+      // scope (decisions/0001) and `agent.deleted` to a delete route that does
+      // not exist. Accepting them
       // would store a subscription that can never fire and read as a working
       // one, so they answer 400 like any unknown name.
       const { status, body } = await subscribe([

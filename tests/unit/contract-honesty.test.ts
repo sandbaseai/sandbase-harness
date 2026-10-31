@@ -480,7 +480,7 @@ describe('contract honesty guard', () => {
   it('turns red when a real status block is edited to disagree with the matrix', () => {
     const tampered = contractDocuments().map((document) =>
       document.name === 'threads.md'
-        ? { ...document, text: document.text.replace('threads-and-coordinator: unavailable', 'threads-and-coordinator: partial') }
+        ? { ...document, text: document.text.replace('threads-and-coordinator: not_applicable', 'threads-and-coordinator: partial') }
         : document,
     );
 
@@ -491,7 +491,7 @@ describe('contract honesty guard', () => {
       mountedRouteKeys: mountedRouteKeys(),
     });
 
-    expect(problems.join('\n')).toMatch(/threads\.md: status block says threads-and-coordinator is "partial" but the matrix says "unavailable"/);
+    expect(problems.join('\n')).toMatch(/threads\.md: status block says threads-and-coordinator is "partial" but the matrix says "not_applicable"/);
   });
 
   it('has a guarded invariant for every rule the guard claims', () => {
@@ -581,13 +581,18 @@ describe('contract document parsing', () => {
 // ---------------------------------------------------------------------------
 
 describe('documented capability decisions', () => {
-  it('reports the canonical multiagent roster as unavailable and refuses it by name', () => {
-    expect(entry('multiagent-roster').status).toBe('unavailable');
-    expect(entry('threads-and-coordinator').status).toBe('unavailable');
+  it('records the multiagent surface as a declared out-of-scope decision', () => {
+    // The surface is not "not yet implemented" — decisions/0001 declares it
+    // permanently out of scope, which is a different status than an open gap.
+    expect(entry('multiagent-roster').status).toBe('not_applicable');
+    expect(entry('threads-and-coordinator').status).toBe('not_applicable');
+    expect(entry('multiagent-roster').reason).toMatch(/decisions\/0001/);
+    expect(entry('threads-and-coordinator').reason).toMatch(/decisions\/0001/);
     expect(entry('local-delegation-subagent').status).toBe('supported');
 
     const threads = documentNamed('threads.md').text;
     expect(threads).toContain('multiagent-roster');
+    expect(threads).toContain('decisions/0001-multiagent-out-of-scope.md');
     expect(parseDocumentedRoutes(threads)).toEqual([]);
   });
 

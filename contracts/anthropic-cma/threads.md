@@ -3,13 +3,14 @@
 Contract area: threads, the `multiagent_20261001` block (subagents, dynamic
 workflows, advisor), thread lifecycle and message events, thread listing and
 archive.
-Status: `unavailable`. See §7.
+Status: `not_applicable` — declared out of scope by
+[`decisions/0001-multiagent-out-of-scope.md`](../../decisions/0001-multiagent-out-of-scope.md). See §7.
 Source: `src/core/session/delegation-service.ts`,
 `src/core/orchestrator/agent-orchestrator.ts`, `src/core/agent/schema.ts`,
 `src/core/agent/update.ts`.
 
 <!-- capability-status
-threads-and-coordinator: unavailable
+threads-and-coordinator: not_applicable
 -->
 
 ---
@@ -141,9 +142,12 @@ with its own status transitions, while a delegated run is an internal turn.
 
 ## 5. Reason for the difference
 
-- The gap is a scope decision, not an oversight: threads, subagent delegation,
-  dynamic workflows, advisor consultations, and per-thread event routing are a
-  protocol surface of their own, and this phase implements none of them.
+- The gap is a **recorded scope decision**
+  ([`decisions/0001`](../../decisions/0001-multiagent-out-of-scope.md)), not
+  an oversight and not a deferred implementation: threads, subagent
+  delegation, dynamic workflows, advisor consultations, and per-thread
+  event routing are a protocol surface of their own, and this runtime
+  implements none of them.
 - The refusal exists because the alternative is worse than the gap. Accepting a
   `multiagent` block and storing it would let a caller build on delegation by
   roster or workflow — a controller that spawns threads, a UI that lists them,
@@ -167,7 +171,9 @@ with its own status transitions, while a delegated run is an internal turn.
 
 ## 7. Status
 
-`unavailable` — nothing in this contract area is implemented. The runtime has no
+`not_applicable` — declared permanently out of scope by
+[`decisions/0001-multiagent-out-of-scope.md`](../../decisions/0001-multiagent-out-of-scope.md).
+The runtime has no
 thread resource, no subagent/workflow/advisor surface, no thread lifecycle or
 message-direction events, no `workflow_run.*` events, no per-thread event
 isolation, and no thread-scoped budget signal. The published thread routes are

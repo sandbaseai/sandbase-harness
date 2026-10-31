@@ -207,18 +207,18 @@ describe('capability matrix', () => {
     // and publishes vault_credential.refresh_failed.
     expect(capabilityEntry('oauth-refresh').status).toBe('supported');
     expect(capabilityEntry('oauth-refresh').reason.toLowerCase()).toContain('refresh_failed');
-    // Threads are a real gap, not a spelling difference: no thread resource, no
-    // coordinator or advisor role, and no thread route exist. The earlier
-    // `partial` reading described files that were never in the tree.
-    expect(capabilityEntry('threads-and-coordinator').status).toBe('unavailable');
+    // Threads are a recorded scope-out, not a spelling difference and not an
+    // open gap: decisions/0001 declares the surface permanently out of scope,
+    // so the entry reports `not_applicable` like tunnels and user_profiles.
+    expect(capabilityEntry('threads-and-coordinator').status).toBe('not_applicable');
     expect(capabilityEntry('threads-and-coordinator').contract).toBe('contracts/anthropic-cma/threads.md');
   });
 
-  it('names the surface that keeps the thread entry unavailable', () => {
-    // `unavailable` has to be readable as a real absence rather than as a
-    // placeholder, so the missing pieces are pinned rather than trusted.
+  it('names the surface that keeps the thread entry out of scope', () => {
+    // `not_applicable` has to carry the decision it records, so the declared
+    // scope-out and the absent pieces are pinned rather than trusted.
     const reason = capabilityEntry('threads-and-coordinator').reason.toLowerCase();
-    expect(reason).toContain('not implemented');
+    expect(reason).toContain('declared out of scope');
     expect(reason).toContain('no subagent, workflow-run, or advisor surface');
     expect(reason).toContain('enable_general_subagent');
   });
@@ -227,7 +227,7 @@ describe('capability matrix', () => {
     // The two facts have to stay apart: the roster is a canonical surface this
     // runtime refuses by name, and the single-level delegation extension is
     // what actually exists. One entry claiming both would be the drift back.
-    expect(capabilityEntry('multiagent-roster').status).toBe('unavailable');
+    expect(capabilityEntry('multiagent-roster').status).toBe('not_applicable');
     expect(capabilityEntry('multiagent-roster').reason.toLowerCase()).toContain('refused by name');
     expect(capabilityEntry('local-delegation-subagent').status).toBe('supported');
     expect(capabilityEntry('local-delegation-subagent').reason.toLowerCase())

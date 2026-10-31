@@ -88,7 +88,7 @@ its family is now implemented, not refused.
 | --- | --- | --- |
 | `/v1/tunnels` and certificate/token actions | `mcp-tunnel` | Hosted connectivity is outside the local-first scope. |
 | `/v1/user_profiles` and enrollment actions | `user-profiles` | Hosted user management is outside the single-tenant scope. |
-| `/v1/sessions/{id}/threads` and its official actions | `threads-and-coordinator` | Session threads are part of the multiagent surface this runtime does not implement; see `contracts/anthropic-cma/threads.md`. |
+| `/v1/sessions/{id}/threads` and its official actions | `threads-and-coordinator` | Session threads are part of the multiagent surface declared out of scope (`decisions/0001-multiagent-out-of-scope.md`); see `contracts/anthropic-cma/threads.md`. |
 
 ### Route Coverage Guard
 

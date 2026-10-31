@@ -267,7 +267,7 @@ export function multiagentRosterRefusal(): ValidationError {
   return {
     path: 'multiagent',
     message:
-      `The canonical multiagent roster is unavailable in this runtime (capability "${MULTIAGENT_ROSTER_CAPABILITY_ID}"): no thread, coordinator, or advisor surface is implemented, so the roster is refused rather than accepted and ignored. `
+      `The canonical multiagent roster is outside this runtime's scope (capability "${MULTIAGENT_ROSTER_CAPABILITY_ID}", decision decisions/0001): no thread, coordinator, or advisor surface is implemented, so the roster is refused rather than accepted and ignored. `
       + 'Use the local delegation extension instead — "delegations" names agents to call, and "enable_general_subagent" allows a one-level temporary sub-agent. '
       + 'GET /v1/x/capabilities records the gap.',
   };
