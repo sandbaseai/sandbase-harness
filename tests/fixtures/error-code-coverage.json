@@ -48,6 +48,7 @@
     "invalid_initial_events": [
       "tests/integration/api.test.ts",
       "tests/integration/define-outcome-event.test.ts",
+      "tests/integration/initial-events-transaction.test.ts",
       "tests/integration/redacted-content-block.test.ts",
       "tests/unit/cma-event-contract.test.ts"
     ],
@@ -253,6 +254,9 @@
     ],
     "requires_action_timeout": [
       "tests/unit/parked-wait.test.ts"
+    ],
+    "request_too_large": [
+      "tests/integration/initial-events-transaction.test.ts"
     ],
     "resource_not_mountable": [
       "tests/integration/resource-admission-refusal.test.ts",

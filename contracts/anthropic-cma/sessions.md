@@ -25,7 +25,11 @@ session-update: supported
 - A session runs one agent against one environment. It is created, may be
   resumed, interrupted, and terminated.
 - `POST /v1/sessions` accepts optional `initial_events` processed at creation,
-  so a session can start with work already queued.
+  so a session can start with work already queued. The published bounds are:
+  at most 50 events; `user.message` and `user.define_outcome` only; at most one
+  `user.define_outcome` and a `rubric` on each; at most 100 file-sourced
+  `document` content blocks across the list; and a `413` when the create body
+  exceeds 32 MB.
 - The `agent` field accepts three forms: an id string (the agent's current
   version), an object with an optional `version` (a pinned version), and
   `agent_with_overrides`, which runs a pinned or current version with part of
@@ -264,6 +268,18 @@ The session-level `stop_reason` (`toApiEvent`):
 - At most 50 events (`MAX_INITIAL_EVENTS`).
 - Only `user.message` and `user.define_outcome` are accepted; any other type is
   rejected with `invalid_initial_event_type` and names the offending index.
+- At most one `user.define_outcome` event per batch (`MAX_INITIAL_DEFINE_OUTCOME`):
+  a second outcome would race the first for the session's `outcome_id` join, so it
+  is refused with `invalid_initial_events` naming the offending index rather than
+  normalized. The bound fires in `normalizeInitialEvents`, upstream of the
+  grader-availability refusal, so a second outcome reports the list rule.
+- At most 100 file-sourced `document` content blocks across the whole list
+  (`MAX_INITIAL_FILE_DOCUMENT_BLOCKS`): `{type:"document", source:{type:"file"}}`
+  and a bare `file_id` source are counted as the same source by different
+  spelling, totalled across every `user.message` in the batch rather than per
+  event. A base64 or text document does not draw down the file budget. The
+  bound is refused with `invalid_initial_events` naming the event that pushed
+  the total past the limit.
 - `user.message` requires a string or content-block array; a malformed payload
   is rejected rather than coerced. A `redacted` block — the runtime's
   placeholder for content withheld by model policy — is refused with
@@ -288,6 +304,14 @@ The session-level `stop_reason` (`toApiEvent`):
   half-created session with no durable record of which events were accepted, and
   a caller retrying would have no way to tell whether the first attempt partly
   took effect.
+- The whole create request is bounded at 32 MB
+  (`MAX_SESSION_CREATE_BODY_BYTES`): a body over the bound is refused with
+  `413` and `request_too_large`. `Content-Length` is the cheap check; when the
+  header is absent or unreliable the parsed body's own serialized size is the
+  backstop, so a chunked or header-less request over the bound is refused
+  either way — before any session row, event, or sandbox exists. The bound is
+  a request-size rule on the create call, not an `initial_events` rule, so it
+  applies to every field of the body.
 
 Session resources:
 
@@ -530,7 +554,12 @@ materialized `agent` with a pinned `version` and `multiagent: null`.
 - `tests/integration/initial-events-transaction.test.ts` — the transaction
   boundary: a rejected initial event leaves no session row and no attached
   resource behind, a successful batch creates the session and delivers every
-  event, and the events' order and `processed_at` reflect admission.
+  event, and the events' order and `processed_at` reflect admission. The
+  published bounds are covered: a second `user.define_outcome` is refused
+  with `invalid_initial_events` (upstream of the grader refusal), more than
+  100 file-sourced `document` blocks across the list is refused while a
+  base64 document does not count, and a create body over 32 MB answers `413`
+  with `request_too_large`.
 - `tests/integration/session-stop-reason.test.ts` — the projected session-level
   `stop_reason`: `stop_reason.type` readable at the top level of a real
   `requires_action` pause and of a paused session reporting `end_turn`, the

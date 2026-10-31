@@ -57,6 +57,7 @@
     "precondition_failed",
     "required",
     "requires_action_timeout",
+    "request_too_large",
     "resource_not_mountable",
     "secret_not_configured",
     "session_archived",
