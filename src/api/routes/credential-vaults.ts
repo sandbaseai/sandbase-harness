@@ -64,6 +64,9 @@ const VAULT_LIST_ORDER = 'vaults.created_at DESC, rowid DESC';
  */
 const AUDIT_QUERY_PARAMS: readonly string[] = ['limit', 'page'];
 
+/** The published bound: at most 20 active credentials per vault. */
+const MAX_CREDENTIALS_PER_VAULT = 20;
+
 type ResourceKind = 'credential_vault';
 
 export function credentialVaultRoutes(deps: ServerDeps) {
@@ -285,6 +288,16 @@ export function credentialVaultRoutes(deps: ServerDeps) {
     const vaultId = c.req.param('id');
     const vault = deps.db.prepare('SELECT id FROM credential_vaults WHERE id = ? AND archived_at IS NULL').get(vaultId);
     if (!vault) return notFound(c, 'Credential vault not found');
+
+    // The published bound is 20 active credentials per vault — archived rows
+    // do not draw it down, so the count filters them out. A vault at the bound
+    // refuses the next credential before it is persisted, not after.
+    const active = deps.db.prepare(
+      'SELECT COUNT(*) AS c FROM credential_records WHERE vault_id = ? AND archived_at IS NULL',
+    ).get(vaultId) as { c: number };
+    if (active.c >= MAX_CREDENTIALS_PER_VAULT) {
+      return invalid(c, `A vault holds at most ${MAX_CREDENTIALS_PER_VAULT} active credentials`);
+    }
 
     // One parser for both wire shapes: the canonical nested `auth` object is the
     // published profile, and the flat spelling stays accepted as a local alias.

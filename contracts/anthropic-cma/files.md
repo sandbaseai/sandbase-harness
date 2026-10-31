@@ -24,7 +24,8 @@ file-mount-path: supported
 
 - Files are uploaded, listed, and read through the files API.
 - A file can be attached to a session as a resource, mounted at a path inside
-  the sandbox so the agent can read it.
+  the sandbox so the agent can read it. A session attaches at most 500 file
+  resources.
 - The mount path is a logical sandbox path, not a host path.
 
 ## 2. Current SandBase shape
@@ -59,6 +60,10 @@ Session file resources:
 
 - A file resource attached to a session gets its own `sesrsc_` id, so it can be
   addressed independently of the session's resource JSON blob.
+- A session attaches at most 500 file resources (`MAX_FILE_RESOURCES_PER_SESSION`
+  in `session-normalizers.ts`): only `file`-type resources count toward the
+  bound — a memory store or a github repository does not draw it down — and the
+  501st is refused at admission before any session row exists.
 - On a running session, file resources may be added, listed, and deleted. This
   differs from `memory_store` (creation-only) and `github_repository` (token
   rotation only).
