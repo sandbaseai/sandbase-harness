@@ -18,6 +18,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import type { ServerDeps } from '../server.js';
 import type { ApiSessionStatus, SessionEvent, SessionLoopEngine, SessionStatus } from '@/types/session.js';
 import type { UserEvent } from '@/types/cma-protocol.js';
+import { CMA_EVENT_TYPES } from '@/types/cma-protocol.js';
 import type { AgentDefinition } from '@/types/agent.js';
 import { UnsupportedCapabilityError } from '@/core/capabilities/registry.js';
 import { cursorPageOf, cursorQueryMismatch, decodeCursor, encodeCursor, normalizeCollectionFilter, toApiEvent, toApiSession } from '../standard.js';
@@ -798,7 +799,7 @@ export function sessionsRoutes(deps: ServerDeps) {
   // pagination.md` already described this route as carrying `{session_id, after_id}` in
   // its cursor; the route never did, and now it does.
   app.get('/:id/events', (c) => {
-    const rejected = rejectUnexpectedQueryParams(c, ['limit', 'after_id', 'page']);
+    const rejected = rejectUnexpectedQueryParams(c, ['limit', 'after_id', 'page', 'types', 'types[]']);
     if (rejected) return rejected;
     const sessionId = c.req.param('id');
 
@@ -810,12 +811,40 @@ export function sessionsRoutes(deps: ServerDeps) {
     const rawLimit = parseInt(c.req.query('limit') ?? '1000', 10) || 1000;
     const limit = Math.min(1000, Math.max(1, rawLimit));
 
+    // `types[]` is the SDK's array spelling and `types` the bare one; both are
+    // repeatable and every value must be an event type this runtime can emit,
+    // because an unknown string silently filters to an empty page — the same
+    // wrong answer the statuses filter refuses to give.
+    const typeValues = [
+      ...(c.req.queries('types') ?? []),
+      ...(c.req.queries('types[]') ?? []),
+    ];
+    const badType = typeValues.find((value) => !CMA_EVENT_TYPES.has(value));
+    if (badType !== undefined) {
+      return c.json({
+        error: {
+          type: 'invalid_request_error',
+          message: `Invalid types value "${badType}". This route accepts the event types this runtime emits.`,
+        },
+      }, 400);
+    }
+    const types = typeValues.length === 0 ? undefined : new Set(typeValues);
+
     // `after_id` is the local spelling of the position and stays supported; `page` is
     // the published one. Both name the last event the caller already has, and the
     // cursor carries that id together with the session it came from, so a cursor
     // issued by another session is refused by the shared filter check rather than
-    // silently applied to this session's log.
-    const cursorState = { order: EVENTS_LIST_ORDER, filter: { session_id: sessionId } };
+    // silently applied to this session's log. The `types` filter rides in the
+    // cursor's filter bag for the same reason `statuses` does on the session
+    // list — a cursor replayed under a different filter is refused rather than
+    // resumed mid-set.
+    const cursorState = {
+      order: EVENTS_LIST_ORDER,
+      filter: {
+        session_id: sessionId,
+        ...(types ? { types: [...types].sort().join(',') } : {}),
+      },
+    };
     let afterId = c.req.query('after_id');
     let fromCursor = false;
     const rawPage = c.req.query('page');
@@ -850,7 +879,8 @@ export function sessionsRoutes(deps: ServerDeps) {
       }, 400);
     }
 
-    const events = start > 0 ? allEvents.slice(start) : allEvents;
+    const events = (start > 0 ? allEvents.slice(start) : allEvents)
+      .filter((event) => types === undefined || types.has(event.type));
     const limited = events.slice(0, limit);
 
     const last = limited[limited.length - 1];
