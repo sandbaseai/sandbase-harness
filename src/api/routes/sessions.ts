@@ -55,8 +55,10 @@ import {
   resolveRequestedLoopEngine,
 } from '@/core/session/loop-engine-admission.js';
 import {
+  modelSupportsMidConversationSystem,
   normalizeSystemMessageContent,
   systemMessageContentError,
+  systemMessageOrderingViolationIndex,
 } from './system-message.js';
 import { publishOperationEvent } from './operation-events.js';
 import type { LoopEngineSteerReceipt } from '@/strategy/loop-engine/adapter.js';
@@ -569,6 +571,32 @@ export function sessionsRoutes(deps: ServerDeps) {
     }
     if (isTerminal(session.status)) {
       return c.json({ error: { type: 'conflict', message: `Session ${sessionId} is in terminal state: ${session.status}` } }, 409);
+    }
+
+    // Two published `system.message` gates need the session, not just the
+    // payload shape, so they run after the row resolves: the model must support
+    // mid-conversation system injection, and a session idle on `requires_action`
+    // only admits one that trails a tool-answer event in the same batch.
+    if (events.some((event: any) => event?.type === 'system.message')) {
+      const model = (session.agentDefinition ?? findAgentById(deps, session.agentId))?.model;
+      if (!modelSupportsMidConversationSystem(model)) {
+        return c.json({
+          error: {
+            type: 'invalid_request_error',
+            code: 'model_does_not_support_mid_conversation_system',
+            message: `model "${model ?? 'unknown'}" does not support mid-conversation system injection`,
+          },
+        }, 400);
+      }
+      const badIndex = systemMessageOrderingViolationIndex(events, session.status === 'requires_action');
+      if (badIndex !== -1) {
+        return c.json({
+          error: {
+            type: 'invalid_request_error',
+            message: 'system.message must trail a tool result event in the same request while the session awaits action on a pending tool call',
+          },
+        }, 400);
+      }
     }
 
     try {

@@ -81,6 +81,9 @@
     "model_config_invalid": [
       "src/model/errors.ts"
     ],
+    "model_does_not_support_mid_conversation_system": [
+      "src/api/routes/sessions.ts"
+    ],
     "model_not_found": [
       "src/model/errors.ts"
     ],
