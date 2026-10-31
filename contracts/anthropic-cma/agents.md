@@ -159,6 +159,11 @@ field the runtime cannot honour instead of dropping it.
   creates and reads agents with omitted, null, and empty prompts over HTTP;
   updates retain an omitted prompt and clear it explicitly.
 
+- `tests/conformance/doc-curl-examples.test.ts` — the agent-setup bodies
+  replayed verbatim through `?beta=true`: the `agent_toolset_20260401` create
+  reading back the published object, and the `inference_geo` doc pin refused
+  by name rather than stored.
+
 - `tests/integration/api.test.ts` — agent create/list/read/version behaviour and
   toolset rejection cases.
 - `tests/unit/schema-validator.test.ts` — the declaration bounds: the
