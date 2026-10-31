@@ -116,6 +116,7 @@ import {
   sandboxProviderForEnvironmentConfig,
 } from '@/sandbox/provider-names.js';
 import {
+  environmentMcpServerAdmission,
   environmentNetworkPolicyOf,
   environmentWebDomainAdmission,
 } from '@/core/config/environment-network.js';
@@ -291,6 +292,31 @@ export class SessionManager {
     const violation = environmentWebDomainAdmission(policy, agent);
     if (violation) {
       throw sessionOperationError('web_domain_outside_allowed_hosts', violation.message);
+    }
+  }
+
+  /**
+   * The `allowed_hosts` admission for declared `url` MCP servers.
+   *
+   * The published rule: under a `limited` Environment with
+   * `allow_mcp_server_network_access` off, session creation fails with a 400
+   * when the agent declares a `url` MCP server whose host `allowed_hosts`
+   * does not cover — the check belongs at create, not at the connect boundary
+   * the tool resolver still enforces for a session admitted earlier. A stdio
+   * server names no endpoint, so there is no host to check. Refusing before
+   * the row exists keeps a session from being admitted only to fail its first
+   * connect.
+   */
+  private assertMcpServersWithinEnvironment(
+    environmentId: string,
+    agent: AgentDefinition,
+  ): void {
+    const policy = environmentNetworkPolicyOf(this.resolveEnvironmentConfig(environmentId));
+    for (const server of agent.mcp_servers ?? []) {
+      const refusal = environmentMcpServerAdmission(policy, server);
+      if (refusal) {
+        throw sessionOperationError('mcp_server_outside_allowed_hosts', refusal);
+      }
     }
   }
 
@@ -703,6 +729,10 @@ export class SessionManager {
     // `allowed_hosts` is refused the same way create is, against the session's
     // bound Environment.
     this.assertWebDomainsWithinEnvironment(session.environmentId, result.data);
+    // An update that swaps in a `url` MCP server `allowed_hosts` does not
+    // cover is refused identically — the declared endpoint is checked here,
+    // not left to fail at the next connect.
+    this.assertMcpServersWithinEnvironment(session.environmentId, result.data);
     if (session.loopEngine === 'pi') {
       assertPiAgentCanExecute(result.data);
     }
@@ -831,6 +861,10 @@ export class SessionManager {
     // The `allowed_domains ⊆ allowed_hosts` admission rule reads the
     // Environment's network policy, which the provider string cannot carry.
     this.assertWebDomainsWithinEnvironment(params.environmentId ?? 'env_default', effectiveDefinition);
+    // So does the `url` MCP-server admission: the published rule refuses a
+    // session at create whose declared endpoint `allowed_hosts` does not
+    // cover, rather than letting it reach the connect boundary.
+    this.assertMcpServersWithinEnvironment(params.environmentId ?? 'env_default', effectiveDefinition);
     // A mounted resource is written to a canonical absolute in-sandbox path, so a
     // backend that refuses that path has to be refused here, on the same
     // before-the-row reasoning: accepting it would promise a mount that only
