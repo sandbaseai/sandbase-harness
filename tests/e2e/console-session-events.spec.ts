@@ -111,8 +111,10 @@ test('create, message, replay the log, and ride a failed turn to retries_exhaust
   expect(created.status, await created.clone().text()).toBe(201);
 
   // 2. Open it in the Console and send a message; the stub's reply renders.
+  //    The nav landmark scopes the locator — a session detail renders its own
+  //    "Sessions" back button, so an unscoped role query matches both.
   await page.goto(consoleBaseUrl);
-  await page.getByRole('button', { name: 'Sessions' }).click();
+  await page.getByRole('navigation').getByRole('button', { name: 'Sessions' }).click();
   await page.locator('tr.clickable-row', { hasText: SESSION_TITLE }).click();
 
   await page.locator('textarea').last().fill('say hello');
@@ -122,7 +124,7 @@ test('create, message, replay the log, and ride a failed turn to retries_exhaust
   // 3. Reload and reopen: the reply is rendered again from the recorded log —
   //    there is no live stream left to deliver it, so only a replayed read can.
   await page.reload();
-  await page.getByRole('button', { name: 'Sessions' }).click();
+  await page.getByRole('navigation').getByRole('button', { name: 'Sessions' }).click();
   await page.locator('tr.clickable-row', { hasText: SESSION_TITLE }).click();
   await expect(page.getByText(STUB_REPLY_TEXT).first()).toBeVisible({ timeout: 60_000 });
 
