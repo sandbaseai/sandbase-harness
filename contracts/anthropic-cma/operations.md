@@ -314,7 +314,13 @@ aliases (`agent_id`, `cron`, `timezone`, `next_run_at`, `payload`) are still
 accepted on write, so an existing caller does not break.
 
 Creating a deployment requires `name`, an agent reference, `environment_id` and
-a non-empty `initial_events` list. The admission is
+a non-empty `initial_events` list, and is refused once the organization holds
+the published cap of **1,000 live deployments**
+(`official-docs/scheduled-deployments.md`): a create at the cap answers 400
+`invalid_request_error` with code `too_many_deployments`. The count is of
+non-archived rows — this runtime is single-organization, so the whole
+non-archived table is the organization's set — which is why archiving a
+deployment frees a slot and a permanent `DELETE` does too. The admission is
 `normalizeInitialEvents(value, {allowSystemMessage: true})` — the same
 normalizer sessions use, with the deployment-only third type `system.message`
 added, since a deployment is privileged enough to seed context. A run then

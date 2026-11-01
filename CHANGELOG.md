@@ -4,6 +4,13 @@
 
 ### Fixed
 
+- `POST /v1/deployments` now enforces the published per-organization cap of
+  1,000 live deployments (`official-docs/scheduled-deployments.md`). A create
+  at the cap is refused with 400 `invalid_request_error` /
+  `too_many_deployments` instead of succeeding past the documented bound; the
+  count is of non-archived rows, so archiving or deleting a deployment frees a
+  slot.
+
 - A manual `POST /v1/deployments/{id}/run` no longer consumes the deployment's
   armed scheduled run. The run is additive — it fires outside the cadence and
   leaves `next_run_at`, `due_at`, and `last_run_at` untouched — so a manual

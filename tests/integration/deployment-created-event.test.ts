@@ -261,6 +261,55 @@ describe('deployment.created', () => {
     expect(everything).toEqual([]);
   });
 
+  it('refuses the create once the organization holds 1,000 live deployments', async () => {
+    // The published cap counts live deployments per organization, so the fastest
+    // honest fixture is the real table: seed 1,000 non-archived rows directly —
+    // routing them through the API would trip the cap on the way up. An archived
+    // row sits beside them to prove it does not consume a slot.
+    const stmt = db.prepare(
+      `INSERT INTO scheduled_deployments (id, name, agent_id, environment_id, cron, initial_events, archived_at)
+       VALUES (?, ?, 'agent_one', 'env_default', '0 3 * * *', '[]', ?)`,
+    );
+    // Earlier cases in this file created rows that stay live; the fixture is
+    // shared, so the seed fills only the slots still open rather than assuming
+    // an empty table.
+    const liveBefore = (db.prepare(
+      `SELECT COUNT(*) AS n FROM scheduled_deployments WHERE archived_at IS NULL`,
+    ).get() as { n: number }).n;
+    const toSeed = 1000 - liveBefore;
+    db.transaction(() => {
+      for (let i = 0; i < toSeed; i += 1) stmt.run(`depl_cap_${i}`, `cap-${i}`, null);
+      stmt.run('depl_cap_archived', 'cap-archived', '2026-01-01T00:00:00.000Z');
+    });
+    // The fixture is shared and tests run in file order, so the 1,000 seeded
+    // rows must come back out at the end or every later create in this file
+    // fails against the cap it just proved.
+    const cleanup = () => db.exec(`DELETE FROM scheduled_deployments WHERE id LIKE 'depl_cap_%'`);
+    try {
+
+    const webhookId = await subscribe(['deployment.created']);
+    const res = await create({ name: 'one-too-many', agent_id: 'agent_one', cron: '0 20 * * 5' });
+    expect(res.status).toBe(400);
+    expect(res.body.error.type).toBe('invalid_request_error');
+    expect(res.body.error.code).toBe('too_many_deployments');
+    expect(res.body.error.message).toContain('1,000');
+    // A refused create still publishes nothing — same invariant as every other
+    // validation refusal in this file.
+    expect(receivedFor(webhookId, 'deployment.created')).toHaveLength(0);
+
+    // Archiving one row frees a slot and the same create now succeeds: the count
+    // is of live rows, not of all rows ever written.
+    // `depl_cap_0` is the first seeded id; earlier cases leave fewer than a
+    // thousand live rows, so toSeed ≥ 1 and it always exists.
+    const archived = await app.request('/v1/deployments/depl_cap_0/archive', { method: 'POST', headers: CMA_HEADERS });
+    expect(archived.status).toBe(200);
+    const retry = await create({ name: 'after-archive', agent_id: 'agent_one', cron: '0 20 * * 5' });
+    expect(retry.status).toBe(201);
+    } finally {
+      cleanup();
+    }
+  });
+
   it('completes the create even when the subscriber cannot be reached', async () => {
     const unreachable = await subscribe(['deployment.created'], 'http://127.0.0.1:1/hook');
     const reachable = await subscribe(['deployment.created']);
