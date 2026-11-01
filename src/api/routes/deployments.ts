@@ -71,6 +71,14 @@ export function deploymentRoutes(deps: ServerDeps, options: OperationMountOption
   const app = new Hono();
   const collections = collectionPager<{ id: string }>(options.pageShape ?? 'canonical');
 
+  /**
+   * The published cap on live scheduled deployments, counted per organization
+   * (scheduled-deployments.md). This runtime is single-organization, so the
+   * count is the whole non-archived table.
+   */
+  const countLiveDeployments = () =>
+    (deps.db.prepare('SELECT COUNT(*) AS n FROM scheduled_deployments WHERE archived_at IS NULL').get() as { n: number }).n;
+
   app.get('/', (c) => {
     const rejected = rejectUnexpectedQueryParams(c, DEPLOYMENT_LIST_PARAMS);
     if (rejected) return rejected;
@@ -117,6 +125,15 @@ export function deploymentRoutes(deps: ServerDeps, options: OperationMountOption
     if (!resolved.environmentId) return invalid(c, 'environment_id is required');
     if (!resolved.initialEvents || resolved.initialEvents.length === 0) {
       return badRequest('initial_events is required', 'invalid_initial_events');
+    }
+    // The published cap is on live deployments, so archived rows do not count:
+    // deleting one frees a slot, which is the only way to shrink the count.
+    const liveCount = countLiveDeployments();
+    if (liveCount >= MAX_DEPLOYMENTS_PER_ORGANIZATION) {
+      return badRequest(
+        `At most ${MAX_DEPLOYMENTS_PER_ORGANIZATION.toLocaleString('en-US')} deployments are supported per organization (currently ${liveCount.toLocaleString('en-US')}). Archive a deployment before creating another.`,
+        'too_many_deployments',
+      );
     }
     const id = `depl_${nanoid(18)}`;
     deps.db.prepare(`
@@ -387,6 +404,13 @@ export function deploymentRoutes(deps: ServerDeps, options: OperationMountOption
 
   return app;
 }
+
+/**
+ * The published cap: at most 1,000 scheduled deployments per organization
+ * (scheduled-deployments.md). This runtime is single-organization, so the cap
+ * is the whole non-archived table.
+ */
+export const MAX_DEPLOYMENTS_PER_ORGANIZATION = 1000;
 
 /**
  * Query parameters `GET /v1/deployments` accepts: the published filter set
