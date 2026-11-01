@@ -165,6 +165,19 @@ describe('deployment_run lifecycle events', () => {
     ).run(id, id, agentId, initialEvents);
   }
 
+  /**
+   * A deployment whose only run is a manual one: `next_run_at` is armed far in
+   * the future, so the manual trigger leaves the armed schedule pending rather
+   * than already-due — the manual run is additive by contract and must not
+   * consume a schedule that is still waiting on its own `due_at`.
+   */
+  function insertManualOnlyDeployment(id: string, agentId = 'agent_one', initialEvents = DUE_EVENTS): void {
+    db.prepare(
+      `INSERT INTO scheduled_deployments (id, name, agent_id, cron, payload, status, next_run_at, initial_events)
+       VALUES (?, ?, ?, '0 20 * * 5', '{}', 'active', '2999-01-01T00:00:00.000Z', ?)`,
+    ).run(id, id, agentId, initialEvents);
+  }
+
   async function runDue() {
     const res = await app.request('/v1/deployments/run-due', { method: 'POST', headers: CMA_HEADERS });
     return { status: res.status, body: await res.json() as any };
@@ -281,7 +294,7 @@ describe('deployment_run lifecycle events', () => {
 
   it('publishes nothing for a manual run', async () => {
     const webhookId = await subscribe(['deployment_run.started', 'deployment_run.succeeded', 'deployment_run.failed']);
-    insertDueDeployment('sched_manual');
+    insertManualOnlyDeployment('sched_manual');
 
     const res = await runNow('sched_manual');
     expect(res.status).toBe(201);
@@ -299,7 +312,7 @@ describe('deployment_run lifecycle events', () => {
 
   it('publishes nothing for a manual run that declares itself scheduled', async () => {
     const webhookId = await subscribe(['deployment_run.started', 'deployment_run.succeeded', 'deployment_run.failed']);
-    insertDueDeployment('sched_forged');
+    insertManualOnlyDeployment('sched_forged');
 
     // `trigger_type` is caller-supplied on this route, so a rule written as
     // `triggerType === 'scheduled'` would emit here. The rule is on the path

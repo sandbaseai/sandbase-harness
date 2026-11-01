@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+### Fixed
+
+- A manual `POST /v1/deployments/{id}/run` no longer consumes the deployment's
+  armed scheduled run. The run is additive — it fires outside the cadence and
+  leaves `next_run_at`, `due_at`, and `last_run_at` untouched — so a manual
+  trigger issued inside the execution-jitter window can no longer overwrite
+  `next_run_at` with `nextCronRun(startedAt)` and discard the instant the
+  scheduler was still owed. The jittered `due_at` for the instant a timed run
+  arms is now also drawn over the cadence it consumes (`nextRun −
+  scheduled_at`) instead of `nextRun − startedAt`, so the drawn delay spans the
+  published interval rather than the smaller residual the wall clock left.
+
 ### Changed
 
 - `file` resources are now refused at session admission on `self_hosted`

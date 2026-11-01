@@ -374,7 +374,13 @@ row.
   lives only in `due_at`. A row whose `due_at` was not drawn for its current
   `next_run_at` (NULL on rows written before `M062`, or stale after a raw
   `next_run_at` write) is re-armed lazily inside the same pass before the
-  due query runs.
+  due query runs. Because a run fires at `due_at` rather than at
+  `next_run_at`, a jittered start can land past the next instant's own fire
+  time; a run answers exactly one instant, so a cadence shorter than its own
+  jitter window (a minutely schedule under a 5–9 s draw) merges instants
+  rather than running twice — the published rule supplies no ordering that
+  would have it fire the same instant twice, so the later instant is the one
+  consumed and the schedule advances from the actual start.
 - `runSchedule` **preflights** the deployment's dependencies before touching a
   session: the bound agent, the environment, every vault id, every file
   resource, and the memory store are each checked, and each failure maps onto
@@ -395,13 +401,16 @@ row.
   the deployment's pinned agent version, environment, title, resources,
   `vault_ids`, memory-store context, budget and `initial_events`, and the run
   row records `scheduled_at` — the due instant the trigger matched — alongside
-  `started_at`. Success advances `last_run_at` on a timed run and recomputes
-  `next_run_at` to the next cron instant after the run, re-arming `due_at`
-  for the instant the row now names. A manual run keeps `last_run_at` —
-  the schedule field reports the most recent *scheduled* start — while
-  `next_run_at` still resolves to the next instant after the run: unchanged
-  when the schedule was already ahead of it, skipped forward when it was
-  overdue. `due_at` follows whichever value is written.
+  `started_at`. Success on a **timed** run advances `last_run_at` to the run's
+  start and searches `next_run_at` from that same start, re-arming `due_at`
+  for the instant the row now names; the jitter for that next instant is drawn
+  over the cadence the run just consumed (`nextRun − scheduled_at`), the true
+  inter-instant gap rather than `nextRun − wall-clock`. A **manual** run is
+  additive — it fires outside the cadence and leaves the schedule untouched:
+  `next_run_at`, `due_at`, and `last_run_at` all keep their timed values, so a
+  manual trigger inside the jitter window cannot swallow the armed instant the
+  pass is still owed (the earlier behaviour overwrote `next_run_at` with
+  `nextCronRun(startedAt)` and discarded it).
 
 `timezone` is a real column on `scheduled_deployments` (migration `M037`) and
 `scheduleTimeZone` reads it, falling back to `UTC` for a row written before the

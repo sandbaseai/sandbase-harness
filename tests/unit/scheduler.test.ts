@@ -147,6 +147,73 @@ describe('deployment run jitter', () => {
     expect(Date.parse(schedule.due_at)).toBeLessThanOrEqual(Date.parse(schedule.next_run_at) + DEPLOYMENT_RUN_JITTER_MAX_MS);
   });
 
+  it('advances a timed run off the answered instant, never double-firing one instant', async () => {
+    // A timed run fires at `due_at` = `next_run_at` + jitter, so its start is
+    // already inside the interval it consumed. The next `next_run_at` is
+    // searched from `max(scheduled_at, startedAt)` — the answered instant, or
+    // the actual start when the run fired long late — so the successor is
+    // always the instant after the one just answered and never the same one
+    // again. For a sub-hour cadence the jittered fire can land across a
+    // boundary; the run still answers one instant and re-arms to the next,
+    // so no instant is fired twice and none is re-armed into the past.
+    const manager = new SessionManager(db);
+    insertSchedule('sched_min', '2026-07-23T10:00:00.000Z', '2026-07-23T09:59:00.000Z');
+    // Drive the ticks one minute apart with a heavy jitter draw.
+    for (let minute = 0; minute < 8; minute++) {
+      await runDueScheduledDeployments(db, manager, {
+        now: new Date(Date.UTC(2026, 6, 23, 10, minute) + 1_000),
+        random: () => 0.99,
+      });
+    }
+    const instants = db
+      .prepare(`SELECT scheduled_at FROM scheduled_deployment_runs WHERE schedule_id = 'sched_min' ORDER BY scheduled_at`)
+      .all() as Array<{ scheduled_at: string }>;
+    // Each recorded scheduled instant is distinct — the run that answered it
+    // always advances `next_run_at` to a strictly later instant.
+    expect(new Set(instants.map((row) => row.scheduled_at)).size).toBe(instants.length);
+    // And `next_run_at` never sits behind the last fired instant.
+    const row = db.prepare('SELECT next_run_at FROM scheduled_deployments WHERE id = ?').get('sched_min') as { next_run_at: string };
+    const last = instants[instants.length - 1];
+    if (last) expect(Date.parse(row.next_run_at)).toBeGreaterThan(Date.parse(last.scheduled_at));
+  });
+
+  it('leaves the armed schedule untouched by a manual run inside the jitter window', async () => {
+    // An hourly deployment is armed to fire at 10:00 + jitter (10:04:30 with a
+    // 0.5 draw). A manual run at 10:02 fires outside the cadence: it must not
+    // consume the pending 10:00 instant, which still fires at its due_at.
+    insertSchedule('sched_man', '2026-07-23T10:00:00.000Z', '2026-07-23T09:00:00.000Z');
+    const manager = new SessionManager(db);
+    await runDueScheduledDeployments(db, manager, {
+      now: new Date('2026-07-23T10:01:00.000Z'),
+      random: () => 0.5,
+    });
+
+    const { runSchedule } = await import('@/core/operations/scheduler.js');
+    runSchedule(
+      db,
+      manager,
+      db.prepare('SELECT * FROM scheduled_deployments WHERE id = ?').get('sched_man') as never,
+      'manual',
+      new Date('2026-07-23T10:02:00.000Z'),
+      () => 0.5,
+    );
+    // The manual run left next_run_at and the armed due_at alone.
+    const afterManual = db.prepare('SELECT next_run_at, due_at FROM scheduled_deployments WHERE id = ?').get('sched_man') as { next_run_at: string; due_at: string };
+    expect(afterManual.next_run_at).toBe('2026-07-23T10:00:00.000Z');
+    expect(afterManual.due_at).toBe('2026-07-23T10:04:30.000Z');
+
+    // The pending 10:00 instant still fires at its jittered due_at.
+    const runs = await runDueScheduledDeployments(db, manager, {
+      now: new Date('2026-07-23T10:05:00.000Z'),
+      random: () => 0.5,
+    });
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ trigger_type: 'scheduled', scheduled_at: '2026-07-23T10:00:00.000Z' });
+    // And it advances to the next hourly instant, having consumed 10:00.
+    const schedule = db.prepare('SELECT next_run_at FROM scheduled_deployments WHERE id = ?').get('sched_man') as { next_run_at: string };
+    expect(schedule.next_run_at).toBe('2026-07-23T11:00:00.000Z');
+  });
+
   it('disarms due_at when the deployment is paused', async () => {
     insertSchedule('sched_p', '2026-07-23T10:00:00.000Z', '2026-07-23T09:00:00.000Z');
     const manager = new SessionManager(db);

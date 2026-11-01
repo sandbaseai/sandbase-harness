@@ -383,12 +383,32 @@ export function runSchedule(
   const runId = `drun_${nanoid(18)}`;
   const startedAt = startedAtDate.toISOString();
   const timeZone = scheduleTimeZone(schedule);
-  const nextRun = schedule.cron
-    ? nextCronRun(schedule.cron, startedAtDate, timeZone)?.toISOString() ?? null
-    : null;
+  const isScheduled = triggerType === 'scheduled';
   // The cron instant this run answered. For a timed trigger it is the due
   // `next_run_at` the pass matched on; for a manual run there is none.
-  const scheduledAt = triggerType === 'scheduled' ? (schedule.next_run_at ?? startedAt) : null;
+  const scheduledAt = isScheduled ? (schedule.next_run_at ?? startedAt) : null;
+
+  // A timed run searches the next instant from its actual start. It fires at
+  // `due_at` = `next_run_at` + jitter, so `startedAt` is always ≥ the answered
+  // `scheduled_at` — never before it — and `nextCronRun(startedAt)` is the
+  // correct successor even when the drawn delay carried the start across a
+  // boundary. That crossing is what makes a sub-hour cadence merge instants:
+  // a run can only answer one, and a fire delayed past the next instant's own
+  // `due_at` consumes it.
+  //
+  // A manual run is additive — it fires outside the cadence and leaves the
+  // armed schedule untouched. `next_run_at`, `due_at`, and `last_run_at` are
+  // the timed path's state: advancing them here would either swallow a pending
+  // instant still waiting on its `due_at` (the bug this fixes — a manual run
+  // inside the jitter window used to overwrite `next_run_at` with
+  // `nextCronRun(startedAt)`, discarding the armed instant), or mis-report the
+  // most recent scheduled start. The pass fires whatever is armed whether or
+  // not a manual run happened between.
+  const nextRun = !schedule.cron
+    ? null
+    : isScheduled
+      ? nextCronRun(schedule.cron, startedAtDate, timeZone)?.toISOString() ?? null
+      : schedule.next_run_at ?? null;
 
   if (!deploymentAgentStillExists(db, schedule.agent_id)) {
     db.prepare(
@@ -457,21 +477,26 @@ export function runSchedule(
   // run re-draws jitter for the new `next_run_at`, a paused or manual-only
   // deployment carries none so the due pass leaves it alone. `last_run_at`
   // anchors the interval this next run fires into.
-  const nextDueAt = pause || !schedule.cron || !nextRun
-    ? null
-    : new Date(
-        Date.parse(nextRun) +
-        deploymentRunJitterMs(
-          Math.max(0, Date.parse(nextRun) - Date.parse(startedAt)),
-          random,
-        ),
-      ).toISOString();
+  // The fire instant for the next `next_run_at`. A timed run arms it fresh:
+  // the jitter interval is the cadence the run just consumed (`nextRun −
+  // scheduled_at`), the true inter-instant gap rather than `nextRun −
+  // wall-clock` — that would stretch the draw when jitter delays the start.
+  // A manual run keeps the stored `due_at` because it does not move
+  // `next_run_at`; the armed instant still fires on schedule.
+  const nextDueAt = (() => {
+    if (pause || !schedule.cron || !nextRun) return null;
+    if (!isScheduled) return schedule.due_at ?? null;
+    return new Date(
+      Date.parse(nextRun) +
+      deploymentRunJitterMs(Math.max(0, Date.parse(nextRun) - Date.parse(scheduledAt!)), random),
+    ).toISOString();
+  })();
   db.prepare(
     `UPDATE scheduled_deployments
      SET last_run_at = ?, next_run_at = ?, due_at = ?, status = ?, paused_reason = ?, updated_at = ?
      WHERE id = ?`,
   ).run(
-    triggerType === 'scheduled' ? startedAt : schedule.last_run_at ?? null,
+    isScheduled ? startedAt : schedule.last_run_at ?? null,
     nextRun,
     nextDueAt,
     pause ? 'paused' : schedule.status ?? 'active',
