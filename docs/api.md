@@ -178,7 +178,9 @@ Known unsupported official SDK operations instead return HTTP 400 with
 `docs/api-matrix.md#unsupported-official-routes`, and
 `error.details.capabilities` containing the capability id and reason. These
 explicit refusals cover MCP tunnels, hosted user profiles, and
-session threads (the unimplemented multiagent surface); they do not create
+session threads (the multiagent surface, declared permanently out of scope by
+`decisions/0001` and reported `not_applicable` in the capability matrix rather
+than planned); they do not create
 resources or
 execute work. Authentication, throttling, and compatibility admission still run
 first. Only the documented official methods and paths are registered; unrelated
@@ -494,6 +496,11 @@ other does not:
 Each rejection names the offending entry. Two toolsets may bind the same declared
 server; that is a legitimate fan-out of one transport across two tool groups.
 
+`mcp_servers` is bounded to the published declaration: at most 20 servers per
+agent, each `name` 1–255 characters and unique within the agent, and a
+`url`-type server's `url` at most 2,048 characters. An over-large roster is
+refused rather than partially connected.
+
 Whether a bound server is reachable, and whether it actually exposes the tools its
 toolset configs name, is checked at connection time rather than at save time.
 
@@ -526,6 +533,19 @@ agent that declares `auto` at admission with `pi_tool_policy_not_supported`.
 
 A custom tool is declared as an independent `tools[]` entry carrying `type: "custom"`, with `name`, `description`, and `input_schema`. The legacy `custom_toolset` grouping is still accepted on write, with `parameters` accepted as an alias for `input_schema`, and is projected back as flat canonical `custom` entries, so a client reading an agent sees one shape regardless of how it was written. A tool the legacy grouping disables — a config with `enabled: false`, or every config under a `default_config` of `enabled: false` — is dropped rather than translated into a policy. A canonical entry carrying a `permission_policy` is refused with `400 invalid_request_error`: the caller executes the tool and decides whether to run it, so a policy field would claim governance the runtime does not have. A name that collides with a built-in tool, a name declared twice across both shapes, and a malformed input schema are each refused with a message naming the offending entry.
 
+The declaration grammar is the published one, enforced on both create and
+update. `name` is 1–128 characters of letters, digits, underscores, and
+hyphens — a leading letter is not required — and the reserved `mcp__` and
+`ant__` prefixes are refused by name, because those namespaces belong to
+server-emitted and Anthropic-reserved tools. `input_schema` rejects a `$ref`
+anywhere in the tree (the runtime does not resolve schema references) and a
+top-level `oneOf`/`anyOf`/`allOf` combinator (the model-facing surface admits
+a plain object schema); `properties` keys are 1–64 letters, digits,
+underscores, dots, or hyphens. The agent's `tools` array as a whole holds at
+most 256 entries — each wrapped tool is one entry and the built-in toolset is
+one more — and an over-large array is refused rather than truncated into a
+surface the model could not navigate.
+
 ### Agent model object
 
 `model` accepts either the bare model id string or the canonical object form.
@@ -539,7 +559,7 @@ A custom tool is declared as an independent `tools[]` entry carrying `type: "cus
 | `id` | non-empty string | Required. |
 | `speed` | `standard` \| `fast` \| `extended` | Optional; defaults to `standard`. On the Anthropic provider, `fast` is executed when the model supports it — the request carries `speed: "fast"` and the `fast-mode-2026-02-01` beta; `fast` on a listed model that cannot take it is refused with `unsupported_model_speed` naming the supported set, and `standard`/`extended` produce no wire field (`extended` is a local extension, not a published value). A model id the capability table does not know is accepted and sends nothing. |
 | `effort` | `low` \| `medium` \| `high` \| `xhigh` \| `max`, or `{ "type": <level> }` | Optional. Parsed, validated, stored in the agent's model profile, and returned by every read — the agent read, the version listing, and a session's frozen snapshot. On the Anthropic provider the level reaches the request as `output_config.effort`, gated per level by the model capability table (e.g. Sonnet 4.6 takes `max` but not `xhigh`; Haiku 4.5 takes no effort): a listed model refused its level fails with `unsupported_model_effort`, and an unknown vocabulary value is `invalid_model_effort`. A model the table does not know, and every non-Anthropic provider, accepts the field and sends nothing. A deployment's own `reasoning_effort` model setting is separate and operator-level. |
-| `inference_geo` | `us` \| `global` | Refused with `unsupported_model_field`. A local runtime has no inference-geography control, so honouring the pin is not possible. |
+| `inference_geo` | `us` \| `global` | A value outside the pair is refused with `invalid_inference_geo` naming the accepted set; a recognized value is still refused, with `unsupported_model_field`, because a local runtime has no inference-geography control and honouring the pin is not possible. |
 
 An unrecognized key is also refused with `unsupported_model_field`, and the error
 lists every known field so the request can be corrected. A malformed `speed`
@@ -693,6 +713,15 @@ honest null. A `page` this route did not issue — malformed, issued for another
 another ordering, or naming an event not in the log — is a `400` rather than a silent
 restart from the first event.
 
+The published repeatable `types[]` parameter — and the bare `types` spelling —
+filters the page to the event types named: `?types[]=agent.message&types[]=user.message`.
+Every value must be an event type this runtime emits, so an unknown value is a
+`400` naming it rather than a filter that silently matches nothing. The filter
+applies to the events after the cursor position, not to which positions are
+legal, and the normalized set is bound into the `next_page` cursor the same way
+`statuses` is on the session list — a cursor replayed under a different `types`
+set is refused rather than resumed mid-set.
+
 Create a session:
 
 ```bash
@@ -707,6 +736,15 @@ curl -X POST http://127.0.0.1:3000/v1/sessions \
     "metadata": { "source": "docs" }
   }'
 ```
+
+The whole create body is bounded at 32 MB: `Content-Length` is the cheap check,
+and when the header is absent or unreliable the parsed body's own serialized
+size is the backstop, so a chunked or header-less request over the bound is
+refused either way — `413` with code `request_too_large`, before any session
+row, event, or sandbox exists. `title` is an optional string exactly as on
+update; a non-string, non-`null` value is a `400` (`title must be a string or
+null`) rather than a coerced one, because a persisted number or object would
+surface back as a title the caller never set.
 
 `loop_engine` is optional and selects the execution engine for this session only.
 Omit it to use the effective Settings default. The selected engine is persisted
@@ -777,6 +815,11 @@ unknown type, or an empty name or sha is a `400` rather than a value carried
 forward. Omitting `checkout` clones the repository's own default branch, which is
 also what the agent is told it is mounted at. Only a `commit` checkout is cached
 between sessions; a branch and a default-branch clone are re-resolved every time.
+
+The published bound is 500 `file` resources per session, counted on that type
+alone — a `memory_store` or a `github_repository` does not draw it down — and
+a `resources` list that pushes past it is refused rather than attached in
+part.
 
 A `memory_store` resource defaults to `/mnt/memory/<slugged-store-name>` when `mount_path` is omitted. Mounted paths are whole-segment paths; traversal and duplicate mount paths are rejected, and a session may attach at most eight stores. The `read`, `write`, `edit`, `glob`, and `grep` tools address mounted content through `memory_records`; read-only mounts reject writes, and shell access is refused while any memory mount is attached because arbitrary shell changes cannot be persisted safely. Updates to existing mounted files require a `precondition_sha256` value so stale content cannot overwrite a newer version.
 
@@ -930,10 +973,27 @@ curl -X POST http://127.0.0.1:3000/v1/sessions/SESSION_ID/events \
   -d '{"events": [{"type": "system.message", "content": [{"type": "text", "text": "Answer in Japanese."}]}]}'
 ```
 
-`content` must be a non-empty array of at most 1000 valid blocks. An empty array,
-a bare string, a block whose text is empty or whitespace-only, and a batch over
-the ceiling each return `400 invalid_request_error`. A size violation is reported as a
-size violation, naming the ceiling, rather than as a generic shape error.
+`content` is text-only: a non-empty array of 1–1000 items, every block
+`{type: "text", text}` with non-whitespace text. An empty array, a bare string,
+an image, document, `tool_use`, or `tool_result` block, a block whose text is
+empty or whitespace-only, and a batch over the ceiling each return `400
+invalid_request_error` — the contract's `content` accepts text items only, so a
+non-text block is refused rather than validated against the wider user-message
+vocabulary and persisted as privileged context it was never meant to carry. A
+size violation is reported as a size violation, naming the ceiling, rather than
+as a generic shape error.
+
+Two further gates need the session, so they run after the row resolves. The
+session's model must support mid-conversation system injection — a model the
+capability table cannot prove supports it is refused `400` with code
+`model_does_not_support_mid_conversation_system`, matching an unknown or
+non-Claude id the same way a known unsupported one is refused. And while the
+session is `idle` on a pending tool call (`requires_action`), a
+`system.message` may not arrive on its own or beside a `user.message`: it must
+trail a tool-answer event in the same batch, so the first
+`user.tool_confirmation` or `user.custom_tool_result` settles the pending call
+before the system context lands. A batch that violates the ordering is refused
+`400` naming the rule.
 
 `system.message` is privileged system-level context, not a user turn. It applies to
 the accompanying turn and every later turn, in contrast to the agent's `system`
@@ -1409,7 +1469,14 @@ it can never evaluate.
 
 Validation runs before any session row, event, or sandbox exists, and creation
 and the events commit together, so a rejected batch leaves no session and no
-partial history behind:
+partial history behind. The published bounds beyond the per-event grammar are
+the 50-event cap above, at most **one** `user.define_outcome` per session — a
+second would race the first for the session's `outcome_id` join — and at most
+**100** file-sourced `document` content blocks (`{type:"document",
+source:{type:"file"}}`) counted across every `user.message` in the list, not
+per event; a base64-sourced document does not count. The create body itself is
+bounded at 32 MB — see session creation above; an over-large request answers
+`413` with `request_too_large` rather than reaching this table.
 
 | Rejection | Error code |
 | --- | --- |
@@ -1417,6 +1484,8 @@ partial history behind:
 | More than 50 events | `too_many_initial_events` |
 | An element is not an object | `invalid_initial_events` |
 | An element's `type` is neither `user.message` nor `user.define_outcome` | `invalid_initial_event_type` |
+| A second `user.define_outcome` in the list | `invalid_initial_events` |
+| More than 100 file-sourced `document` blocks across the list | `invalid_initial_events` |
 | A message `content` is neither a string nor an array of content blocks | `invalid_initial_events` |
 | A message `content` contains a `redacted` block (top-level or inside `tool_result` content) | `invalid_initial_events` |
 | An outcome lacks a `description`, has a malformed `rubric`, or sets `max_iterations` outside 1..20 | `invalid_initial_events` |
@@ -1836,6 +1905,12 @@ returns `{id, type: "skill_version_deleted"}`. Built-in `anthropic` skills
 answer version listings and retrievals read-only; writes and content
 downloads are refused.
 
+The published bound is 500 skills per session, counted as the deduplicated set
+across every agent in it. This runtime runs one agent per session, so the
+agent's own `skills` array is the whole set and the bound lands on the agent
+definition: a `skills` array past 500 entries is refused at create or update
+rather than attached in part.
+
 List query parameters:
 
 | Parameter | Purpose |
@@ -2004,15 +2079,40 @@ which:
 `networking_enforced` is `true` only for `enforced`; treat `best_effort` as
 advisory, not as a boundary.
 
-The allowlist is the declared `allowed_hosts` (`host`, `*.suffix`, optional
-`:port`), widened by a curated set of public package-registry endpoints when
-`allow_package_managers` is set. Beyond subprocess egress, the runtime applies
-the policy in-process at two boundaries regardless of provider: a `url` MCP
-server whose host is not covered is refused at connect (unless
-`allow_mcp_servers` is set), and `web_fetch` checks the target — and every
-redirect hop — against the allowlist on top of its existing domain policy and
-SSRF guards. A credential vault's own `allowed_hosts` policy is a different
-thing and *is* enforced when the credential is injected.
+`allowed_hosts` entries follow the published write-time grammar — a bare
+hostname or a `*.domain` wildcard, with no scheme, port, path, credentials, or
+whitespace — and an environment create or update carrying an entry outside it
+is refused `400` with `invalid_environment_config`, naming the index
+(`config.network.allowed_hosts.2: do not include a port; ...`). The matcher a
+stored policy feeds still resolves `host:port` patterns — an entry written
+before the grammar was enforced keeps its meaning — and a credential vault's
+own `allowed_hosts` list accepts that wider shape, so do not read the
+environment grammar back onto the credential one.
+
+The effective allowlist is the declared `allowed_hosts`, widened by a curated
+set of public package-registry endpoints when `allow_package_managers` is set.
+Beyond subprocess egress, the runtime applies the policy in-process regardless
+of provider. A `url` MCP server whose host is not covered is refused at connect
+(unless `allow_mcp_servers` is set) — and earlier, at session create and at the
+session update that swaps in such a server, which answer `400` with
+`mcp_server_outside_allowed_hosts` before the row changes rather than letting
+the session be admitted only to fail its first connect; a stdio server names
+no endpoint, so there is no host to check. `web_fetch` checks the target — and
+every redirect hop — against the allowlist on top of its existing domain
+policy and SSRF guards. A credential vault's own `allowed_hosts` policy is a
+different thing and *is* enforced when the credential is injected.
+
+The same admission extends to the web tools' own lists: under a `limited`
+policy, a session create or update enabling `web_fetch` or `web_search` whose
+`allowed_domains` carries an entry the Environment's `allowed_hosts` does not
+cover is refused `400` with `web_domain_outside_allowed_hosts` — the two lists
+match differently, since a tool entry covers its subdomains but an
+`allowed_hosts` entry is one exact host unless it starts with `*.`, so
+`docs.example.com` is within `["docs.example.com"]` and `["*.example.com"]`
+but not `["example.com"]`. `blocked_domains` is not checked: blocking a host
+outside the allowlist is a no-op, never a permission the policy did not grant.
+`unrestricted`, an absent policy, and self-hosted environments do not limit
+the web tools, so only `limited` produces the refusal.
 
 Resolution failures surface at `POST /v1/sessions`, before any session row is
 written, and at `POST /v1/sessions/{id}/events`, before any event is appended,
@@ -2372,6 +2472,12 @@ so the two cannot drift apart — and the local spelling is neither deprecated n
 redirected. The published prefix requires the same `anthropic-beta` as the local
 one.
 
+A recorded divergence on the object shape: the published vault object carries
+`"type": "vault"`, but this runtime answers `"type": "credential_vault"` — the
+internal resource kind the Console and stored references already branch on, so
+renaming it would break every existing reader. The `vlt_` id, `display_name`,
+`metadata`, and timestamp fields are unchanged from the published shape.
+
 Listing vaults excludes archived ones by default and takes the published
 `include_archived` parameter: `?include_archived=true` returns archived vaults
 too, each with `status: "archived"` and a non-null `archived_at`, while
@@ -2413,6 +2519,9 @@ being advertised.
 | `POST` | `/v1/vaults/{vault_id}/credentials/{credential_id}/archive`, `/v1/credential-vaults/{vault_id}/credentials/{credential_id}/archive` | Archive a credential. |
 | `POST` | `/v1/vaults/{vault_id}/credentials/{credential_id}/mcp_oauth_validate`, `/v1/credential-vaults/{vault_id}/credentials/{credential_id}/mcp_oauth_validate` | Live-probe an MCP credential: the `initialize` handshake runs against the declared `mcp_server_url` with the stored token, a 401 triggers the recorded refresh exchange once and a re-probe, and the answer is a `vault_credential_validation` (`valid` / `invalid` / `unknown` with `mcp_probe` and `refresh` diagnostics). |
 | `DELETE` | `/v1/vaults/{vault_id}/credentials/{credential_id}`, `/v1/credential-vaults/{vault_id}/credentials/{credential_id}` | Physically delete a credential; returns `{id, type: "vault_credential_deleted"}`. The audit trail survives at vault scope. |
+
+A vault holds at most 20 active credentials — archived rows do not draw the
+bound down — and a create past it is refused `400` rather than stored.
 
 Credential `auth_type` values:
 
@@ -2516,6 +2625,16 @@ A stdio MCP server is a caller of the no-host form: the session's `unrestricted`
 environment variables are passed to its process and an MCP tool's return value is
 scrubbed, while a `limited` credential is denied for it the same way it is denied
 for a shell command.
+
+The placeholder model needs an egress boundary that substitutes the value on the
+wire. On a backend that owns one — `local`, `docker` — a turn's
+`environment_variable` credentials enter the sandbox and every stdio MCP server
+as opaque `__cred_<id>__` tokens and the session's egress proxy materializes the
+real value on the outbound request. A backend with no egress boundary
+(`kubernetes`, `self_hosted`) has nothing that can substitute, so the same
+credential is refused there as `credential_backend_unsupported` — before
+decryption, recorded as `runtime_denied` audit metadata — rather than
+materialized as plaintext the process could read.
 
 ### Memory limits, scope, and preconditions
 
@@ -2912,6 +3031,19 @@ the next three instants while the deployment is active. A deployment with no
 cadence reports `schedule: null` rather than inventing a cron. An update that
 changes the cadence re-arms `next_run_at` in the resolved zone unless the update
 supplies its own.
+
+`upcoming_runs_at` reflects the exact schedule configured — the published rule —
+while actual execution applies jitter to distribute load: each scheduled instant
+is armed with a persisted `due_at` drawn uniformly from `[0, 15% of the interval
+between runs]`, clamped to a minimum of 5 seconds and a maximum of 9 minutes.
+The interval is the gap the run fires into — `next_run_at − last_run_at`, or
+`next_run_at − now` when no previous instant exists — so a minutely schedule
+waits its 5 s floor and an hourly one never waits more than 9 min. Because the
+draw is stored rather than recomputed, a 60-second due pass still matches it,
+the run reports `trigger_context.scheduled_at` as the cron instant it answered
+rather than the wall-clock moment execution began, and a manual trigger inside
+the jitter window leaves the armed `due_at` — and the instant it belongs to —
+untouched rather than consuming the schedule early.
 
 Creating a deployment requires `name`, an agent reference (`agent` as the
 published object or the local `agent_id` alias), `environment_id`, and a
