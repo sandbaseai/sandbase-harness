@@ -24,12 +24,19 @@ Layout:
 Re-crawling:
 
 ```sh
-# Each page is served as markdown at its docs URL plus ".md":
-curl -sSLO "https://platform.claude.com/docs/en/managed-agents/<page>.md"
+# Byte-diff every snapshot page against its live ".md" URL; exits non-zero on drift.
+npm run docs:crawl
+# Refresh each changed page in place (a page that went 404 stays manual — a 404
+# can be a rename rather than a removal).
+npm run docs:crawl -- --write
 ```
 
-The full page list is the file set in this directory; remove stale pages when
-the upstream tree changes rather than adding alongside them.
+Each page is served as markdown at its docs URL plus ".md"
+(`https://platform.claude.com/docs/en/managed-agents/<page>.md`), and the full
+page list is the file set in this directory — the crawl diffs what is pinned,
+so a page added upstream but never snapshotted is the one change it cannot
+see. Remove stale pages when the upstream tree changes rather than adding
+alongside them.
 
 Licensing note: these files are Anthropic's published documentation kept for
 local contract review. Do not copy their prose into SandBase docs — cite the
