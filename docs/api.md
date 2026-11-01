@@ -3052,6 +3052,11 @@ plus the deployment-only `system.message` type, which seeds context without
 opening a turn. Each run hands the list to session creation, so a deployment
 fires the session template it was given rather than an empty prompt.
 
+The create is also bounded by the published per-organization cap of 1,000 live
+deployments: a create at the cap is refused `400` `invalid_request_error` with
+code `too_many_deployments`, and the count is of non-archived rows, so
+archiving or deleting a deployment frees a slot.
+
 An update answers on `POST /v1/deployments/{id}` (the published verb) and
 `PUT /v1/deployments/{id}`, which share one handler and one response.
 
