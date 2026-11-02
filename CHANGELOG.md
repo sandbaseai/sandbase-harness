@@ -23,6 +23,12 @@
 
 ### Changed
 
+- MiniMax defaults and setup suggestions now use `MiniMax-M3.1-Flash`, with
+  `MiniMax-M3` as the other current catalog choice. Explicit saved, legacy, and
+  custom model IDs remain unchanged, including legacy workspace imports. Flash
+  accepts the workspace reasoning-effort option (`low` through `max`); older
+  MiniMax models retain their existing request behavior.
+
 - `file` resources are now refused at session admission on `self_hosted`
   environments, matching the published contract ("自托管沙箱仅支持
   `memory_store` 资源；包含 `file` 或 `github_repository` 资源的会话会被

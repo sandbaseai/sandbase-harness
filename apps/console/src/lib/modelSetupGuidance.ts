@@ -55,7 +55,7 @@ export function setupModelProvider(settings: RuntimeSettings | null): SetupModel
  * The model id a vendor is usually addressed with.
  *
  * Kept to the ids this project already names elsewhere — `init` writes `gpt-4o`,
- * the docs use `claude-sonnet-4` and `MiniMax-M3`, and the official-SDK example
+ * the docs use `claude-sonnet-4` and `MiniMax-M3.1-Flash`, and the official-SDK example
  * documents DeepSeek as `deepseek-chat` — because a Console that invents an id
  * sends the user to a 404 that reads like their mistake. An arbitrary
  * OpenAI-compatible endpoint gets no suggestion at all: only that endpoint knows
@@ -68,7 +68,7 @@ export function suggestedModelId(vendor: string, baseUrl?: string): string | und
     case 'anthropic':
       return 'claude-sonnet-4';
     case 'minimax':
-      return 'MiniMax-M3';
+      return 'MiniMax-M3.1-Flash';
     case 'openai_compatible':
       return /(^|\.)deepseek\.com$/i.test(hostOf(baseUrl)) ? 'deepseek-chat' : undefined;
     default:

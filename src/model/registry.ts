@@ -10,7 +10,7 @@ import { createOpenAI } from '@ai-sdk/openai';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { wrapLanguageModel, type LanguageModel, type LanguageModelMiddleware } from 'ai';
 import { EnvVarNotFoundError, referencedEnvVars, resolveEnvVars } from '@/core/config/env-resolver.js';
-import { MINIMAX_PROVIDER, miniMaxOpenAiBaseUrl } from '@/core/model/minimax.js';
+import { MINIMAX_DEFAULT_MODEL, MINIMAX_FLASH_EFFORTS, MINIMAX_PROVIDER, miniMaxOpenAiBaseUrl } from '@/core/model/minimax.js';
 import {
   ModelConfigInvalidError,
   ModelCredentialUnresolvedError,
@@ -184,8 +184,14 @@ export class ModelRegistry {
       options?.headers,
     );
     const middleware: LanguageModelMiddleware[] = [createRetryMiddleware(this.retryPolicy, options?.retryObserver)];
-    // Only the OpenAI-compatible branches ever took a reasoning effort.
-    if (config.reasoning_effort && config.provider !== 'anthropic' && config.provider !== MINIMAX_PROVIDER) {
+    const miniMaxFlash = provider === MINIMAX_PROVIDER && config.model === MINIMAX_DEFAULT_MODEL;
+    if (miniMaxFlash && config.reasoning_effort
+      && !(MINIMAX_FLASH_EFFORTS as readonly string[]).includes(config.reasoning_effort)) {
+      throw new ModelConfigInvalidError(config.name, Array.from(this.models.keys()),
+        `MiniMax-M3.1-Flash reasoning effort must be one of: ${MINIMAX_FLASH_EFFORTS.join(', ')}.`);
+    }
+    // Flash accepts effort; older MiniMax models keep their existing defaults.
+    if (config.reasoning_effort && provider !== 'anthropic' && (provider !== MINIMAX_PROVIDER || miniMaxFlash)) {
       middleware.push(createReasoningEffortMiddleware(config.reasoning_effort));
     }
     const wrapped = wrapLanguageModel({ model: base, middleware });

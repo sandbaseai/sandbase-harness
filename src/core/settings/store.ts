@@ -283,11 +283,11 @@ function parseRuntimeSettings(value: string): RuntimeSettings | undefined {
 
 function legacySettingsSeed(db: Database, seed: RuntimeSettingsSeed): RuntimeSettings {
   const model = db.prepare(`
-    SELECT provider, base_url, api_key
+    SELECT provider, model, base_url, api_key
     FROM models
     ORDER BY is_default DESC, created_at ASC
     LIMIT 1
-  `).get() as { provider: string; base_url: string | null; api_key: string | null } | undefined;
+  `).get() as { provider: string; model: string; base_url: string | null; api_key: string | null } | undefined;
   const environment = db.prepare(`
     SELECT config FROM environments
     WHERE archived_at IS NULL
@@ -313,7 +313,7 @@ function legacySettingsSeed(db: Database, seed: RuntimeSettingsSeed): RuntimeSet
       vendor,
       ...(baseUrl ? { base_url: baseUrl } : {}),
       ...(model?.api_key ? { api_key: model.api_key } : {}),
-      options: {},
+      options: vendor === MINIMAX_PROVIDER && model?.model ? { model: model.model } : {},
     },
     loop_engine: {
       provider: 'builtin',

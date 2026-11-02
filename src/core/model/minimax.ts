@@ -1,20 +1,23 @@
 export const MINIMAX_PROVIDER = 'minimax' as const;
-export const MINIMAX_DEFAULT_MODEL = 'MiniMax-M3';
+export const MINIMAX_DEFAULT_MODEL = 'MiniMax-M3.1-Flash';
+export const MINIMAX_FLASH_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 
 export const MINIMAX_MODELS = [
   {
-    model_id: 'MiniMax-M3',
+    model_id: 'MiniMax-M3.1-Flash',
     context_window: 1_000_000,
-    pricing_usd_per_million_tokens: { input: 0.6, output: 2.4, cache_read: 0.12, cache_write: null },
+    max_output_tokens: 524_288,
+    pricing_usd_per_million_tokens: { input: 0.15, output: 0.6, cache_read: 0.015, cache_write: null },
     input_modalities: ['text', 'image', 'video'],
-    thinking: ['adaptive', 'disabled'],
+    thinking: ['adaptive'],
   },
   {
-    model_id: 'MiniMax-M2.7',
-    context_window: 204_800,
-    pricing_usd_per_million_tokens: { input: 0.3, output: 1.2, cache_read: 0.06, cache_write: 0.375 },
-    input_modalities: ['text'],
-    thinking: ['always_on'],
+    model_id: 'MiniMax-M3',
+    context_window: 1_000_000,
+    pricing_usd_per_million_tokens: { input: 0.3, output: 1.2, cache_read: 0.06, cache_write: null },
+    pricing_above_512k_usd_per_million_tokens: { input: 0.6, output: 2.4, cache_read: 0.12, cache_write: null },
+    input_modalities: ['text', 'image', 'video'],
+    thinking: ['adaptive', 'disabled'],
   },
 ] as const;
 
@@ -33,10 +36,9 @@ export const MINIMAX_ENDPOINTS = {
 
 export type MiniMaxRegion = keyof typeof MINIMAX_ENDPOINTS;
 
-const MINIMAX_MODEL_IDS = new Set<string>(MINIMAX_MODELS.map((model) => model.model_id));
-
 export function miniMaxModelId(value: unknown): string {
-  return typeof value === 'string' && MINIMAX_MODEL_IDS.has(value)
+  // The catalog suggests current models; explicit saved IDs remain authoritative.
+  return typeof value === 'string' && value.trim()
     ? value
     : MINIMAX_DEFAULT_MODEL;
 }

@@ -253,7 +253,7 @@ describe('model setup derivations', () => {
   it('suggests only ids this project already names, and none for an unknown gateway', () => {
     expect(suggestedModelId('openai')).toBe('gpt-4o');
     expect(suggestedModelId('anthropic')).toBe('claude-sonnet-4');
-    expect(suggestedModelId('minimax')).toBe('MiniMax-M3');
+    expect(suggestedModelId('minimax')).toBe('MiniMax-M3.1-Flash');
     expect(suggestedModelId('openai_compatible', 'https://api.deepseek.com/v1')).toBe('deepseek-chat');
     expect(suggestedModelId('openai_compatible', 'https://gateway.example.test/v1')).toBeUndefined();
     expect(suggestedModelId('openai_compatible', 'not a url')).toBeUndefined();
