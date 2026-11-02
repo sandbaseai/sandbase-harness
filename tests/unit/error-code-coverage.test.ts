@@ -71,7 +71,6 @@ describe('error-code test coverage', () => {
     // The uncovered codes are a recorded gap, not a passing grade: this asserts the fixture states them so
     // the number is visible in review, and fails if a code silently acquires or loses its only assertion.
     const uncovered = Object.entries(pinned).filter(([, files]) => files.length === 0).map(([code]) => code);
-    expect(uncovered.sort()).toEqual([
-    ]);
+    expect(uncovered.sort()).toEqual([]);
   });
 });

@@ -14,6 +14,7 @@
 export {
   ManagedAgentsClient,
   ManagedAgentsApiError,
+  type ModelConnectionTestResult,
   RuntimeSettingsValidationError,
   type ClientOptions,
   type AgentSummary,

@@ -3259,6 +3259,7 @@ Extension endpoints expose local runtime operations.
 | `GET` | `/v1/x/settings` | Read the versioned Settings V2 runtime document. |
 | `POST` | `/v1/x/settings/validate` | Validate a complete Settings V2 document without saving. |
 | `POST` | `/v1/x/settings/test` | Test one settings area without saving. |
+| `POST` | `/v1/x/settings/test-model` | Explicit live model request against a saved settings revision. |
 | `PUT` | `/v1/x/settings` | Save a validated Settings V2 document. |
 | `GET` | `/v1/x/templates` | Built-in agent templates. |
 | `POST` | `/v1/x/reload` | Reload file-backed agents. |
@@ -3585,13 +3586,83 @@ curl -X POST http://127.0.0.1:3000/v1/x/settings/test \
 }'
 ```
 
-Model tests apply the same credential validation used by validate and save.
+The `model` area checks configuration and credential availability only; it does
+not contact the provider. It applies the same credential validation used by
+validate and save.
 Other area tests are scoped to their adapter so local storage, memory, and
 sandbox diagnostics can run before a model API key has been configured.
 Those scoped checks still validate credentials that belong to the tested area.
 Docker sandbox checks currently skip live daemon/image validation. Remote
 sandbox checks require the worker API URL and key, then call
 `/v1/x/health` on that remote worker API.
+
+Explicitly test a model connection after saving the provider:
+
+```bash
+curl -X POST http://127.0.0.1:3000/v1/x/settings/test-model \
+  -H "Content-Type: application/json" \
+  -d '{"model":"claude-sonnet-4","revision":2}'
+```
+
+Use the `revision` from `GET /v1/x/settings` and a model served by the saved
+provider. Configured runtime API authentication applies to this route as usual.
+The body accepts only `model` (a trimmed, nonempty reference up to 256 characters)
+and `revision` (a positive integer). Unknown fields and malformed bodies return
+400 `invalid_request_error`. A stale revision returns 409 `revision_conflict`
+before any provider request. Clients must refresh and explicitly retry. Each
+caller is limited to five live model tests per minute; exceeding this returns
+429 `rate_limit_error` / `inbound_rate_limited` without contacting the provider.
+
+The probe uses `saved_config`, including encrypted or environment-based credentials,
+even while `effective_config` is older. Provider-prefix and gateway model resolution
+follow the normal model registry. It sends `Reply with OK.` through the configured
+SDK adapter with a 32-token output limit, a 20-second deadline and no retries or
+tools. It may incur provider charges. It does not save the model reference,
+activate settings, or create a session, event or session usage record. Cancellation
+of the incoming request also cancels the provider request when the HTTP transport
+exposes that signal. Provider-side billing after cancellation is provider-defined.
+
+A completed diagnostic returns HTTP 200, including provider/configuration failures.
+On an uninitialized workspace a syntactically valid request returns
+`configuration_invalid` with revision `0` without creating a settings row:
+
+```json
+{
+  "ok": true,
+  "outcome": "ok",
+  "model": "anthropic/claude-sonnet-4",
+  "resolved_model": "claude-sonnet-4",
+  "provider": "anthropic",
+  "config_source": "saved",
+  "revision": 2,
+  "elapsed_ms": 420
+}
+```
+
+`resolved_model` is present after successful model-reference resolution. An
+upstream HTTP response may add `http_status`. No key, endpoint URL, upstream
+body, response text, or raw error message is returned or logged by the probe.
+
+| Outcome | Meaning |
+| --- | --- |
+| `ok` | The provider returned nonempty text or reasoning output. |
+| `configuration_invalid` | The saved model configuration, reference, or credentials could not be resolved. |
+| `authentication_failed` | The provider returned 401 or 403. |
+| `model_not_found` | The provider explicitly returned a `model_not_found` error code/type. |
+| `not_found` | HTTP 404 without an explicit model code; check both model access and the base URL. Anthropic `not_found_error` falls here. |
+| `timeout` | The 20-second deadline expired, or the provider returned 408/504. |
+| `cancelled` | The incoming request was cancelled. |
+| `rate_limited` | The provider returned 429. |
+| `network_error` | The provider request failed without an HTTP response. |
+| `invalid_response` | The provider returned malformed data or no usable output. |
+| `provider_error` | Another provider HTTP failure. |
+
+Reasoning-only output counts as a successful connection because the small output
+budget can be consumed before a reasoning model emits its final answer. A successful
+probe checks model connectivity only; it does not validate streaming, agent-specific
+effort/speed settings, tool execution, loop-engine behavior, or complete CMA sessions.
+The Console exposes this action beside each agent's model input, identifies the
+tested provider/model/revision, and clears results when that input or revision changes.
 
 Save the complete document with optimistic concurrency:
 
