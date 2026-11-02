@@ -569,13 +569,24 @@ capability table marks as adaptive-thinking also receives
 `thinking: {type: "adaptive", display: "omitted"}` automatically — there is no
 caller-facing thinking field because the published model object defines none.
 
-A read returns the stored profile as `model_config` — `id`, `speed`, and
-`effort` when one was set. It is omitted for the ordinary case (the local
-`standard` speed and no `effort`), so an agent that never sent either looks the
-same as before; a definition that carries `effort` reports it on the agent read,
-on the version listing, and inside a session's `agent` snapshot. When `model` is
-sent as the object form it is authoritative: the profile is derived from that
-object, and a `model_config` sent beside it is ignored rather than merged.
+Every agent response returns `model` as an object: `{"id": "claude-opus-5-5",
+"speed": "standard", "effort": {"type": "high"}}`. `id` and `speed` are always
+present; `effort` appears only when stored explicitly. This applies to CRUD,
+version reads, session snapshots, and `session.updated` events. Stored definitions
+and event history retain their internal string model and are projected on read.
+
+**Migration:** clients that read `agent.model` as a string must use
+`agent.model.id`. Console and the local TypeScript SDK consume the object; the
+Console also accepts strings from older servers. `model_config` remains a local
+compatibility extension, omitted for standard speed without explicit effort.
+Input still accepts a string or an object, including object-form effort, and
+an object `model` is authoritative over a sibling `model_config`.
+
+The official service resolves per-model effort defaults at save time. Harness
+still leaves omitted effort to deployment/provider configuration and does not
+invent a default in responses. Default resolution remains a tracked parity gap.
+`extended` speed remains a local extension, and returned options on providers
+that do not execute them are configuration echoes rather than execution claims.
 
 ## Sessions
 

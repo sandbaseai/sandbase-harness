@@ -77,7 +77,7 @@ describe('doc cURL examples replayed verbatim', () => {
     expect(created.body).toMatchObject({
       type: 'agent',
       name: 'Coding Assistant',
-      model: 'claude-opus-5-5',
+      model: { id: 'claude-opus-5-5', speed: 'standard' },
       system: 'You are a helpful coding agent.',
     });
     expect(created.body.id).toMatch(/^agent_/);

@@ -59,3 +59,5 @@ export type {
   SandboxInstance,
   SandboxProvider,
 } from '../types/sandbox.js';
+
+export type { AgentModelResponse } from '../types/agent-model.js';

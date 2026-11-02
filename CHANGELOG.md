@@ -14,6 +14,14 @@
 
 ### Fixed
 
+- Agent responses now return `model` as `{id, speed, effort?: {type}}` across
+  CRUD, versions, session snapshots and update events. **Breaking wire change:**
+  string readers must use `agent.model.id`; Console, CLI and the local SDK are
+  migrated. Object-form effort can be saved back without rejection, and SDK
+  partial updates preserve omitted fields without reposting a read projection.
+  `model_config` remains a compatibility extension. Omitted effort still follows
+  runtime/provider defaults; official save-time default resolution remains open.
+
 - Vault objects at `/v1/vaults` now return the published `type: "vault"` on
   create, retrieve, list, update, and archive. `/v1/credential-vaults` retains
   `type: "credential_vault"` for local clients; both prefixes share records and
