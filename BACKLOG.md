@@ -31,7 +31,6 @@ clients through an explicit migration when changing a published response.
 | Track | Current evidence | Completion criteria |
 | --- | --- | --- |
 | Agent model defaults | [`agents.md §4`](contracts/anthropic-cma/agents.md#4-differences): `model` now returns an object; omitted effort still follows runtime/provider configuration rather than an official per-model default saved on the definition. | Source-backed per-model effort defaults resolve at save time and execute consistently; migrations, updates, session overrides and historical snapshots preserve their documented semantics. |
-| Event stream interoperability | [`streaming.md §4`](contracts/anthropic-cma/streaming.md#4-differences): SSE resume uses a numeric sequence, while stored event ids are opaque. | Verify the official reconnect workflow against the pinned docs and SDK, then close any demonstrated cursor mismatch without gaps, duplicates, or changing stored event identity. |
 | Self-hosted tool answers | [`reference.md`](contracts/anthropic-cma/official-docs/reference.md) defines `user.tool_result` for self-hosted `agent_toolset` calls; [`cma-protocol.ts`](src/types/cma-protocol.ts) does not admit it. | A session-scoped worker can settle its outstanding built-in call and resume the turn; wrong-session, duplicate, malformed, and unissued answers fail without executing twice. |
 | Work item lifecycle | [`work.md §4`](contracts/anthropic-cma/work.md#4-differences): the backing queue is tool-call-scoped; per-item TTL and forced stop differ from the published session claim. | An official worker serves a session from one claim, with the published heartbeat, TTL, stop, and recovery semantics. Lost accepted work is never replayed blindly. |
 | Thread foundation and subagents | [`threads.md`](contracts/anthropic-cma/threads.md): no durable threads, isolated event histories, aggregate status, or thread-targeted interrupts exist. Both related capabilities are `unavailable`. | Primary and child threads have durable identity, isolated context, shared resources and budget, published status/message events, limits, archive and interrupt behavior, and restart/replay coverage. Only implemented `multiagent` members may be admitted. |
@@ -70,6 +69,12 @@ mount support is a separate local-backend gap below.
 
 These are implemented on main, not promises about the older `v0.3.8` release:
 
+- The official stream-first reconnect workflow is now verified with SDK
+  `0.131.0` over real local HTTP: full-history pagination, overlap deduplication
+  by payload ID, ordered live events, and writes recovered after disconnection.
+  The numeric SSE cursor is a local extension, not a demonstrated incompatibility
+  with this workflow. This provider-free check uses `session.updated` events
+  ([`streaming.md`](contracts/anthropic-cma/streaming.md#3-alignment)).
 - Published vault responses now use `type: "vault"` across create/read/list/update/archive,
   while the local prefix preserves `credential_vault` over the same records
   ([`credentials.md`](contracts/anthropic-cma/credentials.md#4-differences)).
