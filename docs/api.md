@@ -2472,11 +2472,14 @@ so the two cannot drift apart — and the local spelling is neither deprecated n
 redirected. The published prefix requires the same `anthropic-beta` as the local
 one.
 
-A recorded divergence on the object shape: the published vault object carries
-`"type": "vault"`, but this runtime answers `"type": "credential_vault"` — the
-internal resource kind the Console and stored references already branch on, so
-renaming it would break every existing reader. The `vlt_` id, `display_name`,
-`metadata`, and timestamp fields are unchanged from the published shape.
+Vault objects returned by `/v1/vaults` carry the published `"type": "vault"`
+on create, retrieve, list (including archived entries), update, and archive.
+The local `/v1/credential-vaults` prefix retains `"type": "credential_vault"`
+for existing Console and local clients. Both address the same stored rows;
+no data migration is required, and the remaining fields are shared. Clients
+using the published prefix must use the official `vault` discriminator; callers
+that require the legacy discriminator can use the local prefix. Credential
+subresource types and the `vault_deleted` deletion response are unchanged.
 
 Listing vaults excludes archived ones by default and takes the published
 `include_archived` parameter: `?include_archived=true` returns archived vaults

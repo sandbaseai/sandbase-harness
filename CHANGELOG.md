@@ -14,6 +14,13 @@
 
 ### Fixed
 
+- Vault objects at `/v1/vaults` now return the published `type: "vault"` on
+  create, retrieve, list, update, and archive. `/v1/credential-vaults` retains
+  `type: "credential_vault"` for local clients; both prefixes share records and
+  credential handling without a database migration. Clients using the published
+  prefix must accept `vault`, or use the local prefix for the legacy value.
+  Credential subresource types and `vault_deleted` are unchanged.
+
 - `POST /v1/deployments` now enforces the published per-organization cap of
   1,000 live deployments (`official-docs/scheduled-deployments.md`). A create
   at the cap is refused with 400 `invalid_request_error` /
