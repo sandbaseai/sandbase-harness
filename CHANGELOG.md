@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Compatibility scope
+
+- Official multiagent behavior returns to the CMA target under decision 0002.
+  `/v1/x/capabilities` now reports `multiagent-roster` and
+  `threads-and-coordinator` as `unavailable` instead of `not_applicable`.
+  Agent writes and thread routes still refuse the unsupported surface; their
+  explanations now identify an implementation gap. The roadmap records
+  remaining protocol, execution, and verification work and removes completed
+  package-installation, declarative-apply, session CLI, and snapshot tasks.
+
 ### Fixed
 
 - `POST /v1/deployments` now enforces the published per-organization cap of

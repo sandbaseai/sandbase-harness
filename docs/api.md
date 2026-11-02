@@ -178,9 +178,9 @@ Known unsupported official SDK operations instead return HTTP 400 with
 `docs/api-matrix.md#unsupported-official-routes`, and
 `error.details.capabilities` containing the capability id and reason. These
 explicit refusals cover MCP tunnels, hosted user profiles, and
-session threads (the multiagent surface, declared permanently out of scope by
-`decisions/0001` and reported `not_applicable` in the capability matrix rather
-than planned); they do not create
+session threads (the multiagent surface is in scope under
+[decision 0002](../decisions/0002-cma-multiagent-parity.md), but still
+`unavailable` in the capability matrix); they do not create
 resources or
 execute work. Authentication, throttling, and compatibility admission still run
 first. Only the documented official methods and paths are registered; unrelated
@@ -3292,7 +3292,7 @@ call instead of inferring one from the other:
   "contract": {
     "type": "capability_matrix",
     "statuses": ["supported", "partial", "unavailable", "planned", "not_applicable", "unverified"],
-    "summary": { "supported": 31, "partial": 10, "unavailable": 5, "planned": 0, "not_applicable": 2, "unverified": 1 },
+    "summary": { "supported": 46, "partial": 9, "unavailable": 2, "planned": 0, "not_applicable": 2, "unverified": 0 },
     "capabilities": [
       {
         "area": "capabilities",
