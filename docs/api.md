@@ -907,7 +907,7 @@ curl -N -X POST http://127.0.0.1:3000/v1/sessions/SESSION_ID/messages \
   -d '{"content": "Hello", "stream": true}'
 ```
 
-Resume the event stream:
+Resume the event stream using the local sequence-cursor extension:
 
 ```bash
 curl -N http://127.0.0.1:3000/v1/sessions/SESSION_ID/events/stream \
@@ -925,6 +925,17 @@ compare exactly is refused with the rest, because every real `seq` is below it
 and the connection would never receive a persisted event again. A blank header is
 no cursor, and a `Last-Event-ID` that disagrees with `last_event_id` is refused
 rather than resolved by precedence.
+
+The [official reconnect workflow](https://platform.claude.com/docs/en/managed-agents/events-and-streaming#reconnect-without-missing-events)
+also works without a cursor: open the stream first, read **all** history pages
+into a set of seen event payload IDs, then consume the buffered live stream and
+skip IDs already seen. Opening the stream first covers writes during the history
+read. Use each event payload's opaque `id` for this deduplication; history and
+stream expose the same ID. The numeric SSE frame `id` belongs to the local
+cursor extension and does not replace the payload `id` in the official SDK.
+This workflow is verified with pinned TypeScript SDK `0.131.0` over real local
+HTTP using session updates; see the [streaming contract](../contracts/anthropic-cma/streaming.md#3-alignment)
+for the tested scope.
 
 Every 15 seconds an open stream sends a keepalive frame, which a client skips
 rather than treating as an event:
