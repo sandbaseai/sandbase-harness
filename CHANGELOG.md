@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Added
+
+- Settings > Setup can explicitly test a model connection using the saved
+  provider and the entered model reference. `POST /v1/x/settings/test-model`
+  checks the saved revision before one request with a 32-token output limit,
+  a 20-second deadline, no retries or tools, and five requests per caller per
+  minute. Results distinguish readiness,
+  authentication, missing models/endpoints, timeout, rate limit, transport,
+  and response failures without exposing upstream bodies or credentials.
+  The probe may incur provider charges; it neither saves the entered model nor
+  activates settings or creates a session. Existing configuration checks remain
+  available separately.
+
 ### Compatibility scope
 
 - Official multiagent behavior returns to the CMA target under decision 0002.

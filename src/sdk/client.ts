@@ -261,6 +261,20 @@ export interface RuntimeSettingsValidationResult {
   normalized_config?: RuntimeSettingsConfig;
 }
 
+/** Result of an explicitly requested one-shot provider/model request. */
+export interface ModelConnectionTestResult {
+  ok: boolean;
+  outcome: 'ok' | 'configuration_invalid' | 'authentication_failed' | 'model_not_found'
+    | 'not_found' | 'timeout' | 'cancelled' | 'rate_limited' | 'network_error' | 'invalid_response' | 'provider_error';
+  model: string;
+  resolved_model?: string;
+  provider: string;
+  config_source: 'saved';
+  revision: number;
+  elapsed_ms: number;
+  http_status?: number;
+}
+
 /**
  * A partial settings document, merged over the stored one by `SettingsResource.patch`.
  *
@@ -933,6 +947,11 @@ class SettingsResource {
 
   get(): Promise<RuntimeSettingsSummary> {
     return this.client.request('GET', '/v1/x/settings');
+  }
+
+  /** Send one bounded live request using the saved provider and an entered model reference. */
+  testModel(model: string, revision: number): Promise<ModelConnectionTestResult> {
+    return this.client.request('POST', '/v1/x/settings/test-model', { model, revision });
   }
 
   /**

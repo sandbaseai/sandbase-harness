@@ -5,6 +5,7 @@ import { AlertTriangle, Bot, CheckCircle2, KeyRound } from 'lucide-react';
 import { putJson } from '../../../api';
 import { agentModelFieldHint, agentModelUpdateBody, pendingRestartNote, type SetupModelProvider } from '../../../lib/modelSetupGuidance';
 import type { ConsoleData } from '../../../types';
+import { ModelConnectionTest } from './ModelConnectionTest';
 
 type RowState = { kind: 'ok' | 'error'; text: string };
 
@@ -120,6 +121,7 @@ export function SetupAgentModels({
         </div>
       </div>
       <p className="setupAgentHint">{agentModelFieldHint(provider, t)}</p>
+      <p className="setupAgentHint">{t('setupModels.connection.hint')}</p>
       {restartNote ? (
         <div className="setupProviderWarning">
           <AlertTriangle size={15} />
@@ -172,6 +174,8 @@ export function SetupAgentModels({
                     {saving ? t('setupModels.saving') : t('setupModels.save')}
                   </button>
                 </form>
+                <ModelConnectionTest model={draft} agentName={agent.name} revision={data.settings?.revision}
+                  disabled={saving} onRefresh={onRefresh} />
                 {state ? (
                   <div className={`inlineStatus ${state.kind === 'error' ? 'error' : 'neutral'}`}>
                     {state.kind === 'ok' ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}
