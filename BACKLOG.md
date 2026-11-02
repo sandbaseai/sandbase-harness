@@ -31,7 +31,6 @@ clients through an explicit migration when changing a published response.
 | Track | Current evidence | Completion criteria |
 | --- | --- | --- |
 | Agent model response | [`agents.md §4`](contracts/anthropic-cma/agents.md#4-differences): `model` is a string and the profile is on local `model_config`; the official response resolves an object with defaults. | Official create/read/version/session-snapshot responses carry the published model object; Console and local SDK readers migrate with regression coverage. |
-| Vault response kind | [`credentials.md §4`](contracts/anthropic-cma/credentials.md#4-differences): the response says `credential_vault`, while the published object says `vault`. | The canonical projection returns `vault`; local readers and stored references remain usable through a reviewed migration. The doc-example assertion checks the official value. |
 | Event stream interoperability | [`streaming.md §4`](contracts/anthropic-cma/streaming.md#4-differences): SSE resume uses a numeric sequence, while stored event ids are opaque. | Verify the official reconnect workflow against the pinned docs and SDK, then close any demonstrated cursor mismatch without gaps, duplicates, or changing stored event identity. |
 | Self-hosted tool answers | [`reference.md`](contracts/anthropic-cma/official-docs/reference.md) defines `user.tool_result` for self-hosted `agent_toolset` calls; [`cma-protocol.ts`](src/types/cma-protocol.ts) does not admit it. | A session-scoped worker can settle its outstanding built-in call and resume the turn; wrong-session, duplicate, malformed, and unissued answers fail without executing twice. |
 | Work item lifecycle | [`work.md §4`](contracts/anthropic-cma/work.md#4-differences): the backing queue is tool-call-scoped; per-item TTL and forced stop differ from the published session claim. | An official worker serves a session from one claim, with the published heartbeat, TTL, stop, and recovery semantics. Lost accepted work is never replayed blindly. |
@@ -70,6 +69,10 @@ mount support is a separate local-backend gap below.
 ## Recently completed
 
 These are implemented on main, not promises about the older `v0.3.8` release:
+
+- Published vault responses now use `type: "vault"` across create/read/list/update/archive,
+  while the local prefix preserves `credential_vault` over the same records
+  ([`credentials.md`](contracts/anthropic-cma/credentials.md#4-differences)).
 
 - Environment package installation at provisioning, including failure handling
   and package-manager network admission ([#961](https://github.com/sandbaseai/sandbase-harness/pull/961)).
