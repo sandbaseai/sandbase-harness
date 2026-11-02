@@ -14,6 +14,13 @@
 
 ### Fixed
 
+- `user.tool_result` now fails with `400 invalid_request_error` and code
+  `self_hosted_tool_result_not_supported` before persistence or execution,
+  including whole-batch preflight. Previously it could return `accepted: true`
+  and append an answer the runtime could not consume. Official self-hosted
+  built-in tool answers remain unimplemented; existing local worker completions
+  and `user.custom_tool_result` retain their separate protocols.
+
 - Agent responses now return `model` as `{id, speed, effort?: {type}}` across
   CRUD, versions, session snapshots and update events. **Breaking wire change:**
   string readers must use `agent.model.id`; Console, CLI and the local SDK are

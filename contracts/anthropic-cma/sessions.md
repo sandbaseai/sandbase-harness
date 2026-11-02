@@ -271,6 +271,12 @@ The session-level `stop_reason` (`toApiEvent`):
   lives in `src/core/auth/session-work-scope.ts` and the type fence in the
   route itself.
 
+  Permission to post an answer type does not imply implementation:
+  `user.tool_result` is refused with `400 invalid_request_error` /
+  `self_hosted_tool_result_not_supported` before any event in the batch is
+  appended or executed. Only the custom-tool answer lifecycle is implemented
+  here; local worker completions use `/v1/x/worker/complete`.
+
 `initial_events`:
 
 - At most 50 events (`MAX_INITIAL_EVENTS`).

@@ -62,6 +62,7 @@
     "requires_action_timeout",
     "resource_not_mountable",
     "secret_not_configured",
+    "self_hosted_tool_result_not_supported",
     "session_archived",
     "store_full",
     "store_unavailable",

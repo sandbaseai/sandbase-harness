@@ -899,6 +899,13 @@ through the same endpoint:
 
 The runtime supports the whole loop rather than only the event protocol. A declared custom tool is exposed to the model with its description and input schema, a call to it is persisted as an `agent.custom_tool_use` event which parks the session in `requires_action`, and the caller answers with `user.custom_tool_result` naming the `custom_tool_use_id`, after which the turn resumes with that result as the model-facing tool result. The runtime never executes a custom tool itself and never fabricates a result for one, so the caller is the only thing that can answer a call — which is why a result naming a call that is not pending, and a second result for a call that already has one, are each refused with `400 invalid_request_error` instead of being appended.
 
+`user.tool_result`, the official self-hosted built-in tool-answer event, is not
+implemented. It returns `400 invalid_request_error` with code
+`self_hosted_tool_result_not_supported` before any event in the batch is
+appended or executed. This includes requests authenticated with a session work
+token. Use `/v1/x/worker/complete` for existing local sandbox work items;
+`user.custom_tool_result` remains the separate answer for custom tools.
+
 Send and stream a message:
 
 ```bash
@@ -2468,7 +2475,9 @@ stream, `POST /v1/sessions/{id}/events` limited to the tool-answer types
 sub-resources of every store that session attached. A store attached
 `access: "read_only"` admits reads and refuses writes and deletes with `403
 permission_error`; a different session, an unattached store, or any other
-route answers `401`.
+route answers `401`. Authorization of an event name does not bypass admission:
+`user.tool_result` still returns `400 self_hosted_tool_result_not_supported`;
+the official built-in tool-answer lifecycle is not implemented.
 
 The projection's honest edges: `data` is always the session variant because
 every queue item belongs to a session and the per-call payload stays on the
