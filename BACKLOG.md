@@ -61,7 +61,6 @@ mount support is a separate local-backend gap below.
 | Official documentation scenarios | [`docs-examples/manifest.ts`](tests/conformance/docs-examples/manifest.ts) still uses an external Chinese tree, enables three snippets, and contains outdated exclusions for Dreams and Work. [`doc-curl-examples.test.ts`](tests/conformance/doc-curl-examples.test.ts) transcribes selected bodies and intentionally asserts some local deviations. | Bind executable scenarios to the pinned snapshot, review digests and fixtures, and separate official conformance assertions from documented deviations. Required CI must execute the selected scenarios rather than silently skip them. |
 | Upstream change discovery | [`crawl-cma-docs.ts`](scripts/crawl-cma-docs.ts) compares only the local page set; SDK upgrade [#955](https://github.com/sandbaseai/sandbase-harness/pull/955) is still open at this baseline. | Detect added/renamed upstream pages and review SDK route/type changes before updating pins. Keep every new unsupported route explicit. |
 | Real execution boundaries | Local conformance run on 2026-11-02: 144 passed, 4 skipped (three external-doc tests and the Docker SDK quickstart). CI at the baseline passed Quality, Test, E2E, and Build. | Record complete SDK turns on Docker, real MCP/HTTPS credential flows, worker recovery, budget resume, and scheduled runs against the exact tested build. Report unavailable providers and skipped suites separately. |
-| Console test types | [`tsconfig.tests.json`](tsconfig.tests.json) excludes 13 Console-touching test files because fixtures drifted. | Repair the fixtures, remove those exclusions, and pass the full test TypeScript program without weakening the contributor rule. |
 | Settings readiness | [`test.ts`](src/core/settings/test.ts) checks model configuration and key presence without making a model request. | Offer an explicit live probe whose result distinguishes valid configuration from successful provider authentication and model execution. Keep credentials out of diagnostics. |
 | Release delivery | Latest release at this baseline is `v0.3.8` (2026-08-30); the README install command targets it while the compatibility table describes newer main. | Pass the release gate on a named commit, publish a new tested artifact and release notes, and align quickstart and versioned compatibility evidence with that artifact. |
 
@@ -69,6 +68,10 @@ mount support is a separate local-backend gap below.
 
 These are implemented on main, not promises about the older `v0.3.8` release:
 
+- All Console-related tests now participate in `typecheck:tests`. The 13
+  file exclusions were removed after repairing drifted fixtures and narrowing
+  a tool-result assertion; the full test TypeScript program passes without
+  weakening production types or disabling checks.
 - The official stream-first reconnect workflow is now verified with SDK
   `0.131.0` over real local HTTP: full-history pagination, overlap deduplication
   by payload ID, ordered live events, and writes recovered after disconnection.

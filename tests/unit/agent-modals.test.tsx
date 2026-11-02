@@ -4,13 +4,16 @@ import { describe, expect, it } from 'vitest';
 import { AgentEditModal, AgentModal, agentDefinitionObject } from '../../apps/console/src/components/modals/AgentModals';
 import { sendsModelConfig } from '../../apps/console/src/lib/agentModelConfig';
 import { validateAgentDraft } from '../../apps/console/src/lib/agentVersionDiff';
-import type { Agent, ConsoleData, Template } from '../../apps/console/src/types';
+import type { Agent, Template } from '../../apps/console/src/types';
+import { consoleDataFixture } from '../fixtures/console-data.js';
 
 const template: Template = {
   id: 'blank',
   name: 'Blank agent',
   description: 'Start from a minimal agent definition.',
   tags: ['starter'],
+  summary: 'A minimal agent for local testing.',
+  skill_ids: [],
   agent: {
     name: 'Starter agent',
     description: 'A test agent template.',
@@ -25,10 +28,14 @@ const template: Template = {
 
 describe('Agent modals', () => {
   it('renders the create-agent composer without runtime icon errors', () => {
-    const data = {
+    const data = consoleDataFixture({
       templates: [template],
-      runtime: { models: [{ name: 'local-echo' }] },
-    } as ConsoleData;
+      runtime: {
+        status: 'running', agents_loaded: 0, skills_loaded: 0,
+        models: [{ name: 'local-echo', provider: 'openai_compatible', model: 'local-echo', api_key_state: 'not_set', base_url_state: 'configured', is_default: true }],
+        sandbox_providers: ['local'], memory: 'sqlite', memory_providers: [], storage_providers: [], auth_enabled: false,
+      },
+    });
 
     const html = renderToStaticMarkup(
       <AgentModal
@@ -52,7 +59,7 @@ describe('Agent modals', () => {
   // agent whose level was accepted must see the level in the form: hiding it
   // would save the agent back without the value the read had just returned.
   it('shows the stored effort in the edit form even at the default speed', () => {
-    const agent = {
+    const agent: Agent = {
       id: 'agent_1',
       type: 'agent',
       name: 'Effort agent',
@@ -65,10 +72,11 @@ describe('Agent modals', () => {
       metadata: {},
       status: 'active',
       version: 2,
+      multiagent: null,
       created_at: null,
       updated_at: null,
       archived_at: null,
-    } as Agent;
+    };
 
     const html = renderToStaticMarkup(
       <AgentEditModal agent={agent} onClose={() => {}} onSaved={() => {}} />,
@@ -122,7 +130,7 @@ describe('Console custom tool declarations', () => {
   });
 
   it('prefills stored custom tools in the edit form', () => {
-    const agent = {
+    const agent: Agent = {
       id: 'agent_1',
       type: 'agent',
       name: 'Custom tool agent',
@@ -138,10 +146,11 @@ describe('Console custom tool declarations', () => {
       metadata: {},
       status: 'active',
       version: 1,
+      multiagent: null,
       created_at: null,
       updated_at: null,
       archived_at: null,
-    } as unknown as Agent;
+    };
 
     const html = renderToStaticMarkup(
       <AgentEditModal agent={agent} onClose={() => {}} onSaved={() => {}} />,
