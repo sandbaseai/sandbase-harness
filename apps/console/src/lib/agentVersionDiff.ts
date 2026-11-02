@@ -1,3 +1,4 @@
+import { agentModelId, agentModelConfig } from './agentModelConfig';
 import type { Agent } from '../types';
 
 /**
@@ -69,7 +70,7 @@ function agentMetadataList(agent: Agent): string[] {
 }
 
 function modelSpeed(agent: Agent): string {
-  return agent.model_config?.speed ?? 'standard';
+  return agentModelConfig(agent)?.speed ?? 'standard';
 }
 
 const CUSTOM_TOOL_NAME = /^[a-zA-Z][a-zA-Z0-9_-]*$/;
@@ -103,7 +104,7 @@ export function diffAgentVersions(base: Agent, next: Agent): AgentFieldDiff[] {
   const rows: Array<{ field: string; label: string; base: string; next: string }> = [
     { field: 'name', label: 'Name', base: base.name, next: next.name },
     { field: 'description', label: 'Description', base: base.description ?? '', next: next.description ?? '' },
-    { field: 'model', label: 'Model', base: base.model, next: next.model },
+    { field: 'model', label: 'Model', base: agentModelId(base.model), next: agentModelId(next.model) },
     { field: 'model_config', label: 'Model config', base: modelSpeed(base), next: modelSpeed(next) },
     { field: 'max_turns', label: 'Max turns', base: base.max_turns === undefined ? '' : String(base.max_turns), next: next.max_turns === undefined ? '' : String(next.max_turns) },
     { field: 'system', label: 'System prompt', base: base.system, next: next.system },

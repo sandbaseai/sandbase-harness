@@ -141,7 +141,7 @@ const modelSpeedSchema = z.enum(['fast', 'standard', 'extended']);
  *
  * Parsed and validated so an unsupported level fails loudly, then carried
  * through so the value survives a read-back instead of being dropped on the
- * way in. Nothing yet varies model behaviour by it.
+ * way in. Anthropic execution is gated by the selected model's capabilities.
  */
 export const modelEffortSchema = z.enum(['low', 'medium', 'high', 'xhigh', 'max']);
 
@@ -170,7 +170,9 @@ export const agentModelConfigSchema = z.object({
 export const agentModelObjectSchema = z.object({
   id: z.string().min(1, 'Model id is required'),
   speed: modelSpeedSchema.optional(),
-  effort: modelEffortSchema.optional(),
+  effort: z.union([modelEffortSchema, z.object({ type: modelEffortSchema })])
+    .transform((effort) => typeof effort === 'string' ? effort : effort.type)
+    .optional(),
 });
 
 // The canonical object form is tried before the bare string so a definition

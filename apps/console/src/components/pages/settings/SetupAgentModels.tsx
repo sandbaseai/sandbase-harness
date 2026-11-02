@@ -1,3 +1,4 @@
+import { agentModelId } from '../../../lib/agentModelConfig';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, Bot, CheckCircle2, KeyRound } from 'lucide-react';
@@ -55,7 +56,7 @@ export function SetupAgentModels({
       const next = { ...current };
       let changed = false;
       for (const agent of data.agents) {
-        const stored = agent.model ?? '';
+        const stored = agentModelId(agent.model) ?? '';
         const previous = storedModels.current[agent.id];
         if (previous !== undefined && previous !== stored && next[agent.id] !== undefined) {
           delete next[agent.id];
@@ -79,7 +80,7 @@ export function SetupAgentModels({
   const save = async (agentId: string) => {
     const agent = data.agents.find((item) => item.id === agentId);
     if (!agent) return;
-    const update = agentModelUpdateBody(agent, draftFor(agent.id, agent.model ?? ''), t);
+    const update = agentModelUpdateBody(agent, draftFor(agent.id, agentModelId(agent.model) ?? ''), t);
     if (!update.ok) {
       setRowState(agentId, { kind: 'error', text: update.error });
       return;
@@ -138,14 +139,14 @@ export function SetupAgentModels({
       {agents.length ? (
         <ul className="setupAgentList">
           {agents.map((agent) => {
-            const draft = draftFor(agent.id, agent.model ?? '');
+            const draft = draftFor(agent.id, agentModelId(agent.model) ?? '');
             const state = rowStates[agent.id];
             const saving = savingId === agent.id;
             return (
               <li key={agent.id} className="setupAgentRow">
                 <div className="setupAgentIdentity">
                   <strong>{agent.name}</strong>
-                  <span><KeyRound size={13} />{agent.model || t('setupModels.noModel')}</span>
+                  <span><KeyRound size={13} />{agentModelId(agent.model) || t('setupModels.noModel')}</span>
                 </div>
                 <form
                   className="setupAgentForm"
