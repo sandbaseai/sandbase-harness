@@ -275,6 +275,9 @@
       "tests/integration/api.test.ts",
       "tests/unit/settings.test.ts"
     ],
+    "self_hosted_tool_result_not_supported": [
+      "tests/integration/tool-result-admission.test.ts"
+    ],
     "session_archived": [
       "tests/unit/session-archive.test.ts"
     ],

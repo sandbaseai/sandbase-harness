@@ -21,6 +21,7 @@ import type { UserEvent } from '@/types/cma-protocol.js';
 import { CMA_EVENT_TYPES } from '@/types/cma-protocol.js';
 import type { AgentDefinition } from '@/types/agent.js';
 import { UnsupportedCapabilityError } from '@/core/capabilities/registry.js';
+import { SelfHostedToolResultUnsupportedError } from '@/core/session/tool-result-admission.js';
 import { cursorPageOf, cursorQueryMismatch, decodeCursor, encodeCursor, normalizeCollectionFilter, toApiEvent, toApiSession } from '../standard.js';
 import { unsupportedCapability } from '../capability-errors.js';
 import { isTerminal } from '@/core/session/state-machine.js';
@@ -674,6 +675,9 @@ export function sessionsRoutes(deps: ServerDeps) {
           code: err.code,
           message: err.message,
         } }, 400);
+      }
+      if (err instanceof SelfHostedToolResultUnsupportedError) {
+        return invalidWithCode(c, err.code, err.message);
       }
       // A session at its ceiling refuses the event that would start the next
       // model request. That is a well-formed request asking for something the
