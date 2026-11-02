@@ -1,7 +1,10 @@
 # SandBase Harness — Claude Managed Agents contract
 
 This directory records how SandBase Harness implements the Claude Managed
-Agents (CMA) public contract: what matches, what deviates, and why.
+Agents (CMA) public contract: what matches, what deviates, and why. The current
+target and open gaps are in [BACKLOG.md](../../BACKLOG.md#cma-compatibility).
+[Decision 0002](../../decisions/0002-cma-multiagent-parity.md) brings the official
+multiagent surface back into scope; it remains unavailable until implemented.
 
 ## Scope
 
@@ -135,8 +138,10 @@ Coverage is claimed only where a test exercises the published behaviour:
 
 An official CMA SDK may be used as a **test-time protocol oracle** at a pinned
 version, to observe real response and event shapes. It is not a runtime or
-release dependency, and it is not a compatibility promise that the official SDK
-can drive SandBase. SandBase's own acceptance is raw HTTP contract tests.
+release dependency, and it is not a promise that every official SDK
+workflow works unchanged. The official SDK quickstart and selected conformance
+scenarios are tested alongside raw HTTP contracts; neither route presence nor
+a passing subset establishes full compatibility.
 
 Where a published detail is not documented — error code vocabularies, for
 instance — the entry is marked `unverified` rather than guessed.
