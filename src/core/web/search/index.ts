@@ -11,10 +11,12 @@ import type { Database } from '@/core/db/database.js';
 import { resolveEnvVars } from '@/core/config/env-resolver.js';
 import { resolveRuntimeSettingsSecret } from '@/core/settings/secrets.js';
 import type { RuntimeSettings } from '@/core/settings/schema.js';
+import { createKeenableProvider } from './keenable.js';
 import { createTavilyProvider } from './tavily.js';
 import type { SearchProvider } from './types.js';
 
 export type { SearchProvider, WebSearchOutcome, WebSearchRecency, WebSearchRequest, WebSearchResultItem } from './types.js';
+export { createKeenableProvider, KEENABLE_DEFAULT_BASE_URL } from './keenable.js';
 export { createTavilyProvider, TAVILY_DEFAULT_BASE_URL } from './tavily.js';
 
 export interface SearchProviderDeps {
@@ -45,9 +47,21 @@ export function searchProviderFromSettings(
       // unkeyed provider that fails on every call would report "configured"
       // while executing nothing.
       return apiKey ? createTavilyProvider({ apiKey, baseUrl, fetchImpl: deps.fetchImpl }) : undefined;
+    case 'keenable':
+      // Keenable has a keyless public endpoint, so an absent key is a usable
+      // configuration. A key that is spelled but does not resolve still fails
+      // safe to "unavailable" rather than silently downgrading to keyless.
+      if (apiKey === undefined && hasOption(webSearch, 'api_key')) return undefined;
+      return createKeenableProvider({ apiKey, baseUrl, fetchImpl: deps.fetchImpl });
     // The remaining ids pass schema validation but ship no adapter yet;
     // the availability check already refuses saving them.
     default:
       return undefined;
   }
+}
+
+/** Whether an option is spelled at all (a non-empty string), resolvable or not. */
+function hasOption(webSearch: NonNullable<RuntimeSettings['web_search']>, key: string): boolean {
+  const raw = webSearch.options[key];
+  return typeof raw === 'string' && raw.trim().length > 0;
 }

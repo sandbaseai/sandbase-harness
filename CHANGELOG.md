@@ -4,6 +4,17 @@
 
 ### Added
 
+- `web_search` gains a second shipped adapter, Keenable
+  (`web_search.provider: "keenable"`). It works without a key: with no
+  `api_key` it posts to Keenable's public `POST /v1/search/public` endpoint
+  (rate limited per IP, `X-Keenable-Title` app identifier), and an optional
+  `api_key` (managed secret, `${VAR}` reference) switches it to the keyed
+  `POST /v1/search` with an `X-API-Key` header. `num_results` maps to
+  `max_results`, `recency` to a `published_after` date, and a single
+  `allowed_domains` host to `site`; other domain-policy entries stay
+  client-side. A key that is spelled but does not resolve leaves the
+  capability unavailable rather than falling back to keyless. The settings
+  Test reports the keyless setup as `ok`.
 - Settings > Setup can explicitly test a model connection using the saved
   provider and the entered model reference. `POST /v1/x/settings/test-model`
   checks the saved revision before one request with a 32-token output limit,

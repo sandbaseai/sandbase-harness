@@ -14,7 +14,7 @@ const STORED_SECRET_PREFIX = '__managed_secret__:';
  * check (`adapter_unavailable`), mirroring how `loop_engine` lists engines
  * this runtime cannot execute.
  */
-export const WEB_SEARCH_PROVIDER_IDS = ['tavily', 'brave', 'exa', 'searxng'] as const;
+export const WEB_SEARCH_PROVIDER_IDS = ['tavily', 'keenable', 'brave', 'exa', 'searxng'] as const;
 export type WebSearchProviderId = (typeof WEB_SEARCH_PROVIDER_IDS)[number];
 const COMPLETE_ENV_REFERENCE = /^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$/;
 
@@ -351,9 +351,9 @@ export function defaultSettingsAvailability(): SettingsAvailability {
     artifactStorage: new Set(['local']),
     memoryProviders: new Set(['sqlite']),
     sandboxProviders: new Set(['local']),
-    // Tavily is the only shipped adapter; the other ids validate but fail the
+    // Tavily and Keenable ship adapters; the other ids validate but fail the
     // availability check until their adapters land.
-    webSearchProviders: new Set<WebSearchProviderId>(['tavily']),
+    webSearchProviders: new Set<WebSearchProviderId>(['tavily', 'keenable']),
   };
 }
 

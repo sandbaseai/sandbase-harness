@@ -114,7 +114,11 @@ an unsupported request never leaves state behind.
   cost-profile field; both figures are derived from the event log.
 - Tavily is the shipped adapter (`POST /search`, bearer auth, `time_range` /
   `include_domains` / `exclude_domains` / `country` mapping, 30 s timeout, 1 MB
-  response cap). `brave`, `exa`, and `searxng` are recognized settings values
+  response cap). Keenable (`keenable.ts`) is the second shipped adapter: keyed
+  `POST /v1/search` with an `X-API-Key` header, or the keyless public
+  `POST /v1/search/public` with an `X-Keenable-Title` identifier when no key is
+  configured; `max_results`, `published_after` (from `recency`) and a single
+  include host as `site`, with the rest of the domain policy client-side. `brave`, `exa`, and `searxng` are recognized settings values
   listed as unavailable adapters — each ships as its own PR against the same
   `SearchProvider` interface.
 
@@ -286,6 +290,9 @@ client loop reads — `evaluated_permission` and `evaluation` included.
 
 ## 6. Corresponding tests
 
+- `tests/unit/web-search-keenable.test.ts` — the Keenable adapter: keyless
+  public-endpoint selection, keyed header placement, request mapping,
+  normalization, and coded failures.
 - `tests/unit/web-search-tavily.test.ts` — the adapter contract: request-field
   mapping onto the Tavily body, bearer-only key placement, response
   normalization, and the coded outcomes for rate limiting, HTTP failure,

@@ -474,7 +474,7 @@ Including `{ "type": "agent_toolset_20260401" }` enables every built-in tool;
 `configs` entries disable (`enabled: false`, `never_allow`) or reconfigure
 specific tools, and `default_config.enabled: false` empties the implicit set.
 `web_search` is configuration-gated: it executes only when Runtime Settings
-name a usable search provider (`web_search.provider`, Tavily ships). With no
+name a usable search provider (`web_search.provider`, Tavily and Keenable ship). With no
 provider configured, naming it in `configs` is refused at admission, while the
 implicit enable from a bare toolset is accepted and simply never offered to the
 model.
@@ -3425,7 +3425,9 @@ safe implementation and a missing provider are different facts.
 ### Executing web_search
 
 `web_search` is a provider-backed tool: it executes only when Runtime Settings
-carry `web_search.provider` with a usable key. `tavily` ships today; `brave`,
+carry `web_search.provider` with a usable key. `tavily` and `keenable` ship
+today (Keenable also runs keyless: with no `api_key` it uses its public,
+per-IP rate-limited endpoint); `brave`,
 `exa`, and `searxng` are recognized provider names but have no adapter yet, so
 selecting one leaves the capability unavailable. `web_search.options.api_key`
 is a managed secret — a `${VAR}` reference or encrypted storage, masked on
