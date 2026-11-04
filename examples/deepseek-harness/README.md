@@ -78,8 +78,18 @@ The command copies the complete open-source Skill to
 page-reading tools without a SandBase account; optional provider-backed
 workflows remain opt-in.
 
-The bundle resolves its MCP entry from the installed Web profile, so a clean
-profile needs neither a global `npm link` nor a custom `PATH` entry.
+The tagged `v0.3.8` instructions above target the Web profile. That release's
+bundle still resolves its MCP entry under `profiles/web`.
+
+For Desktop or a custom profile, build the current source from `main` instead
+of `v0.3.8`, then add that checkout to the intended profile. The source bundle
+resolves its MCP entry from DSH's active `profileContext.dir`, so each profile
+uses its own installed package. A clean profile needs neither a global
+`npm link` nor a custom `PATH` entry. Use the same profile for installation and
+launch; for Desktop, initialize its profile in the app and quit it before
+running `dsh plugin --profile desktop add -w ../sandbase-harness`.
+This profile-aware bundle requires a DSH launcher that provides
+`profileContext` (verified against `0.2.0-rc.2`).
 
 DSH receives these tools under its stable MCP namespace:
 

@@ -73,7 +73,7 @@ describe('MCP OCI distribution', () => {
     const patch = read('examples/deepseek-harness/cordis.yml');
 
     expect(patch).toContain('command: node');
-    expect(patch).toContain("dshHomePath('profiles/web/node_modules/managed-agents/dist/mcp/index.js')");
+    expect(patch).toContain("profileContext.dir + '/node_modules/managed-agents/dist/mcp/index.js'");
     expect(patch).toContain("process.env.MANAGED_AGENTS_URL ?? 'http://127.0.0.1:3000'");
     expect(patch).toContain("process.env.MANAGED_AGENTS_API_KEY ?? ''");
     expect(patch).not.toContain('MANAGED_AGENTS_API_KEY: !!js process.env.MANAGED_AGENTS_API_KEY\n');
