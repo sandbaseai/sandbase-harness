@@ -13,8 +13,12 @@ and supported model IDs explicit.
 
 The built-in model IDs are:
 
-- `MiniMax-M3` (default)
-- `MiniMax-M2.7`
+- `MiniMax-M3.1-Flash` (default)
+- `MiniMax-M3`
+
+These are suggestions for new configurations. Explicit saved, legacy, and custom
+model IDs are passed through unchanged; upgrading does not reset an existing
+agent or workspace selection.
 
 Model access can depend on the MiniMax account and plan. Check the current
 [MiniMax text-generation documentation](https://platform.minimax.io/docs/guides/text-generation)
@@ -43,7 +47,7 @@ model:
   api_key: ${MINIMAX_API_KEY}
   options:
     region: global_en
-    model: MiniMax-M3
+    model: MiniMax-M3.1-Flash
 ```
 
 For the mainland China endpoint, set `region: cn_zh`. An explicit `base_url`
@@ -56,16 +60,26 @@ model:
   api_key: ${MINIMAX_API_KEY}
   options:
     region: global_en
-    model: MiniMax-M2.7
+    model: MiniMax-M3
 ```
 
 Agents can select either supported model directly:
 
 ```yaml
 name: MiniMax assistant
-model: MiniMax-M3
+model: MiniMax-M3.1-Flash
 system: You are a helpful assistant.
 ```
+
+Flash always uses adaptive thinking. The runtime leaves that control omitted,
+which enables thinking on the direct endpoint. Set the workspace's
+`model.options.reasoning_effort` to `low`, `medium`, `high`, `xhigh`, or `max`
+to tune Flash thinking depth; omitting it uses the API default of `max`.
+`none` is rejected for Flash. M3 and legacy IDs retain their existing behavior
+without an effort parameter. These are deployment options, separate from an
+agent's model profile. See the [MiniMax request parameters](https://platform.minimax.io/docs/api-reference/text-openai-api)
+for the current direct API contract. Custom gateway model IDs and capabilities
+remain the gateway operator's responsibility.
 
 After saving, create a short session from the Console and inspect its events.
 A successful response verifies the API key, endpoint, model access, and runtime

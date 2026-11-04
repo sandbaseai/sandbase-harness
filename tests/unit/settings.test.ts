@@ -137,7 +137,7 @@ describe('Settings V2 schema', () => {
 
     expect(model).toMatchObject({ label: 'MiniMax', status: 'available' });
     expect(model?.options_schema.properties).toMatchObject({
-      model: { default: 'MiniMax-M3' },
+      model: { default: 'MiniMax-M3.1-Flash', enum: ['MiniMax-M3.1-Flash', 'MiniMax-M3'] },
       openai_base_url: { default: MINIMAX_ENDPOINTS.global_en.openai_base_url },
       anthropic_base_url: { default: MINIMAX_ENDPOINTS.global_en.anthropic_base_url },
       cn_openai_base_url: { default: MINIMAX_ENDPOINTS.cn_zh.openai_base_url },

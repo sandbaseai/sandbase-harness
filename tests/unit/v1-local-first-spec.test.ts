@@ -102,7 +102,7 @@ describe('v1 local-first architecture spec', () => {
     expect(minimax).toContain('https://api.minimax.io/v1');
     expect(minimax).toContain('https://api.minimaxi.com/v1');
     expect(minimax).toContain('MiniMax-M3');
-    expect(minimax).toContain('MiniMax-M2.7');
+    expect(minimax).toContain('MiniMax-M3.1-Flash');
     expect(minimax).toContain('${MINIMAX_API_KEY}');
   });
 });

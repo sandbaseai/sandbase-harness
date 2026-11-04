@@ -78,6 +78,12 @@
 
 ### Changed
 
+- MiniMax defaults and setup suggestions now use `MiniMax-M3.1-Flash`, with
+  `MiniMax-M3` as the other current catalog choice. Explicit saved, legacy, and
+  custom model IDs remain unchanged, including legacy workspace imports. Flash
+  accepts the workspace reasoning-effort option (`low` through `max`); older
+  MiniMax models retain their existing request behavior.
+
 - The AI SDK upgrade reports `stop_reason: "interrupted"` on model-derived
   events when an OpenAI or Anthropic stream ends without its completion
   signal. Partial text is retained; interruption alone does not emit a
