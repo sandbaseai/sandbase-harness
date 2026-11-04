@@ -21,6 +21,7 @@ import {
   StorageSettingsForm,
   WebSearchSettingsForm,
   optionDefaultsForAdapter,
+  type AdapterOption,
 } from '../../apps/console/src/components/pages/settings/RuntimeSettingsForms';
 import type { ConsoleData, RuntimeSettings, RuntimeSettingsConfig } from '../../apps/console/src/types';
 
@@ -254,7 +255,7 @@ describe('Runtime Settings forms', () => {
   });
 
   it('renders advanced JSON options across configurable forms', () => {
-    const adapters = [{ id: 'builtin', label: 'Default', status: 'available' }];
+    const adapters: AdapterOption[] = [{ id: 'builtin', label: 'Default', status: 'available' }];
     expect(renderToStaticMarkup(<ModelSettingsForm adapters={[{ id: 'openai', label: 'OpenAI', status: 'available' }]} config={config} onChange={() => {}} apiKeyConfigured={false} />)).not.toContain('formOptionsEditor');
     expect(renderToStaticMarkup(<LoopEngineSettingsForm adapters={adapters} config={config} onChange={() => {}} />)).toContain('default_max_steps');
     expect(renderToStaticMarkup(<MemorySettingsForm adapters={[{ id: 'sqlite', label: 'SQLite', status: 'available' }]} config={config} onChange={() => {}} />)).toContain('formOptionsEditor');
@@ -263,6 +264,7 @@ describe('Runtime Settings forms', () => {
 
   it('hydrates display defaults from adapter schemas without model option fields', () => {
     const adapters: RuntimeSettings['adapters'] = {
+      web_search: [],
       model: [{ id: 'openai', label: 'OpenAI', version: '1', status: 'available', restart_policy: 'runtime', options_schema: {} }],
       loop_engine: [{ id: 'builtin', label: 'Default', version: '1', status: 'available', restart_policy: 'runtime', options_schema: { type: 'object', properties: { default_max_steps: { type: 'integer', default: 25 } } } }],
       storage: {
@@ -294,6 +296,7 @@ describe('Runtime Settings forms', () => {
 
   it('hydrates MiniMax display defaults from the selected model vendor', () => {
     const adapters: RuntimeSettings['adapters'] = {
+      web_search: [],
       model: [{ id: 'minimax', label: 'MiniMax', version: '1', status: 'available', restart_policy: 'runtime', options_schema: {} }],
       loop_engine: [{ id: 'builtin', label: 'Default', version: '1', status: 'available', restart_policy: 'runtime', options_schema: { type: 'object', properties: { default_max_steps: { type: 'integer', default: 25 } } } }],
       storage: { metadata: [], artifacts: [] },
@@ -457,6 +460,7 @@ describe('Runtime Settings forms', () => {
         diagnostics: { metadata: { path: '/tmp/data.db', health: 'ok' } },
         secret_states: { model: { api_key: 'not_set' } },
         adapters: {
+          web_search: [],
           model: [{ id: 'openai', label: 'OpenAI', version: '1', status: 'available', restart_policy: 'runtime', options_schema: {} }],
           loop_engine: [{ id: 'builtin', label: 'Default', version: '1', status: 'available', restart_policy: 'runtime', options_schema: {} }],
           storage: { metadata: [], artifacts: [] },
@@ -489,6 +493,7 @@ describe('Runtime Settings forms', () => {
         diagnostics: { metadata: { path: '/tmp/data.db', health: 'ok' } },
         secret_states: { model: { api_key: 'not_set' } },
         adapters: {
+          web_search: [],
           model: [{ id: 'openai', label: 'OpenAI', version: '1', status: 'available', restart_policy: 'runtime', options_schema: {} }],
           loop_engine: [{ id: 'builtin', label: 'Default', version: '1', status: 'available', restart_policy: 'runtime', options_schema: {} }],
           storage: { metadata: [], artifacts: [] },
@@ -562,6 +567,7 @@ describe('Runtime Settings forms', () => {
         diagnostics: { metadata: { path: '/tmp/data.db', health: 'ok' } },
         secret_states: { model: { api_key: 'configured' } },
         adapters: {
+          web_search: [],
           model: [{ id: 'openai', label: 'OpenAI', version: '1', status: 'available', restart_policy: 'runtime', options_schema: {} }],
           loop_engine: [{ id: 'builtin', label: 'Default', version: '1', status: 'available', restart_policy: 'runtime', options_schema: {} }],
           storage: { metadata: [], artifacts: [] },
@@ -609,6 +615,7 @@ describe('Runtime Settings forms', () => {
         diagnostics: { metadata: { path: '/tmp/data.db', health: 'ok' } },
         secret_states: { model: { api_key: 'not_set' } },
         adapters: {
+          web_search: [],
           model: [{ id: 'openai', label: 'OpenAI', version: '1', status: 'available', restart_policy: 'runtime', options_schema: {} }],
           loop_engine: [{ id: 'builtin', label: 'Default', version: '1', status: 'available', restart_policy: 'runtime', options_schema: {} }],
           storage: { metadata: [], artifacts: [] },

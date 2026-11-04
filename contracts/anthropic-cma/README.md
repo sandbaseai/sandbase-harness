@@ -1,7 +1,10 @@
 # SandBase Harness — Claude Managed Agents contract
 
 This directory records how SandBase Harness implements the Claude Managed
-Agents (CMA) public contract: what matches, what deviates, and why.
+Agents (CMA) public contract: what matches, what deviates, and why. The current
+target and open gaps are in [BACKLOG.md](../../BACKLOG.md#cma-compatibility).
+[Decision 0002](../../decisions/0002-cma-multiagent-parity.md) brings the official
+multiagent surface back into scope; it remains unavailable until implemented.
 
 ## Scope
 
@@ -42,7 +45,7 @@ deviation. If the reason stops being true, the difference should be removed.
 | [`agents.md`](./agents.md) | Agent definitions, model profile, toolsets |
 | [`sessions.md`](./sessions.md) | Session lifecycle, status, initial events |
 | [`budget.md`](./budget.md) | Session budget, local cost profile, usage and pause semantics |
-| [`threads.md`](./threads.md) | Session threads, multi-agent roster, thread lifecycle and archive |
+| [`threads.md`](./threads.md) | Session threads, the `multiagent` block (subagents, workflows, advisor), thread lifecycle and archive |
 | [`events.md`](./events.md) | Event log, ordering, `processed_at`, `session.error` |
 | [`streaming.md`](./streaming.md) | SSE delivery, resume, delta previews |
 | [`tools.md`](./tools.md) | Built-in tools, web domain policy, output overflow |
@@ -135,8 +138,10 @@ Coverage is claimed only where a test exercises the published behaviour:
 
 An official CMA SDK may be used as a **test-time protocol oracle** at a pinned
 version, to observe real response and event shapes. It is not a runtime or
-release dependency, and it is not a compatibility promise that the official SDK
-can drive SandBase. SandBase's own acceptance is raw HTTP contract tests.
+release dependency, and it is not a promise that every official SDK
+workflow works unchanged. The official SDK quickstart and selected conformance
+scenarios are tested alongside raw HTTP contracts; neither route presence nor
+a passing subset establishes full compatibility.
 
 Where a published detail is not documented — error code vocabularies, for
 instance — the entry is marked `unverified` rather than guessed.

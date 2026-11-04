@@ -34,7 +34,7 @@ function agent(overrides: Partial<Agent> = {}): Agent {
     name: 'assistant',
     description: 'Seeded by init.',
     system: 'You are a helpful assistant.',
-    model: 'gpt-4o',
+    model: { id: 'gpt-4o', speed: 'standard' },
     tools: [{ type: 'agent_toolset_20260401' }],
     skills: [],
     mcp_servers: [],

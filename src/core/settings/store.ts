@@ -73,6 +73,12 @@ export function getOrSeedRuntimeSettings(db: Database, seed: RuntimeSettingsSeed
   return rowToRecord(readSettingsRow(db)!);
 }
 
+/** Read an existing settings record without creating a row or migrating legacy config. */
+export function findRuntimeSettings(db: Database): RuntimeSettingsRecord | undefined {
+  const row = readSettingsRow(db);
+  return row ? rowToRecord(row) : undefined;
+}
+
 /** Apply the last validated saved revision during process startup. */
 export function activateRuntimeSettings(
   db: Database,

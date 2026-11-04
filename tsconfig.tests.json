@@ -1,5 +1,5 @@
 {
-  // Type-checks the runtime test suite, which the root config deliberately
+  // Type-checks the complete test suite, which the root config deliberately
   // excludes so build output stays scoped to `src`. Without this, a breaking
   // change to an internal interface type-checks clean while every test call
   // site is already wrong: vitest transpiles without checking types, so the
@@ -31,27 +31,5 @@
     "types": ["node", "vitest/globals", "react", "react-dom", "vite/client"]
   },
   "include": ["tests/**/*", "src/**/*", "scripts/**/*.ts", "playwright.config.ts"],
-  "exclude": [
-    "node_modules",
-    "dist",
-    // Tests that import Console components pull `apps/console/src` into the
-    // program. The Console itself typechecks clean, but these files carry stale
-    // fixtures — agents without `multiagent`, sessions without `budget`, and
-    // other drifted literals — that predate the type-checked suite. Repairing
-    // the fixtures is its own change; until then they run under vitest, which
-    // transpiles without checking, while the runtime suite stays enforced.
-    "tests/unit/agent-modals.test.tsx",
-    "tests/unit/console-pages.test.ts",
-    "tests/unit/console-tool-confirmation.test.ts",
-    "tests/unit/console-tool-permission.test.tsx",
-    "tests/unit/credential-modals.test.tsx",
-    "tests/unit/runtime-settings-forms.test.tsx",
-    "tests/unit/session-modals.test.tsx",
-    "tests/unit/ui-primitives.test.tsx",
-    "tests/unit/api-reference-docs.test.tsx",
-    "tests/unit/agent-version-diff.test.tsx",
-    "tests/unit/console-agent-capabilities.test.tsx",
-    "tests/unit/docs-api.test.ts",
-    "tests/integration/console-api-e2e.test.ts"
-  ]
+  "exclude": ["node_modules", "dist"]
 }

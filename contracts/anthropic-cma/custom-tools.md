@@ -17,6 +17,15 @@ custom-tool-worker-execution: supported
 - A custom tool is declared as an independent `tools[]` entry on the agent, not
   grouped inside a toolset.
 - Minimum fields: `name`, `description`, and an input schema.
+- `name` uses letters, digits, underscores, and hyphens, 1–128 characters. It
+  cannot match a built-in agent tool name or carry the reserved `mcp__`/`ant__`
+  prefixes, and it is unique per agent.
+- `input_schema` accepts the JSON Schema keywords MCP servers commonly emit.
+  A `$ref` is rejected anywhere in the tree, a top-level `oneOf`/`anyOf`/`allOf`
+  combinator is rejected, and `properties` keys are 1–64 letters, digits,
+  underscores, dots, or hyphens.
+- The agent's `tools` array holds at most 256 entries — each wrapped tool is
+  one entry and the built-in toolset is one more.
 - A custom tool is executed by the caller, not the runtime. The runtime's job is
   to surface the call and accept the result.
 
@@ -39,6 +48,13 @@ is `src/api/routes/session-normalizers.ts`.
 - `custom_toolset` (the legacy SandBase grouping) is accepted on ingress and
   projected back as a flat `CanonicalCustomTool` list, so a client reading an
   agent sees the canonical shape regardless of how it was written.
+- The declaration grammar is the published one, enforced on both create and
+  update in `validateCustomToolDefinitions`: the name admits the full
+  letters/digits/underscores/hyphens set at 1–128 (a leading letter is not
+  required), the `mcp__`/`ant__` prefixes and built-in names are refused by
+  name, and `input_schema` rejects a `$ref` anywhere and a top-level
+  `oneOf`/`anyOf`/`allOf` combinator, with `properties` keys bounded to the
+  published character set. The `tools` array is bounded at 256 entries.
 - The declaration deliberately carries no permission policy. The caller decides
   whether to run the tool, so a policy field would claim governance the runtime
   does not have.
@@ -102,6 +118,11 @@ name, and the absence of a runtime-side permission policy on the declaration.
 
 ## 6. Corresponding tests
 
+- `tests/unit/schema-validator.test.ts` — the declaration grammar: the
+  leading-digit/underscore/hyphen name acceptance, the 128-character bound,
+  the `mcp__`/`ant__` reserved-prefix refusal, the built-in-name collision,
+  the `$ref`-anywhere and top-level combinator rejections, the property-name
+  character set, and the 256-entry `tools` bound.
 - `tests/unit/custom-tool-canonical-shape.test.ts` — declaration parsing and
   canonical projection.
 - `tests/unit/custom-tool-loop.test.ts` — the caller-executed loop: the runtime

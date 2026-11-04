@@ -582,6 +582,26 @@ describe('Managed Agents API', () => {
       expect(missingMemoryStore.body.error.message).toContain('Memory store not found');
     });
 
+    it('accepts a string title on create and refuses a non-string', async () => {
+      const accepted = await postJson('/v1/sessions', {
+        agent: 'agent_echo-agent',
+        title: 'my session',
+      });
+      expect(accepted.res.status, JSON.stringify(accepted.body)).toBe(201);
+      expect(accepted.body.title).toBe('my session');
+
+      // The update path makes the same refusal; create agrees on the type so a
+      // number or object never persists as a title the caller never set.
+      for (const bad of [42, { name: 'x' }, ['t'], true]) {
+        const refused = await postJson('/v1/sessions', {
+          agent: 'agent_echo-agent',
+          title: bad,
+        });
+        expect(refused.res.status, JSON.stringify(bad)).toBe(400);
+        expect(refused.body.error.message).toContain('title');
+      }
+    });
+
     it('rebinds vault_ids on session update and validates them like creation', async () => {
       const { res: created, body: session } = await postJson('/v1/sessions', {
         agent: 'agent_echo-agent',
@@ -1396,7 +1416,7 @@ describe('Managed Agents API', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.name).toBe('echo-agent');
-      expect(body.model).toBe('gpt-4o');
+      expect(body.model.id).toBe('gpt-4o');
     });
 
     it('returns 404 for non-existent agent', async () => {

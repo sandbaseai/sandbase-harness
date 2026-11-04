@@ -16,7 +16,7 @@ export function unsupportedOfficialRoutes(): Hono {
   const profiles = rejectCapability('user-profiles', 'Hosted user profile management is outside the single-tenant runtime scope.');
   const threads = rejectCapability(
     'threads-and-coordinator',
-    'Session threads belong to the multiagent surface this runtime does not implement; a request reaches a mounted refusal rather than a 404.',
+    'Session threads are in scope but not implemented (decisions/0002); a request reaches a mounted refusal rather than a 404.',
   );
 
   app.get('/tunnels', tunnels);

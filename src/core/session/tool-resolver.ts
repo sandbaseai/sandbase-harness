@@ -549,10 +549,12 @@ export class ToolResolver {
     // A stdio server's environment is agent-adjacent process state, so its
     // credentials enter as placeholders when the sandbox owns an egress
     // boundary — and each bundle's substitution table is registered on that
-    // boundary before the spawn. A url server is an in-process transport: its
-    // headers keep real values because the runtime itself presents them, and
-    // the placeholders an environment credential produces still register so a
-    // later turn's subprocesses resolve them the same way.
+    // boundary before the spawn. On a backend without one environment
+    // credentials are refused rather than handed to the process in plaintext.
+    // A url server is an in-process transport: its headers keep real values
+    // because the runtime itself presents them, and the placeholders an
+    // environment credential produces still register so a later turn's
+    // subprocesses resolve them the same way.
     const usePlaceholders = typeof sandbox.configureEgressSubstitutions === 'function';
     const resolveCredentials = this.deps.resolveCredentialInjections
       ? (server: McpServerConfig) => {

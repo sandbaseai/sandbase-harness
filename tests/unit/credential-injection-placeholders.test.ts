@@ -79,14 +79,25 @@ describe('credential injection — placeholders', () => {
     }]);
   });
 
-  it('still emits plaintext when the caller cannot substitute', () => {
+  it('refuses an environment credential when the caller cannot substitute', () => {
     const db = setup();
     seedCredential(db, tmpDir!, { id: 'crd_plain', network: { type: 'unrestricted', allowed_hosts: [] } });
 
+    // A boundary-less caller is the published "self-hosted" case: the contract
+    // does not support environment credentials there, and plaintext would put
+    // the secret inside the process, so the answer is a refusal rather than a
+    // degraded materialization.
     const bundle = resolveSessionCredentialInjections(db, 'sess_ph', { dataDir: tmpDir });
 
-    expect(bundle.environment.TOKEN).toBe(SECRET);
+    expect(bundle.environment.TOKEN).toBeUndefined();
     expect(bundle.placeholders).toEqual([]);
+    expect(bundle.denied).toHaveLength(1);
+    expect(bundle.denied[0]).toMatchObject({
+      credential_id: 'crd_plain',
+      host: null,
+      reason: 'backend_unsupported',
+      code: 'credential_backend_unsupported',
+    });
   });
 
   it('admits a limited credential with no target host under placeholders, scoped to its own allowed_hosts', () => {
@@ -96,11 +107,11 @@ describe('credential injection — placeholders', () => {
       network: { type: 'limited', allowed_hosts: ['api.example.com'] },
     });
 
-    // The plaintext shape denies: no declared target means the process would
-    // hold the secret for any destination.
+    // Without a boundary the credential is refused before the host question is
+    // even asked: plaintext would hold the secret for any destination.
     const denied = resolveSessionCredentialInjections(db, 'sess_ph', { dataDir: tmpDir });
     expect(denied.environment.TOKEN).toBeUndefined();
-    expect(denied.denied[0]?.reason).toBe('host_unverified');
+    expect(denied.denied[0]?.reason).toBe('backend_unsupported');
 
     // The placeholder shape admits: the token is inert until a request to
     // api.example.com crosses the boundary.
@@ -160,26 +171,28 @@ describe('credential injection — delegated vault scope', () => {
 
   it('resolves an unpersisted child session against the parent vault ids', () => {
     const db = setup();
-    // A delegated child row never exists; the override carries the scope.
-    const bundle = resolveSessionCredentialInjections(db, 'subsess_child', { dataDir: tmpDir, vaultIds: ['vlt_a', 'vlt_b'] });
+    // A delegated child row never exists; the override carries the scope, and
+    // the child's own boundary is what the placeholders register on.
+    const bundle = resolveSessionCredentialInjections(db, 'subsess_child', { dataDir: tmpDir, vaultIds: ['vlt_a', 'vlt_b'], placeholders: true });
 
-    expect(bundle.environment.TOKEN).toBe(SECRET);
-    expect(bundle.environment.OTHER).toBe('vault-b-secret');
+    expect(bundle.environment.TOKEN).toBe('__cred_crd_a__');
+    expect(bundle.environment.OTHER).toBe('__cred_crd_b__');
+    expect(bundle.placeholders.map((entry) => entry.value).sort()).toEqual([SECRET, 'vault-b-secret'].sort());
     expect(bundle.vaultIds).toEqual(['vlt_a', 'vlt_b']);
   });
 
   it('narrows the child to the vaults the parent actually references', () => {
     const db = setup();
-    const bundle = resolveSessionCredentialInjections(db, 'subsess_child', { dataDir: tmpDir, vaultIds: ['vlt_a'] });
+    const bundle = resolveSessionCredentialInjections(db, 'subsess_child', { dataDir: tmpDir, vaultIds: ['vlt_a'], placeholders: true });
 
-    expect(bundle.environment.TOKEN).toBe(SECRET);
+    expect(bundle.environment.TOKEN).toBe('__cred_crd_a__');
     expect(bundle.environment.OTHER).toBeUndefined();
     expect(bundle.vaultIds).toEqual(['vlt_a']);
   });
 
   it('ignores override entries that are not vault ids', () => {
     const db = setup();
-    const bundle = resolveSessionCredentialInjections(db, 'subsess_child', { dataDir: tmpDir, vaultIds: ['vlt_a', 'sess_parent', 'other-id'] });
+    const bundle = resolveSessionCredentialInjections(db, 'subsess_child', { dataDir: tmpDir, vaultIds: ['vlt_a', 'sess_parent', 'other-id'], placeholders: true });
 
     expect(bundle.vaultIds).toEqual(['vlt_a']);
   });

@@ -1,3 +1,4 @@
+import { agentModelId } from './agentModelConfig';
 /**
  * The setup facts a Console needs to guide a model choice.
  *
@@ -104,7 +105,7 @@ export function agentModelUpdateBody(agent: Agent, model: string, t: TFunction<'
   if (!trimmed) {
     return { ok: false, error: t('setupModels.guidance.enterModel', { name: agent.name }) };
   }
-  if (trimmed === agent.model) {
+  if (trimmed === agentModelId(agent.model)) {
     return { ok: false, error: t('setupModels.guidance.alreadyUses', { name: agent.name, model: trimmed }) };
   }
   return { ok: true, body: { model: trimmed, version: agent.version } };
