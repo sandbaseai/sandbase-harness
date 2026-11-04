@@ -64,10 +64,16 @@ const VAULT_LIST_ORDER = 'vaults.created_at DESC, rowid DESC';
  */
 const AUDIT_QUERY_PARAMS: readonly string[] = ['limit', 'page'];
 
-type ResourceKind = 'credential_vault';
+/** The published bound: at most 20 active credentials per vault. */
+const MAX_CREDENTIALS_PER_VAULT = 20;
 
-export function credentialVaultRoutes(deps: ServerDeps) {
+type VaultResponseKind = 'vault' | 'credential_vault';
+
+export function credentialVaultRoutes(deps: ServerDeps, responseKind: VaultResponseKind = 'credential_vault') {
   const app = new Hono();
+  // The mount owns the wire discriminator; stored rows and credential handling
+  // are shared. Keep the local default for existing embedders and the Console.
+  const projectVault = (row: VaultRow) => toVault(row, responseKind, deps);
 
   // The published live probe: run the MCP `initialize` handshake against the
   // credential's declared server with its stored secret, refresh once on a
@@ -147,7 +153,7 @@ export function credentialVaultRoutes(deps: ServerDeps) {
     // a total order — without it a page boundary can repeat or drop a row — and
     // descending `rowid` is insertion-recency, which is what the tie group means.
     const rows = deps.db.prepare(`${vaultSelect(where)} ORDER BY v.created_at DESC, v.rowid DESC`).all() as unknown as VaultRow[];
-    return c.json(window.value.slice(rows.map((row) => toVault(row, deps))));
+    return c.json(window.value.slice(rows.map((row) => projectVault(row))));
   });
 
   app.post('/', async (c) => {
@@ -173,7 +179,7 @@ export function credentialVaultRoutes(deps: ServerDeps) {
       );
       const row = deps.db.prepare(vaultSelect('WHERE v.id = ? AND v.archived_at IS NULL')).get(id) as unknown as VaultRow;
       await publishOperationEvent(deps, { type: 'vault.created', subjectId: id });
-      return c.json(toVault(row, deps), 201);
+      return c.json(projectVault(row), 201);
     } catch (err: any) {
       if (String(err.message).includes('UNIQUE')) return conflict(c, 'Credential vault id already exists');
       return c.json({ error: { type: 'internal_error', message: err.message } }, 500);
@@ -182,7 +188,7 @@ export function credentialVaultRoutes(deps: ServerDeps) {
 
   app.get('/:id', (c) => {
     const row = deps.db.prepare(vaultSelect('WHERE v.id = ? AND v.archived_at IS NULL')).get(c.req.param('id')) as VaultRow | undefined;
-    return row ? c.json(toVault(row, deps)) : notFound(c, 'Credential vault not found');
+    return row ? c.json(projectVault(row)) : notFound(c, 'Credential vault not found');
   });
 
   // `POST /vaults/{id}` is the published update verb (`VaultUpdateParams`):
@@ -221,7 +227,7 @@ export function credentialVaultRoutes(deps: ServerDeps) {
       id,
     );
     const row = deps.db.prepare(vaultSelect('WHERE v.id = ? AND v.archived_at IS NULL')).get(id) as unknown as VaultRow;
-    return c.json(toVault(row, deps));
+    return c.json(projectVault(row));
   });
 
   // `DELETE /vaults/{id}` physically removes the vault and every credential it
@@ -285,6 +291,16 @@ export function credentialVaultRoutes(deps: ServerDeps) {
     const vaultId = c.req.param('id');
     const vault = deps.db.prepare('SELECT id FROM credential_vaults WHERE id = ? AND archived_at IS NULL').get(vaultId);
     if (!vault) return notFound(c, 'Credential vault not found');
+
+    // The published bound is 20 active credentials per vault — archived rows
+    // do not draw it down, so the count filters them out. A vault at the bound
+    // refuses the next credential before it is persisted, not after.
+    const active = deps.db.prepare(
+      'SELECT COUNT(*) AS c FROM credential_records WHERE vault_id = ? AND archived_at IS NULL',
+    ).get(vaultId) as { c: number };
+    if (active.c >= MAX_CREDENTIALS_PER_VAULT) {
+      return invalid(c, `A vault holds at most ${MAX_CREDENTIALS_PER_VAULT} active credentials`);
+    }
 
     // One parser for both wire shapes: the canonical nested `auth` object is the
     // published profile, and the flat spelling stays accepted as a local alias.
@@ -486,7 +502,7 @@ export function credentialVaultRoutes(deps: ServerDeps) {
     const credentials = deps.db.prepare(
       "SELECT id FROM credential_records WHERE vault_id = ? AND archived_at IS NULL AND status != 'deleted'",
     ).all(vaultId) as Array<{ id: string }>;
-    const response = archiveResource(c, deps, 'credential_vaults', (row) => toVault(row, deps));
+    const response = archiveResource(c, deps, 'credential_vaults', (row) => projectVault(row));
     if (response.status === 200) {
       for (const credential of credentials) {
         await publishOperationEvent(deps, {
@@ -681,10 +697,10 @@ function vaultSelect(where = '') {
   `;
 }
 
-function toVault(row: VaultRow, deps?: ServerDeps) {
+function toVault(row: VaultRow, type: VaultResponseKind, deps: ServerDeps) {
   return {
     id: row.id,
-    type: 'credential_vault' as ResourceKind,
+    type,
     name: row.name,
     // `display_name` is the published field name (`BetaManagedAgentsVault`);
     // `name` stays beside it because the Console, the local SDK and stored
@@ -693,7 +709,7 @@ function toVault(row: VaultRow, deps?: ServerDeps) {
     description: row.description ?? '',
     status: row.archived_at ? 'archived' : row.status,
     credential_count: Number(row.credential_count ?? 0),
-    credentials: deps ? listCredentials(deps, row.id) : [],
+    credentials: listCredentials(deps, row.id),
     metadata: parseObject(row.metadata),
     created_at: row.created_at,
     updated_at: row.updated_at,

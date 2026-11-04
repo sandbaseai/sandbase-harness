@@ -19,8 +19,26 @@ model-request-span-pair: supported
 ## 1. Official definition
 
 - The event log is append-only. Events are never rewritten or removed.
-- Events belong to domains: inbound user events, outbound agent events,
-  lifecycle events, tool events, and system events.
+- Events belong to domains: inbound user events (`user.message`,
+  `user.interrupt`, `user.custom_tool_result`, `user.tool_confirmation`,
+  `user.define_outcome`, `user.tool_result`), outbound agent events
+  (`agent.message`, `agent.thinking`, `agent.tool_use`, `agent.tool_result`,
+  `agent.mcp_tool_use`, `agent.mcp_tool_result`, `agent.custom_tool_use`,
+  `agent.thread_context_compacted`, `agent.thread_message_received`,
+  `agent.thread_message_sent`), lifecycle events (`session.status_*`,
+  `session.thread_*`, `workflow_run.*`, `session.error`, `session.usage`,
+  `session.updated`, `session.deleted`), span events
+  (`span.model_request_start`/`end`, `span.outcome_evaluation_*`), and system
+  events (`system.message`). Stream-only `event_start`/`event_delta` previews
+  are never persisted. [`official-docs/reference.md`](./official-docs/reference.md)
+  "Event types".
+- `agent.thinking` is a persisted progress signal that the agent is making
+  forward progress through extended thinking; it carries no thinking content.
+- `agent.thread_context_compacted` records that conversation history was
+  compacted to fit the context window.
+- `user.tool_result` is the self-hosted-environment answer channel for
+  `agent_toolset` calls — on cloud sandboxes the platform executes the
+  built-in tools itself; on `self_hosted` the worker posts results through it.
 - Inbound events carry `processed_at` once admitted, so a client can tell queued
   from handled.
 - `session.error` carries a structured error object rather than a bare string.
@@ -41,6 +59,14 @@ The append path and the row shape are `src/core/session/session-manager.ts` and
   precision and two events in the same second must still order deterministically.
 - Event payloads are stored in `events.metadata` and projected through
   `toApiEvent`, so a new field does not require a schema migration.
+- `GET /v1/sessions/{id}/events` filters by the published repeatable `types[]`
+  (and bare `types`) parameter: each value must be an event type the runtime
+  can emit (`CMA_EVENT_TYPES` in `src/types/cma-protocol.ts`), an unknown value
+  is refused `400` rather than silently filtered, and the normalized filter is
+  bound into the page cursor so a replay under a different filter fails the
+  shared `cursorQueryMismatch` check. `after_id`/`page` keep their position
+  semantics — the filter applies to the events after that position, not to
+  which positions are legal.
 - `processed_at` is recorded once an inbound event is admitted.
 - `session.error` carries a structured payload whose `error.type` is one of the
   eight official values, whose `error.retry_status` is the published
@@ -79,6 +105,16 @@ The append path and the row shape are `src/core/session/session-manager.ts` and
   success.
 - `session.usage` is emitted before the session goes idle, so a client reading
   the stream observes usage before the terminal status.
+- `agent.thinking` is emitted as a persisted progress signal during extended
+  thinking, carrying no thinking content — the runtime's policy of never
+  persisting reasoning traces means the block is a marker, not a transcript.
+  `agent.thread_context_compacted` is emitted when a turn's context had to be
+  compacted; thread-scoped variants do not exist because no thread surface
+  does. `user.tool_result` is not implemented: session admission refuses it
+  with `400 invalid_request_error` / `self_hosted_tool_result_not_supported`
+  before persistence or execution, including whole-batch preflight. The worker
+  token's event-name allowlist grants permission to request this channel, not an
+  implemented answer lifecycle. Local worker results use `/v1/x/worker/complete`.
 - Every model request is bracketed by a `span.model_request_start` /
   `span.model_request_end` pair. The builtin strategy opens the start when the
   SDK prepares the step's request and the Pi translator opens its own; the end

@@ -11,6 +11,7 @@
  */
 
 import { nanoid } from 'nanoid';
+import { assertToolResultSupported } from './tool-result-admission.js';
 import type { Database } from '@/core/db/database.js';
 import type { ArtifactStore } from '@/core/storage/artifact-store.js';
 import { parseSessionVaultIds } from '@/core/credentials/injection.js';
@@ -110,10 +111,16 @@ import {
   PI_RPC_PROTOCOL_ERROR_CODE,
   PI_RPC_TIMEOUT_CODE,
 } from '@/strategy/pi/rpc-wire.js';
+import type { EnvironmentConfig } from '@/types/sandbox.js';
 import {
   parseEnvironmentConfig,
   sandboxProviderForEnvironmentConfig,
 } from '@/sandbox/provider-names.js';
+import {
+  environmentMcpServerAdmission,
+  environmentNetworkPolicyOf,
+  environmentWebDomainAdmission,
+} from '@/core/config/environment-network.js';
 import {
   WORK_LEASE_LOST_CODE,
   WORK_OUTCOME_UNKNOWN_CODE,
@@ -190,6 +197,8 @@ export interface SessionExecutor {
 
 type Subscriber = (event: SessionEvent) => void;
 type EnvironmentSandboxProviderResolver = (environmentId: string) => string | undefined;
+/** The resolved Environment config, in whatever shape the composition layer returns. */
+type EnvironmentConfigResolver = (environmentId: string) => EnvironmentConfig | undefined;
 
 export interface SessionStorage {
   artifactStore?: ArtifactStore;
@@ -203,6 +212,7 @@ export interface SessionStorage {
 export class SessionManager {
   private readonly eventLogger: EventLogger;
   private readonly resolveEnvironmentSandboxProvider: EnvironmentSandboxProviderResolver;
+  private readonly resolveEnvironmentConfig: EnvironmentConfigResolver;
   private readonly isLoopEngineExecutable: (engine: SessionLoopEngine) => boolean;
   private subscribers = new Map<string, Set<Subscriber>>();
   /**
@@ -238,6 +248,13 @@ export class SessionManager {
     private readonly defaultLoopEngine: SessionLoopEngine = 'builtin',
     environmentSandboxProviderResolver?: EnvironmentSandboxProviderResolver,
     loopEngineAvailability?: (engine: SessionLoopEngine) => boolean,
+    /**
+     * Full Environment config lookup for admission checks the provider string
+     * cannot answer — the `allowed_domains ⊆ allowed_hosts` rule reads the
+     * Environment's network policy, not its backend. Defaults to the declared
+     * config the provider resolver already reads.
+     */
+    environmentConfigResolver?: EnvironmentConfigResolver,
   ) {
     this.isLoopEngineExecutable = loopEngineAvailability ?? ((engine) => engine === this.defaultLoopEngine);
     this.eventLogger = new EventLogger(db);
@@ -246,6 +263,8 @@ export class SessionManager {
     // the authoritative effective-provider decision (including env_default).
     this.resolveEnvironmentSandboxProvider = environmentSandboxProviderResolver
       ?? ((environmentId) => this.declaredEnvironmentSandboxProvider(environmentId));
+    this.resolveEnvironmentConfig = environmentConfigResolver
+      ?? ((environmentId) => this.declaredEnvironmentConfig(environmentId));
   }
 
   getCapabilityRegistry(): RuntimeCapabilityRegistry {
@@ -254,6 +273,52 @@ export class SessionManager {
 
   assertAgentCapabilities(agent: AgentDefinition): void {
     this.capabilityRegistry.assertAgentSupported(agent);
+  }
+
+  /**
+   * The `allowed_domains ⊆ allowed_hosts` session admission rule.
+   *
+   * A `limited` Environment refuses a session whose enabled `web_fetch` /
+   * `web_search` declares an `allowed_domains` entry the Environment's
+   * `allowed_hosts` does not cover — on create, and on the update that adds
+   * such an entry. Refusing before the row changes keeps a rejected tool
+   * surface from ever being stored, which is the same before-the-row
+   * reasoning the capability and resource-mount checks use.
+   */
+  private assertWebDomainsWithinEnvironment(
+    environmentId: string,
+    agent: AgentDefinition,
+  ): void {
+    const policy = environmentNetworkPolicyOf(this.resolveEnvironmentConfig(environmentId));
+    const violation = environmentWebDomainAdmission(policy, agent);
+    if (violation) {
+      throw sessionOperationError('web_domain_outside_allowed_hosts', violation.message);
+    }
+  }
+
+  /**
+   * The `allowed_hosts` admission for declared `url` MCP servers.
+   *
+   * The published rule: under a `limited` Environment with
+   * `allow_mcp_server_network_access` off, session creation fails with a 400
+   * when the agent declares a `url` MCP server whose host `allowed_hosts`
+   * does not cover — the check belongs at create, not at the connect boundary
+   * the tool resolver still enforces for a session admitted earlier. A stdio
+   * server names no endpoint, so there is no host to check. Refusing before
+   * the row exists keeps a session from being admitted only to fail its first
+   * connect.
+   */
+  private assertMcpServersWithinEnvironment(
+    environmentId: string,
+    agent: AgentDefinition,
+  ): void {
+    const policy = environmentNetworkPolicyOf(this.resolveEnvironmentConfig(environmentId));
+    for (const server of agent.mcp_servers ?? []) {
+      const refusal = environmentMcpServerAdmission(policy, server);
+      if (refusal) {
+        throw sessionOperationError('mcp_server_outside_allowed_hosts', refusal);
+      }
+    }
   }
 
   /**
@@ -661,6 +726,14 @@ export class SessionManager {
     if (agentDefinitionsEqual(current, result.data)) return undefined;
 
     this.assertAgentCapabilities(result.data);
+    // The update that adds an `allowed_domains` entry outside the Environment's
+    // `allowed_hosts` is refused the same way create is, against the session's
+    // bound Environment.
+    this.assertWebDomainsWithinEnvironment(session.environmentId, result.data);
+    // An update that swaps in a `url` MCP server `allowed_hosts` does not
+    // cover is refused identically — the declared endpoint is checked here,
+    // not left to fail at the next connect.
+    this.assertMcpServersWithinEnvironment(session.environmentId, result.data);
     if (session.loopEngine === 'pi') {
       assertPiAgentCanExecute(result.data);
     }
@@ -786,6 +859,13 @@ export class SessionManager {
     // resolve must be refused before the row exists, so a session is never
     // created that can only fail once it tries to provision a sandbox.
     const environmentProvider = this.resolveEnvironmentSandboxProvider(params.environmentId ?? 'env_default');
+    // The `allowed_domains ⊆ allowed_hosts` admission rule reads the
+    // Environment's network policy, which the provider string cannot carry.
+    this.assertWebDomainsWithinEnvironment(params.environmentId ?? 'env_default', effectiveDefinition);
+    // So does the `url` MCP-server admission: the published rule refuses a
+    // session at create whose declared endpoint `allowed_hosts` does not
+    // cover, rather than letting it reach the connect boundary.
+    this.assertMcpServersWithinEnvironment(params.environmentId ?? 'env_default', effectiveDefinition);
     // A mounted resource is written to a canonical absolute in-sandbox path, so a
     // backend that refuses that path has to be refused here, on the same
     // before-the-row reasoning: accepting it would promise a mount that only
@@ -977,6 +1057,22 @@ export class SessionManager {
   }
 
   /**
+   * The declared Environment config an admission check reads, or `undefined`
+   * for `env_default` (the workspace default carries no stored row; its
+     * effective policy resolves to nothing to check against).
+   */
+  private declaredEnvironmentConfig(environmentId: string): EnvironmentConfig | undefined {
+    if (environmentId === 'env_default') return undefined;
+    const row = this.db.prepare(
+      'SELECT config FROM environments WHERE id = ? AND archived_at IS NULL',
+    ).get(environmentId) as { config: string } | undefined;
+    if (!row) return undefined;
+    // The stored config is a parsed bag; the network policy normalizer reads
+    // `network`/`networking` from it regardless of the wider shape.
+    return parseEnvironmentConfig(row.config, `Environment ${environmentId}`) as unknown as EnvironmentConfig;
+  }
+
+  /**
    * The backend sessions on an Environment actually provision, as resolved by
    * the runtime's effective Settings — Settings-backed in the composed
    * runtime, declared-only in embedded use. Exposed for read-model
@@ -1044,6 +1140,10 @@ export class SessionManager {
     if (isTerminal(session.status)) {
       throw new Error(`Session ${sessionId} is in terminal state: ${session.status}`);
     }
+    // TypeScript's UserEvent union is not an ingress guard. Refuse the official
+    // worker result before a raw HTTP/direct caller can persist an answer that
+    // no executor consumes. This also runs during whole-batch preflight.
+    assertToolResultSupported(event);
     // Existing Pi rows can predate the creation guard. Reject them before
     // repair/persistence or queuing so a resumed turn cannot bypass policy.
     this.assertPiSessionCanExecute(session, event);

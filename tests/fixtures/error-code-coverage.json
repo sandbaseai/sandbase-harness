@@ -13,6 +13,10 @@
     "already_exists": [
       "tests/integration/memory-already-exists.test.ts"
     ],
+    "credential_backend_unsupported": [
+      "tests/unit/credential-injection-placeholders.test.ts",
+      "tests/unit/credential-policy.test.ts"
+    ],
     "cycle": [
       "tests/unit/orchestrator.test.ts"
     ],
@@ -48,6 +52,7 @@
     "invalid_initial_events": [
       "tests/integration/api.test.ts",
       "tests/integration/define-outcome-event.test.ts",
+      "tests/integration/initial-events-transaction.test.ts",
       "tests/integration/redacted-content-block.test.ts",
       "tests/unit/cma-event-contract.test.ts"
     ],
@@ -110,8 +115,12 @@
       "tests/unit/model-error-hints.test.ts",
       "tests/unit/session-error-shape.test.ts"
     ],
+    "model_does_not_support_mid_conversation_system": [
+      "tests/integration/system-message-admission.test.ts"
+    ],
     "model_not_found": [
       "tests/integration/model-qualified-reference.test.ts",
+      "tests/integration/settings-model-connection.test.ts",
       "tests/unit/model-auth-failed.test.ts",
       "tests/unit/model-error-hints.test.ts",
       "tests/unit/session-error-shape.test.ts"
@@ -134,6 +143,7 @@
       "tests/integration/sdk-error-envelope.test.ts",
       "tests/integration/self-hosted.test.ts",
       "tests/integration/session-artifacts-query-admission.test.ts",
+      "tests/integration/settings-model-connection.test.ts",
       "tests/integration/unrouted-path-404.test.ts",
       "tests/integration/vault-path-aliases.test.ts",
       "tests/unit/orchestrator.test.ts",
@@ -246,6 +256,9 @@
       "tests/unit/memory-semantics-wiring.test.ts",
       "tests/unit/memory-semantics.test.ts"
     ],
+    "request_too_large": [
+      "tests/integration/initial-events-transaction.test.ts"
+    ],
     "required": [
       "tests/integration/api.test.ts",
       "tests/integration/sdk-settings-resource.test.ts",
@@ -263,6 +276,9 @@
     "secret_not_configured": [
       "tests/integration/api.test.ts",
       "tests/unit/settings.test.ts"
+    ],
+    "self_hosted_tool_result_not_supported": [
+      "tests/integration/tool-result-admission.test.ts"
     ],
     "session_archived": [
       "tests/unit/session-archive.test.ts"
