@@ -940,7 +940,7 @@ skip IDs already seen. Opening the stream first covers writes during the history
 read. Use each event payload's opaque `id` for this deduplication; history and
 stream expose the same ID. The numeric SSE frame `id` belongs to the local
 cursor extension and does not replace the payload `id` in the official SDK.
-This workflow is verified with pinned TypeScript SDK `0.131.0` over real local
+This workflow is verified with pinned TypeScript SDK `0.132.1` over real local
 HTTP using session updates; see the [streaming contract](../contracts/anthropic-cma/streaming.md#3-alignment)
 for the tested scope.
 

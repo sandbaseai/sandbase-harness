@@ -74,6 +74,11 @@
   `session.error`. Confirmation-required tool calls from an incomplete stream
   remain ineligible for approval or execution.
 
+- Official TypeScript SDK conformance is pinned to `@anthropic-ai/sdk`
+  `0.132.1`. The route inventory remains 110 method/path pairs, with 90
+  resource mounts and 20 explicit refusals; the stream-first reconnect and
+  quickstart workflows are revalidated against this version.
+
 - `file` resources are now refused at session admission on `self_hosted`
   environments, matching the published contract ("自托管沙箱仅支持
   `memory_store` 资源；包含 `file` 或 `github_repository` 资源的会话会被
