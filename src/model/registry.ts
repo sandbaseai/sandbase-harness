@@ -7,7 +7,7 @@
  */
 
 import { createOpenAI } from '@ai-sdk/openai';
-import { createHash } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { miniMaxErrorMiddleware } from './minimax-errors.js';
 import { createAnthropic } from '@ai-sdk/anthropic';
@@ -206,8 +206,9 @@ export class ModelRegistry {
     resolvedModelIds.set(wrapped as object, config.model);
     if (provider === MINIMAX_PROVIDER) {
       // Bind private replay to the actual model/endpoint/authentication context.
-      // Store only an opaque digest, never credentials or raw header values.
-      miniMaxReplayScopes.set(wrapped as object, createHash('sha256').update(JSON.stringify([
+      // An ephemeral keyed identity, not a stored password verifier. The
+      // process-random key prevents offline credential guesses from a digest.
+      miniMaxReplayScopes.set(wrapped as object, createHmac('sha256', miniMaxReplayKey).update(JSON.stringify([
         config.model, miniMaxOpenAiBaseUrl({}, resolvedBaseUrl), resolvedApiKey,
         Object.entries(options?.headers ?? {}).sort(([a], [b]) => a.localeCompare(b)),
       ])).digest('hex'));
@@ -329,6 +330,7 @@ const QUALIFIED_MODEL = /^([a-zA-Z][a-zA-Z0-9_-]*)\/(.+)$/;
  */
 const resolvedModelIds = new WeakMap<object, string>();
 const miniMaxReplayScopes = new WeakMap<object, string>();
+const miniMaxReplayKey = randomBytes(32);
 
 export function miniMaxReplayScopeOf(model: unknown): string | undefined {
   return model && typeof model === 'object' ? miniMaxReplayScopes.get(model) : undefined;
