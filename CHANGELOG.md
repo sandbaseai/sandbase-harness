@@ -78,6 +78,12 @@
 
 ### Changed
 
+- The AI SDK upgrade reports `stop_reason: "interrupted"` on model-derived
+  events when an OpenAI or Anthropic stream ends without its completion
+  signal. Partial text is retained; interruption alone does not emit a
+  `session.error`. Confirmation-required tool calls from an incomplete stream
+  remain ineligible for approval or execution.
+
 - Official TypeScript SDK conformance is pinned to `@anthropic-ai/sdk`
   `0.132.1`. The route inventory remains 110 method/path pairs, with 90
   resource mounts and 20 explicit refusals; the stream-first reconnect and
