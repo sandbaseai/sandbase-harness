@@ -209,7 +209,11 @@ Validation:
   rejection is `invalid`, `no_refresh_token` after a 401 is `invalid`, and
   transport failure, a 5xx/429 probe or refresh response, a malformed
   handshake, and any timeout are `unknown` — transient is never reported as
-  a rejection.
+  a rejection. A redirect refused by the MCP transport is also `unknown`:
+  the target did not authenticate the credential, so the redirect response
+  is diagnostic evidence of an endpoint configuration issue, not an invalid
+  token. URL transports follow only same-origin, method-preserving redirects
+  (plus same-host HTTP-to-HTTPS upgrades on default ports).
 - The response carries `type`, `credential_id`, `vault_id`, `validated_at`,
   `has_refresh_token`, `status`, `mcp_probe`, and `refresh`, and appends a
   `validate` credential audit event recording the verdict. A missing or
