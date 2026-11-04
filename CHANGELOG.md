@@ -44,6 +44,13 @@
 
 ### Fixed
 
+- MiniMax M3 and M3.1 Flash preserve `reasoning_content` through streaming and
+  non-streaming tool history. Session turns, approvals and custom tool results
+  can replay it from a bounded private in-memory cache; it is excluded from
+  persisted/public events, summaries and errors. Restart, eviction or a change
+  of model, endpoint or credentials loses this private replay. Authenticated
+  live MiniMax continuation has not yet been verified; see `docs/minimax.md`.
+
 - Tavily searches retain their 30-second deadline through response-body reads
   and cancel unread, stalled or oversized bodies. Invalid response envelopes
   return `web_search_provider_failed` instead of throwing or reporting empty

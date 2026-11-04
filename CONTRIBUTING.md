@@ -30,6 +30,12 @@ rules; the rationale and procedure belong here.
   they land on `main`, and must work on fresh and existing workspaces.
 - Keep credentials, personal paths, host tokens, and sensitive output out of
   logs, fixtures, screenshots, commits, and public examples.
+- Provider-required private reasoning replay belongs to the executor's bounded,
+  process-local store, scoped to session, model, endpoint and authentication.
+  It is never a durable event, API/broadcast payload, log, memory or summary
+  input. Compaction receives only its numeric token estimate and prunes covered
+  anchors; session cleanup clears it. Do not persist reasoning to make replay
+  survive a restart without a separately reviewed storage/privacy design.
 
 Before a substantial implementation, refactor, runtime/process change, schema
 or API change, or cross-package behavior change, read this guide. Update it in

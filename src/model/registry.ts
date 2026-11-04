@@ -7,6 +7,9 @@
  */
 
 import { createOpenAI } from '@ai-sdk/openai';
+import { createHmac, randomBytes } from 'node:crypto';
+import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
+import { miniMaxErrorMiddleware } from './minimax-errors.js';
 import { createAnthropic } from '@ai-sdk/anthropic';
 import { wrapLanguageModel, type LanguageModel, type LanguageModelMiddleware } from 'ai';
 import { EnvVarNotFoundError, referencedEnvVars, resolveEnvVars } from '@/core/config/env-resolver.js';
@@ -192,7 +195,7 @@ export class ModelRegistry {
     }
     // Flash accepts effort; older MiniMax models keep their existing defaults.
     if (config.reasoning_effort && provider !== 'anthropic' && (provider !== MINIMAX_PROVIDER || miniMaxFlash)) {
-      middleware.push(createReasoningEffortMiddleware(config.reasoning_effort));
+      middleware.push(createReasoningEffortMiddleware(config.reasoning_effort, miniMaxFlash ? 'minimax' : 'openai'));
     }
     const wrapped = wrapLanguageModel({ model: base, middleware });
     // Record the id the provider will actually be addressed with, so a turn can
@@ -201,6 +204,15 @@ export class ModelRegistry {
     // registry serves concurrent sessions, and a single "last resolved" field
     // would report whichever turn resolved most recently.
     resolvedModelIds.set(wrapped as object, config.model);
+    if (provider === MINIMAX_PROVIDER) {
+      // Bind private replay to the actual model/endpoint/authentication context.
+      // An ephemeral keyed identity, not a stored password verifier. The
+      // process-random key prevents offline credential guesses from a digest.
+      miniMaxReplayScopes.set(wrapped as object, createHmac('sha256', miniMaxReplayKey).update(JSON.stringify([
+        config.model, miniMaxOpenAiBaseUrl({}, resolvedBaseUrl), resolvedApiKey,
+        Object.entries(options?.headers ?? {}).sort(([a], [b]) => a.localeCompare(b)),
+      ])).digest('hex'));
+    }
     return wrapped;
   }
 
@@ -317,6 +329,12 @@ const QUALIFIED_MODEL = /^([a-zA-Z][a-zA-Z0-9_-]*)\/(.+)$/;
  * both be collected together.
  */
 const resolvedModelIds = new WeakMap<object, string>();
+const miniMaxReplayScopes = new WeakMap<object, string>();
+const miniMaxReplayKey = randomBytes(32);
+
+export function miniMaxReplayScopeOf(model: unknown): string | undefined {
+  return model && typeof model === 'object' ? miniMaxReplayScopes.get(model) : undefined;
+}
 
 /** The upstream model id a client built by this registry was addressed with. */
 export function resolvedModelIdOf(model: unknown): string | undefined {
@@ -508,13 +526,13 @@ function abortError(): Error {
  * Pass `reasoning_effort` as a call-time provider option: the provider dropped
  * the constructor settings argument that used to carry it.
  */
-function createReasoningEffortMiddleware(reasoningEffort: string): LanguageModelMiddleware {
+function createReasoningEffortMiddleware(reasoningEffort: string, provider = 'openai'): LanguageModelMiddleware {
   return {
     transformParams: async ({ params }) => ({
       ...params,
       providerOptions: {
         ...params.providerOptions,
-        openai: { reasoningEffort, ...params.providerOptions?.openai },
+        [provider]: { reasoningEffort, ...params.providerOptions?.[provider] },
       },
     }),
   };
@@ -576,13 +594,15 @@ function createModelInstance(
       return openai.chat(model);
     }
     case MINIMAX_PROVIDER: {
-      const minimax = createOpenAI({
+      const minimax = createOpenAICompatible({
+        name: 'minimax',
         apiKey: apiKey ?? '',
         baseURL: miniMaxOpenAiBaseUrl({}, baseUrl),
         headers,
+        includeUsage: true,
         fetch: createSseCompatFetch(),
       });
-      return minimax.chat(model);
+      return wrapLanguageModel({ model: minimax.chatModel(model), middleware: miniMaxErrorMiddleware() });
     }
     case 'anthropic': {
       const anthropic = createAnthropic({

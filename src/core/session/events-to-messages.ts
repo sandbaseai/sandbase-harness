@@ -83,6 +83,7 @@ export interface CompactionBoundaryProjection {
 export function eventsToMessages(
   events: SessionEvent[],
   boundary?: CompactionBoundaryProjection | string,
+  privateReasoning?: (eventId: string) => string | undefined,
 ): Message[] {
   // Pre-pass: build toolName lookup across ALL events (OMA pattern)
   const toolNameById = new Map<string, string>();
@@ -187,7 +188,7 @@ export function eventsToMessages(
       case 'agent.thinking': {
         // OMA: reasoning parts go into assistant content
         flushTools();
-        const text = extractText(event.content);
+        const text = privateReasoning?.(event.id) ?? extractText(event.content);
         if (text) {
           pendingAssistant.push({ type: 'reasoning', text });
         }

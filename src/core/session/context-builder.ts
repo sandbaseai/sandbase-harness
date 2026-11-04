@@ -1,6 +1,6 @@
 import { eventsToMessages } from './events-to-messages.js';
 import type { EventLogger } from './event-logger.js';
-import { estimateEventTokens, type ContextCompactor } from './context-compactor.js';
+import { estimateEventTokens, estimateMessagesTokens, type ContextCompactor } from './context-compactor.js';
 import type { CompactionStore } from './compaction-store.js';
 import type { AgentDefinition } from '@/types/agent.js';
 import type { UserEvent } from '@/types/cma-protocol.js';
@@ -11,6 +11,7 @@ import { memoryBindingIsWritable, resolveMemoryBindings } from '@/core/memory/bi
 import { getAgentSkillIds } from '@/core/agent/standard.js';
 import type { SandboxProviderType } from '@/types/sandbox.js';
 import { renderSessionResources } from './session-resource-prompt.js';
+import type { TransientReasoning } from './transient-reasoning.js';
 
 type SessionAwareMemoryProvider = MemoryProvider & {
   addForSession?: (
@@ -43,6 +44,8 @@ export interface BuiltContext {
 }
 
 export interface ContextBuildOptions {
+  /** Private provider replay supplement, used only after public-log compaction. */
+  transientReasoning?: TransientReasoning;
   /**
    * Skills discovered inside a repository mounted for this session, already
    * read out of that sandbox.
@@ -79,10 +82,19 @@ export class ContextBuilder {
     broadcast: (event: SessionEvent) => void,
     options?: ContextBuildOptions,
   ): Promise<BuiltContext> {
-    await this.compactIfNeeded(session, model, broadcast);
+    await this.compactIfNeeded(session, model, broadcast, options?.transientReasoning);
 
     const events = this.deps.eventLogger.getEvents(session.id);
-    const messages = eventsToMessages(events, this.compactionBoundary(session.id));
+    const boundary = this.compactionBoundary(session.id);
+    options?.transientReasoning?.retain(new Set(events
+      .filter((item) => item.type === 'agent.thinking' && item.seq > (boundary?.eventSeqBefore ?? -1))
+      .map((item) => item.id)));
+    const used = new Set<string>();
+    const messages = eventsToMessages(events, boundary, options?.transientReasoning ? (id) => {
+      used.add(id);
+      return options.transientReasoning!.get(id);
+    } : undefined);
+    options?.transientReasoning?.retain(used);
 
     let systemPrompt = this.composeSystemPrompt(agent, options?.repositorySkills);
     if (this.deps.memory && session.contextId) {
@@ -164,6 +176,7 @@ export class ContextBuilder {
     session: Session,
     model: unknown | undefined,
     broadcast: (event: SessionEvent) => void,
+    transientReasoning?: TransientReasoning,
   ): Promise<void> {
     // Strategies such as Pi own their model transport, so compaction cannot
     // construct or invoke an AI SDK model on their behalf.
@@ -172,6 +185,14 @@ export class ContextBuilder {
     const events = this.deps.eventLogger.getEvents(session.id);
     const prior = this.compactionBoundary(session.id);
     const projected = eventsToMessages(events, prior);
+    const privateTokens = transientReasoning
+      ? estimateMessagesTokens(eventsToMessages(events, prior, transientReasoning.get)) - estimateMessagesTokens(projected)
+      : 0;
+    const supplementalTokens = new Map<string, number>();
+    if (transientReasoning) for (const event of events) {
+      const text = event.type === 'agent.thinking' ? transientReasoning.get(event.id) : undefined;
+      if (text) supplementalTokens.set(event.id, Math.ceil(JSON.stringify(text).length / 4));
+    }
     const modelId = typeof model === 'object' && model !== null && 'modelId' in model
       ? String((model as { modelId: unknown }).modelId)
       : undefined;
@@ -187,14 +208,14 @@ export class ContextBuilder {
       : undefined;
     if (measured !== undefined
       ? !this.deps.compactor.shouldCompactTokens(measured, window)
-      : !this.deps.compactor.shouldCompact(projected, window)) return;
+      : !this.deps.compactor.shouldCompactTokens(estimateMessagesTokens(projected) + privateTokens, window)) return;
 
     try {
       if (!this.deps.compactionStore) {
         // An embedder without boundary persistence keeps the legacy behavior:
         // the summary rides on the event and the tail is lost, same as before
         // this store existed.
-        const legacy = await this.deps.compactor.compact(events, null, model as any, window);
+        const legacy = await this.deps.compactor.compact(events, null, model as any, window, supplementalTokens);
         if (legacy) {
           // The summarize call is a model request like any other, so it gets
           // the canonical span-plus-aggregate record a turn-end span carries.
@@ -211,7 +232,7 @@ export class ContextBuilder {
         }
         return;
       }
-      const result = await this.deps.compactor.compact(events, prior ?? null, model as any, window);
+      const result = await this.deps.compactor.compact(events, prior ?? null, model as any, window, supplementalTokens);
       if (result) {
         const usageEvent = this.deps.eventLogger.recordAuxiliaryModelUsage(session.id, result.usage, {
           purpose: 'context_compaction',

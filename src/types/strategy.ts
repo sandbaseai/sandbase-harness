@@ -6,6 +6,7 @@
  */
 
 import type { LanguageModel } from 'ai';
+import type { TransientReasoning } from '@/core/session/transient-reasoning.js';
 import type { ModelConfig } from './model.js';
 import type { SandboxInstance } from './sandbox.js';
 import type { Session, SessionEvent, TurnTrigger } from './session.js';
@@ -56,6 +57,8 @@ export interface StrategyContext {
   skillDirs?: string[];
   /** Constructed only for strategies that require the AI SDK model transport. */
   model?: LanguageModel;
+  /** Process-local provider history; never persisted or broadcast. */
+  transientReasoning?: TransientReasoning;
   tools: Record<string, CoreTool>;
   /** Names resolved from custom tools. They are exposed to the model but never executed locally. */
   customToolNames?: ReadonlySet<string>;
