@@ -115,7 +115,9 @@ an unsupported request never leaves state behind.
   cost-profile field; both figures are derived from the event log.
 - Tavily is the shipped adapter (`POST /search`, bearer auth, `time_range` /
   `include_domains` / `exclude_domains` / `country` mapping, 30 s timeout, 1 MB
-  response cap). Keenable (`keenable.ts`) is the second shipped adapter: keyed
+  response cap). Its deadline covers body consumption, unread bodies are canceled,
+  and invalid envelopes or read failures produce controlled errors. A valid empty
+  results array remains successful. Keenable (`keenable.ts`) is the second shipped adapter: keyed
   `POST /v1/search` with an `X-API-Key` header, or the keyless public
   `POST /v1/search/public` with an `X-Keenable-Title` identifier when no key is
   configured; `max_results`, `published_after` (from `recency`) and a single

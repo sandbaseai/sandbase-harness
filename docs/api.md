@@ -3453,6 +3453,12 @@ change that enables or changes the provider takes effect on the same restart
 boundary as every other runtime setting.
 
 
+Tavily's 30-second timeout covers headers and the complete response body, with
+a 1 MB byte cap. Unread error bodies are canceled. Invalid JSON or a missing,
+null or non-array `results` envelope returns `web_search_provider_failed`;
+an empty `results` array remains successful. Transport and body-read failures
+use controlled messages rather than arbitrary upstream exception text.
+
 Keenable posts once to `/v1/search/public` without a key, or `/v1/search` with
 an `X-API-Key` header. Configure a final endpoint in `options.base_url`:
 redirects are refused, including same-origin redirects, so a redirect cannot

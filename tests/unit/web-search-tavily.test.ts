@@ -109,11 +109,11 @@ describe('createTavilyProvider', () => {
     });
   });
 
-  it('returns a result-less page when the provider answers with no results array', async () => {
+  it('refuses an invalid results envelope', async () => {
     const { fetchImpl } = recordingFetch({ answer: 'maybe', results: 'not-an-array' });
     const provider = createTavilyProvider({ apiKey: API_KEY, fetchImpl });
 
-    expect(await provider.search(QUERY)).toEqual({ ok: true, provider: 'tavily', results: [] });
+    expect(await provider.search(QUERY)).toMatchObject({ ok: false, code: 'web_search_provider_failed' });
   });
 
   it('maps HTTP 429 to the rate-limited code', async () => {
@@ -160,7 +160,7 @@ describe('createTavilyProvider', () => {
     expect(outcome).toEqual({
       ok: false,
       code: 'web_search_provider_failed',
-      message: 'Tavily request failed: connect ECONNREFUSED',
+      message: 'Tavily request or response failed',
     });
   });
 

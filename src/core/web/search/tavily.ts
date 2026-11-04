@@ -48,7 +48,7 @@ export function createTavilyProvider(options: TavilyProviderOptions): SearchProv
 
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), timeoutMs);
-      let response: Response;
+      let response: Response | undefined;
       try {
         response = await fetchImpl(`${baseUrl}/search`, {
           method: 'POST',
@@ -60,39 +60,25 @@ export function createTavilyProvider(options: TavilyProviderOptions): SearchProv
           body: JSON.stringify(body),
           signal: controller.signal,
         });
-      } catch (error) {
-        return {
-          ok: false,
-          code: 'web_search_provider_failed',
-          message: error instanceof Error && error.name === 'AbortError'
-            ? `Tavily request timed out after ${timeoutMs}ms`
-            : `Tavily request failed: ${error instanceof Error ? error.message : String(error)}`,
-        };
-      } finally {
-        clearTimeout(timer);
-      }
+        if (response.status === 429) {
+          return { ok: false, code: 'web_search_rate_limited', message: 'Tavily rate limit reached' };
+        }
+        if (!response.ok) {
+          return { ok: false, code: 'web_search_provider_failed', message: `Tavily returned HTTP ${response.status}` };
+        }
 
-      if (response.status === 429) {
-        return { ok: false, code: 'web_search_rate_limited', message: 'Tavily rate limit reached' };
-      }
-      if (!response.ok) {
-        return { ok: false, code: 'web_search_provider_failed', message: `Tavily returned HTTP ${response.status}` };
-      }
-
-      let text: string;
-      try {
-        text = await boundedText(response, TAVILY_MAX_RESPONSE_BYTES);
-      } catch (error) {
-        return { ok: false, code: 'web_search_provider_failed', message: error instanceof Error ? error.message : String(error) };
-      }
-      let payload: { results?: unknown };
-      try {
-        payload = JSON.parse(text);
-      } catch {
-        return { ok: false, code: 'web_search_provider_failed', message: 'Tavily returned a non-JSON response' };
-      }
-      const results = Array.isArray(payload.results)
-        ? payload.results.flatMap((item): WebSearchResultItem[] => {
+        const text = await boundedText(response, TAVILY_MAX_RESPONSE_BYTES, controller.signal);
+        let payload: unknown;
+        try {
+          payload = JSON.parse(text);
+        } catch {
+          return { ok: false, code: 'web_search_provider_failed', message: 'Tavily returned a non-JSON response' };
+        }
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)
+          || !Array.isArray((payload as { results?: unknown }).results)) {
+          return { ok: false, code: 'web_search_provider_failed', message: 'Tavily returned an invalid results response' };
+        }
+        const results = (payload as { results: unknown[] }).results.flatMap((item): WebSearchResultItem[] => {
           if (!item || typeof item !== 'object') return [];
           const record = item as Record<string, unknown>;
           return typeof record.url === 'string' && record.url
@@ -102,28 +88,57 @@ export function createTavilyProvider(options: TavilyProviderOptions): SearchProv
               content: typeof record.content === 'string' ? record.content : '',
             }]
             : [];
-        })
-        : [];
-      return { ok: true, provider: 'tavily', results };
+        });
+        return { ok: true, provider: 'tavily', results };
+      } catch (error) {
+        return {
+          ok: false,
+          code: 'web_search_provider_failed',
+          message: controller.signal.aborted
+            ? `Tavily request timed out after ${timeoutMs}ms`
+            : error instanceof ResponseTooLargeError
+              ? `Tavily response exceeds the ${TAVILY_MAX_RESPONSE_BYTES}-byte limit`
+              : 'Tavily request or response failed',
+        };
+      } finally {
+        clearTimeout(timer);
+        controller.abort();
+        // Error statuses return without reading the body. Release that stream
+        // without awaiting a potentially stalled underlying cancellation.
+        if (response?.body && !response.body.locked) void response.body.cancel().catch(() => {});
+      }
     },
   };
 }
 
-/** Read a response body with a byte cap; fetch has no built-in limit. */
-async function boundedText(response: Response, maxBytes: number): Promise<string> {
-  if (!response.body) return response.text();
+class ResponseTooLargeError extends Error {}
+
+/** Bound body consumption by both bytes and the full request deadline. */
+async function boundedText(response: Response, maxBytes: number, signal: AbortSignal): Promise<string> {
+  if (!response.body) return '';
   const reader = response.body.getReader();
   const chunks: Uint8Array[] = [];
   let received = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    received += value.byteLength;
-    if (received > maxBytes) {
-      await reader.cancel();
-      throw new Error(`Tavily response exceeds the ${maxBytes}-byte limit`);
+  let complete = false;
+  const cancel = () => { void reader.cancel().catch(() => {}); };
+  signal.addEventListener('abort', cancel, { once: true });
+  try {
+    signal.throwIfAborted();
+    for (;;) {
+      const { done, value } = await reader.read();
+      signal.throwIfAborted();
+      if (done) {
+        complete = true;
+        break;
+      }
+      received += value.byteLength;
+      if (received > maxBytes) throw new ResponseTooLargeError();
+      chunks.push(value);
     }
-    chunks.push(value);
+    return new TextDecoder().decode(Buffer.concat(chunks));
+  } finally {
+    signal.removeEventListener('abort', cancel);
+    if (!complete) cancel();
+    reader.releaseLock();
   }
-  return new TextDecoder().decode(Buffer.concat(chunks.map((chunk) => Buffer.from(chunk))));
 }
