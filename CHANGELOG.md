@@ -44,6 +44,11 @@
 
 ### Fixed
 
+- Tavily searches retain their 30-second deadline through response-body reads
+  and cancel unread, stalled or oversized bodies. Invalid response envelopes
+  return `web_search_provider_failed` instead of throwing or reporting empty
+  success; transport/read failures no longer expose arbitrary upstream text.
+
 - The DSH MCP bundle resolves its executable from the active profile directory
   instead of always using `profiles/web`. Desktop and custom profiles now use
   their own installed package, including when the profile path contains spaces.
