@@ -214,4 +214,18 @@ describe('web_search settings', () => {
       delete process.env.KEENABLE_TEST_KEY;
     }
   });
+  it('does not downgrade a blank resolved key or unresolved relay to keyless vendor search', () => {
+    process.env.KEENABLE_BLANK_KEY = '   ';
+    try {
+      expect(searchProviderFromSettings(
+        { provider: 'keenable', options: { api_key: '${KEENABLE_BLANK_KEY}' } }, { db },
+      )).toBeUndefined();
+      expect(searchProviderFromSettings(
+        { provider: 'keenable', options: { base_url: '${KEENABLE_MISSING_RELAY}' } }, { db },
+      )).toBeUndefined();
+    } finally {
+      delete process.env.KEENABLE_BLANK_KEY;
+    }
+  });
+
 });

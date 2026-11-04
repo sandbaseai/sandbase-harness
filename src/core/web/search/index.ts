@@ -51,7 +51,8 @@ export function searchProviderFromSettings(
       // Keenable has a keyless public endpoint, so an absent key is a usable
       // configuration. A key that is spelled but does not resolve still fails
       // safe to "unavailable" rather than silently downgrading to keyless.
-      if (apiKey === undefined && hasOption(webSearch, 'api_key')) return undefined;
+      if (!apiKey?.trim() && hasOption(webSearch, 'api_key')) return undefined;
+      if (!baseUrl?.trim() && hasOption(webSearch, 'base_url')) return undefined;
       return createKeenableProvider({ apiKey, baseUrl, fetchImpl: deps.fetchImpl });
     // The remaining ids pass schema validation but ship no adapter yet;
     // the availability check already refuses saving them.

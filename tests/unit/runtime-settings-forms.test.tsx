@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { render, screen } from '@testing-library/react';
@@ -23,6 +23,7 @@ import {
   optionDefaultsForAdapter,
   type AdapterOption,
 } from '../../apps/console/src/components/pages/settings/RuntimeSettingsForms';
+import { describeSettingsAdapters } from '@/core/settings/adapters.js';
 import type { ConsoleData, RuntimeSettings, RuntimeSettingsConfig } from '../../apps/console/src/types';
 
 const config: RuntimeSettingsConfig = {
@@ -422,6 +423,30 @@ describe('Runtime Settings forms', () => {
     expect(on).toContain('type="password"');
     expect(on).toContain('********');
     expect(on).toContain('https://api.tavily.com');
+  });
+
+  it('switches from Tavily to keyless Keenable without retaining its endpoint or credential', async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    const starting: RuntimeSettingsConfig = {
+      ...config,
+      web_search: { provider: 'tavily', options: { api_key: '${TAVILY_API_KEY}', base_url: 'https://api.tavily.com' } },
+    };
+    const { unmount } = render(<WebSearchSettingsForm
+      adapters={describeSettingsAdapters(['local']).web_search}
+      config={starting}
+      onChange={onChange}
+    />);
+    try {
+      await user.click(screen.getByRole('combobox', { name: 'Provider' }));
+      await user.click(await screen.findByRole('option', { name: 'Keenable' }));
+      expect(onChange).toHaveBeenLastCalledWith({
+        ...config,
+        web_search: { provider: 'keenable', options: { base_url: 'https://api.keenable.ai' } },
+      });
+    } finally {
+      unmount();
+    }
   });
 
   it('round-trips the optional web_search section through the JSON editor', () => {

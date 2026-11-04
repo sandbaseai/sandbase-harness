@@ -14,7 +14,13 @@
   `allowed_domains` host to `site`; other domain-policy entries stay
   client-side. A key that is spelled but does not resolve leaves the
   capability unavailable rather than falling back to keyless. The settings
-  Test reports the keyless setup as `ok`.
+  Test reports the keyless setup as `ok`. Redirects are refused so queries and
+  `X-API-Key` stay at the admitted endpoint; the 30 s timeout covers the full
+  body, responses are capped at 1 MB, and malformed envelopes return coded
+  failures. Keenable does not support country preferences; domain/path policy
+  still filters returned results. Explicitly configured but unresolved keys or
+  relays keep the capability unavailable.
+
 - Settings > Setup can explicitly test a model connection using the saved
   provider and the entered model reference. `POST /v1/x/settings/test-model`
   checks the saved revision before one request with a 32-token output limit,
