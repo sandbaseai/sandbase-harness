@@ -582,6 +582,26 @@ describe('Managed Agents API', () => {
       expect(missingMemoryStore.body.error.message).toContain('Memory store not found');
     });
 
+    it('accepts a string title on create and refuses a non-string', async () => {
+      const accepted = await postJson('/v1/sessions', {
+        agent: 'agent_echo-agent',
+        title: 'my session',
+      });
+      expect(accepted.res.status, JSON.stringify(accepted.body)).toBe(201);
+      expect(accepted.body.title).toBe('my session');
+
+      // The update path makes the same refusal; create agrees on the type so a
+      // number or object never persists as a title the caller never set.
+      for (const bad of [42, { name: 'x' }, ['t'], true]) {
+        const refused = await postJson('/v1/sessions', {
+          agent: 'agent_echo-agent',
+          title: bad,
+        });
+        expect(refused.res.status, JSON.stringify(bad)).toBe(400);
+        expect(refused.body.error.message).toContain('title');
+      }
+    });
+
     it('rebinds vault_ids on session update and validates them like creation', async () => {
       const { res: created, body: session } = await postJson('/v1/sessions', {
         agent: 'agent_echo-agent',
@@ -1396,7 +1416,7 @@ describe('Managed Agents API', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.name).toBe('echo-agent');
-      expect(body.model).toBe('gpt-4o');
+      expect(body.model.id).toBe('gpt-4o');
     });
 
     it('returns 404 for non-existent agent', async () => {
@@ -2353,7 +2373,7 @@ description: Uploaded from a compressed package.
           network: {
             type: 'limited',
             allow_mcp_server_network_access: false,
-            allow_package_manager_network_access: false,
+            allow_package_manager_network_access: true,
             allowed_hosts: ['api.example.com'],
           },
           packages: [{ manager: 'pip', package: 'pytest==8.3.4' }],
@@ -2370,7 +2390,9 @@ description: Uploaded from a compressed package.
       expect(body.config.network.allowed_hosts).toEqual(['api.example.com']);
       expect(body.config.networking.allowed_hosts).toEqual(['api.example.com']);
       expect(body.config.packages.pip).toEqual(['pytest==8.3.4']);
-      expect(body.packages_enforced).toBe(false);
+      // self_hosted resolves to a backend, so declared packages are enforced;
+      // the limited policy is not — no shipped self-hosted boundary exists.
+      expect(body.packages_enforced).toBe(true);
       expect(body.networking_enforced).toBe(false);
 
       const getRes = await app.request(`/v1/environments/${body.id}`);

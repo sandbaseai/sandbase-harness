@@ -1,3 +1,4 @@
+import { agentModelId } from '../../lib/agentModelConfig';
 import { Box, Check, ChevronDown, Copy, FlaskConical, Lock, MessageSquare, Monitor, MoreVertical, Pencil, Play, Plus, Server, Sparkles, Zap } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -34,7 +35,7 @@ export function Agents({ data, onNewAgent, onOpenAgent }: { data: ConsoleData; o
   const agents = data.agents.filter((agent) => {
     const q = query.toLowerCase();
     const matchesStatus = status === 'all' || (status === 'active' ? !agent.archived_at : status === 'archived' ? !!agent.archived_at : agent.status === status);
-    const matchesQuery = agent.id.toLowerCase().includes(q) || agent.name.toLowerCase().includes(q) || agent.description.toLowerCase().includes(q) || agent.model.toLowerCase().includes(q);
+    const matchesQuery = agent.id.toLowerCase().includes(q) || agent.name.toLowerCase().includes(q) || agent.description.toLowerCase().includes(q) || agentModelId(agent.model).toLowerCase().includes(q);
     return matchesStatus && matchesQuery;
   });
   return (
@@ -91,7 +92,7 @@ export function Agents({ data, onNewAgent, onOpenAgent }: { data: ConsoleData; o
                         openLabel={t('view.open', { name: agent.name })}
                       />
                     </th>
-                    <td><code title={agent.model}>{agent.model}</code></td>
+                    <td><code title={agentModelId(agent.model)}>{agentModelId(agent.model)}</code></td>
                     <td><StatusDot tone={agentTone(agent)} label={agentStatusLabel(agent)} /></td>
                     <td>{formatDate(agent.created_at)}</td>
                     <td>{formatDate(agent.updated_at)}</td>
@@ -113,7 +114,7 @@ export function Agents({ data, onNewAgent, onOpenAgent }: { data: ConsoleData; o
               <button className="agent-card-open" type="button" onClick={() => onOpenAgent(agent)} aria-label={t('view.open', { name: agent.name })}>
                 <strong>{agent.name}</strong>
                 <span className="agent-card-meta">
-                  <code>{agent.model}</code>
+                  <code>{agentModelId(agent.model)}</code>
                   <StatusDot tone={agentTone(agent)} label={agentStatusLabel(agent)} />
                 </span>
               </button>

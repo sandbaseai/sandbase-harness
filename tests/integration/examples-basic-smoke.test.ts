@@ -109,7 +109,7 @@ describe('examples/basic smoke', () => {
     // The model id belongs to the agent, so the example has to name one a real
     // endpoint serves: this is the value the README tells a reader to replace if
     // their provider does not offer it.
-    expect(assistant.model).toBe('gpt-4o');
+    expect(assistant.model.id).toBe('gpt-4o');
 
     const skillPage = await getJson(app, '/v1/skills');
     expect(skillPage.data.map((skill: any) => skill.name)).toContain('code-review');

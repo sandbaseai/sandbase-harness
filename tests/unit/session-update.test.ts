@@ -151,7 +151,7 @@ describe('session update', () => {
       id: 'agent_test',
       type: 'agent',
       name: 'test-agent',
-      model: 'conformance-model',
+      model: { id: 'conformance-model', speed: 'standard' },
       tools: NEW_TOOLS,
     });
     expect(apiEvent.metadata).toBeUndefined();

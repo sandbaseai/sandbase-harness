@@ -3,7 +3,8 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { SessionModal, toSessionResourcePayload } from '../../apps/console/src/components/modals/SessionModals';
 import { Sessions } from '../../apps/console/src/components/pages/SessionPages';
-import type { Agent, ConsoleData, Environment } from '../../apps/console/src/types';
+import type { Agent, Environment } from '../../apps/console/src/types';
+import { consoleDataFixture } from '../fixtures/console-data.js';
 
 const now = '2026-07-18T12:00:00.000Z';
 
@@ -20,6 +21,7 @@ const agent: Agent = {
   metadata: {},
   status: 'active',
   version: 1,
+  multiagent: null,
   created_at: now,
   updated_at: now,
   archived_at: null,
@@ -30,32 +32,20 @@ const environment: Environment = {
   type: 'environment',
   name: 'Local',
   description: 'Local test environment.',
-  hosting_type: 'local',
-  sandbox_provider: 'local',
-  network: {},
-  packages: [],
-  status: 'active',
-  config: {},
+  config: { type: 'local' },
+  effective_sandbox_provider: 'local',
+  packages_enforced: true,
+  networking_enforced: false,
   metadata: {},
   created_at: now,
   updated_at: now,
   archived_at: null,
 };
 
-const data = {
+const data = consoleDataFixture({
   agents: [agent],
-  sessions: [],
   environments: [environment],
-  vaults: [],
-  memoryStores: [],
-  files: [],
-  apiKeys: [],
-  skills: [],
-  templates: [],
-  runtime: null,
-  workspace: null,
-  settings: null,
-} as ConsoleData;
+});
 
 describe('Session surfaces', () => {
   it('renders the sessions page without create-button icon errors', () => {
