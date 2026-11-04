@@ -1,5 +1,12 @@
 # Claude Managed Agents Gap Spec
 
+> Historical review from 2026-07-23. The current product target and actionable
+> compatibility gaps are in [BACKLOG.md](../../BACKLOG.md#cma-compatibility),
+> with implementation evidence in the [CMA contracts](../../contracts/anthropic-cma/README.md).
+> [Decision 0002](../../decisions/0002-cma-multiagent-parity.md) supersedes the
+> earlier exclusion of official multiagent behavior. The inventory and scope
+> statements below describe the reviewed historical build, not current main.
+
 Reviewed: 2026-07-23
 
 Repository:

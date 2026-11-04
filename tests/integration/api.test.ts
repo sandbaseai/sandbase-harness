@@ -1416,7 +1416,7 @@ describe('Managed Agents API', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.name).toBe('echo-agent');
-      expect(body.model).toBe('gpt-4o');
+      expect(body.model.id).toBe('gpt-4o');
     });
 
     it('returns 404 for non-existent agent', async () => {

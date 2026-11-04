@@ -178,9 +178,9 @@ Known unsupported official SDK operations instead return HTTP 400 with
 `docs/api-matrix.md#unsupported-official-routes`, and
 `error.details.capabilities` containing the capability id and reason. These
 explicit refusals cover MCP tunnels, hosted user profiles, and
-session threads (the multiagent surface, declared permanently out of scope by
-`decisions/0001` and reported `not_applicable` in the capability matrix rather
-than planned); they do not create
+session threads (the multiagent surface is in scope under
+[decision 0002](../decisions/0002-cma-multiagent-parity.md), but still
+`unavailable` in the capability matrix); they do not create
 resources or
 execute work. Authentication, throttling, and compatibility admission still run
 first. Only the documented official methods and paths are registered; unrelated
@@ -569,13 +569,24 @@ capability table marks as adaptive-thinking also receives
 `thinking: {type: "adaptive", display: "omitted"}` automatically — there is no
 caller-facing thinking field because the published model object defines none.
 
-A read returns the stored profile as `model_config` — `id`, `speed`, and
-`effort` when one was set. It is omitted for the ordinary case (the local
-`standard` speed and no `effort`), so an agent that never sent either looks the
-same as before; a definition that carries `effort` reports it on the agent read,
-on the version listing, and inside a session's `agent` snapshot. When `model` is
-sent as the object form it is authoritative: the profile is derived from that
-object, and a `model_config` sent beside it is ignored rather than merged.
+Every agent response returns `model` as an object: `{"id": "claude-opus-5-5",
+"speed": "standard", "effort": {"type": "high"}}`. `id` and `speed` are always
+present; `effort` appears only when stored explicitly. This applies to CRUD,
+version reads, session snapshots, and `session.updated` events. Stored definitions
+and event history retain their internal string model and are projected on read.
+
+**Migration:** clients that read `agent.model` as a string must use
+`agent.model.id`. Console and the local TypeScript SDK consume the object; the
+Console also accepts strings from older servers. `model_config` remains a local
+compatibility extension, omitted for standard speed without explicit effort.
+Input still accepts a string or an object, including object-form effort, and
+an object `model` is authoritative over a sibling `model_config`.
+
+The official service resolves per-model effort defaults at save time. Harness
+still leaves omitted effort to deployment/provider configuration and does not
+invent a default in responses. Default resolution remains a tracked parity gap.
+`extended` speed remains a local extension, and returned options on providers
+that do not execute them are configuration echoes rather than execution claims.
 
 ## Sessions
 
@@ -888,6 +899,13 @@ through the same endpoint:
 
 The runtime supports the whole loop rather than only the event protocol. A declared custom tool is exposed to the model with its description and input schema, a call to it is persisted as an `agent.custom_tool_use` event which parks the session in `requires_action`, and the caller answers with `user.custom_tool_result` naming the `custom_tool_use_id`, after which the turn resumes with that result as the model-facing tool result. The runtime never executes a custom tool itself and never fabricates a result for one, so the caller is the only thing that can answer a call — which is why a result naming a call that is not pending, and a second result for a call that already has one, are each refused with `400 invalid_request_error` instead of being appended.
 
+`user.tool_result`, the official self-hosted built-in tool-answer event, is not
+implemented. It returns `400 invalid_request_error` with code
+`self_hosted_tool_result_not_supported` before any event in the batch is
+appended or executed. This includes requests authenticated with a session work
+token. Use `/v1/x/worker/complete` for existing local sandbox work items;
+`user.custom_tool_result` remains the separate answer for custom tools.
+
 Send and stream a message:
 
 ```bash
@@ -896,7 +914,7 @@ curl -N -X POST http://127.0.0.1:3000/v1/sessions/SESSION_ID/messages \
   -d '{"content": "Hello", "stream": true}'
 ```
 
-Resume the event stream:
+Resume the event stream using the local sequence-cursor extension:
 
 ```bash
 curl -N http://127.0.0.1:3000/v1/sessions/SESSION_ID/events/stream \
@@ -914,6 +932,17 @@ compare exactly is refused with the rest, because every real `seq` is below it
 and the connection would never receive a persisted event again. A blank header is
 no cursor, and a `Last-Event-ID` that disagrees with `last_event_id` is refused
 rather than resolved by precedence.
+
+The [official reconnect workflow](https://platform.claude.com/docs/en/managed-agents/events-and-streaming#reconnect-without-missing-events)
+also works without a cursor: open the stream first, read **all** history pages
+into a set of seen event payload IDs, then consume the buffered live stream and
+skip IDs already seen. Opening the stream first covers writes during the history
+read. Use each event payload's opaque `id` for this deduplication; history and
+stream expose the same ID. The numeric SSE frame `id` belongs to the local
+cursor extension and does not replace the payload `id` in the official SDK.
+This workflow is verified with pinned TypeScript SDK `0.131.0` over real local
+HTTP using session updates; see the [streaming contract](../contracts/anthropic-cma/streaming.md#3-alignment)
+for the tested scope.
 
 Every 15 seconds an open stream sends a keepalive frame, which a client skips
 rather than treating as an event:
@@ -2446,7 +2475,9 @@ stream, `POST /v1/sessions/{id}/events` limited to the tool-answer types
 sub-resources of every store that session attached. A store attached
 `access: "read_only"` admits reads and refuses writes and deletes with `403
 permission_error`; a different session, an unattached store, or any other
-route answers `401`.
+route answers `401`. Authorization of an event name does not bypass admission:
+`user.tool_result` still returns `400 self_hosted_tool_result_not_supported`;
+the official built-in tool-answer lifecycle is not implemented.
 
 The projection's honest edges: `data` is always the session variant because
 every queue item belongs to a session and the per-call payload stays on the
@@ -2472,11 +2503,14 @@ so the two cannot drift apart — and the local spelling is neither deprecated n
 redirected. The published prefix requires the same `anthropic-beta` as the local
 one.
 
-A recorded divergence on the object shape: the published vault object carries
-`"type": "vault"`, but this runtime answers `"type": "credential_vault"` — the
-internal resource kind the Console and stored references already branch on, so
-renaming it would break every existing reader. The `vlt_` id, `display_name`,
-`metadata`, and timestamp fields are unchanged from the published shape.
+Vault objects returned by `/v1/vaults` carry the published `"type": "vault"`
+on create, retrieve, list (including archived entries), update, and archive.
+The local `/v1/credential-vaults` prefix retains `"type": "credential_vault"`
+for existing Console and local clients. Both address the same stored rows;
+no data migration is required, and the remaining fields are shared. Clients
+using the published prefix must use the official `vault` discriminator; callers
+that require the legacy discriminator can use the local prefix. Credential
+subresource types and the `vault_deleted` deletion response are unchanged.
 
 Listing vaults excludes archived ones by default and takes the published
 `include_archived` parameter: `?include_archived=true` returns archived vaults
@@ -3225,6 +3259,7 @@ Extension endpoints expose local runtime operations.
 | `GET` | `/v1/x/settings` | Read the versioned Settings V2 runtime document. |
 | `POST` | `/v1/x/settings/validate` | Validate a complete Settings V2 document without saving. |
 | `POST` | `/v1/x/settings/test` | Test one settings area without saving. |
+| `POST` | `/v1/x/settings/test-model` | Explicit live model request against a saved settings revision. |
 | `PUT` | `/v1/x/settings` | Save a validated Settings V2 document. |
 | `GET` | `/v1/x/templates` | Built-in agent templates. |
 | `POST` | `/v1/x/reload` | Reload file-backed agents. |
@@ -3292,7 +3327,7 @@ call instead of inferring one from the other:
   "contract": {
     "type": "capability_matrix",
     "statuses": ["supported", "partial", "unavailable", "planned", "not_applicable", "unverified"],
-    "summary": { "supported": 31, "partial": 10, "unavailable": 5, "planned": 0, "not_applicable": 2, "unverified": 1 },
+    "summary": { "supported": 46, "partial": 9, "unavailable": 2, "planned": 0, "not_applicable": 2, "unverified": 0 },
     "capabilities": [
       {
         "area": "capabilities",
@@ -3551,13 +3586,83 @@ curl -X POST http://127.0.0.1:3000/v1/x/settings/test \
 }'
 ```
 
-Model tests apply the same credential validation used by validate and save.
+The `model` area checks configuration and credential availability only; it does
+not contact the provider. It applies the same credential validation used by
+validate and save.
 Other area tests are scoped to their adapter so local storage, memory, and
 sandbox diagnostics can run before a model API key has been configured.
 Those scoped checks still validate credentials that belong to the tested area.
 Docker sandbox checks currently skip live daemon/image validation. Remote
 sandbox checks require the worker API URL and key, then call
 `/v1/x/health` on that remote worker API.
+
+Explicitly test a model connection after saving the provider:
+
+```bash
+curl -X POST http://127.0.0.1:3000/v1/x/settings/test-model \
+  -H "Content-Type: application/json" \
+  -d '{"model":"claude-sonnet-4","revision":2}'
+```
+
+Use the `revision` from `GET /v1/x/settings` and a model served by the saved
+provider. Configured runtime API authentication applies to this route as usual.
+The body accepts only `model` (a trimmed, nonempty reference up to 256 characters)
+and `revision` (a positive integer). Unknown fields and malformed bodies return
+400 `invalid_request_error`. A stale revision returns 409 `revision_conflict`
+before any provider request. Clients must refresh and explicitly retry. Each
+caller is limited to five live model tests per minute; exceeding this returns
+429 `rate_limit_error` / `inbound_rate_limited` without contacting the provider.
+
+The probe uses `saved_config`, including encrypted or environment-based credentials,
+even while `effective_config` is older. Provider-prefix and gateway model resolution
+follow the normal model registry. It sends `Reply with OK.` through the configured
+SDK adapter with a 32-token output limit, a 20-second deadline and no retries or
+tools. It may incur provider charges. It does not save the model reference,
+activate settings, or create a session, event or session usage record. Cancellation
+of the incoming request also cancels the provider request when the HTTP transport
+exposes that signal. Provider-side billing after cancellation is provider-defined.
+
+A completed diagnostic returns HTTP 200, including provider/configuration failures.
+On an uninitialized workspace a syntactically valid request returns
+`configuration_invalid` with revision `0` without creating a settings row:
+
+```json
+{
+  "ok": true,
+  "outcome": "ok",
+  "model": "anthropic/claude-sonnet-4",
+  "resolved_model": "claude-sonnet-4",
+  "provider": "anthropic",
+  "config_source": "saved",
+  "revision": 2,
+  "elapsed_ms": 420
+}
+```
+
+`resolved_model` is present after successful model-reference resolution. An
+upstream HTTP response may add `http_status`. No key, endpoint URL, upstream
+body, response text, or raw error message is returned or logged by the probe.
+
+| Outcome | Meaning |
+| --- | --- |
+| `ok` | The provider returned nonempty text or reasoning output. |
+| `configuration_invalid` | The saved model configuration, reference, or credentials could not be resolved. |
+| `authentication_failed` | The provider returned 401 or 403. |
+| `model_not_found` | The provider explicitly returned a `model_not_found` error code/type. |
+| `not_found` | HTTP 404 without an explicit model code; check both model access and the base URL. Anthropic `not_found_error` falls here. |
+| `timeout` | The 20-second deadline expired, or the provider returned 408/504. |
+| `cancelled` | The incoming request was cancelled. |
+| `rate_limited` | The provider returned 429. |
+| `network_error` | The provider request failed without an HTTP response. |
+| `invalid_response` | The provider returned malformed data or no usable output. |
+| `provider_error` | Another provider HTTP failure. |
+
+Reasoning-only output counts as a successful connection because the small output
+budget can be consumed before a reasoning model emits its final answer. A successful
+probe checks model connectivity only; it does not validate streaming, agent-specific
+effort/speed settings, tool execution, loop-engine behavior, or complete CMA sessions.
+The Console exposes this action beside each agent's model input, identifies the
+tested provider/model/revision, and clears results when that input or revision changes.
 
 Save the complete document with optimistic concurrency:
 

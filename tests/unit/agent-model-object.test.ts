@@ -218,3 +218,11 @@ describe('model object profile is wired into the agent definition validator', ()
     expect(result.errors).toContainEqual(expect.objectContaining({ path: 'model' }));
   });
 });
+
+it('normalizes object-form effort through the full definition schema', () => {
+  const result = validateAgentDefinition({ name: 'roundtrip', system: '', model: {
+    id: 'claude-opus-5-5', speed: 'fast', effort: { type: 'high' },
+  } });
+  expect(result.valid).toBe(true);
+  expect(result.data?.model_config).toEqual({ id: 'claude-opus-5-5', speed: 'fast', effort: 'high' });
+});

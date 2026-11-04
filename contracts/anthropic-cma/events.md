@@ -110,9 +110,11 @@ The append path and the row shape are `src/core/session/session-manager.ts` and
   persisting reasoning traces means the block is a marker, not a transcript.
   `agent.thread_context_compacted` is emitted when a turn's context had to be
   compacted; thread-scoped variants do not exist because no thread surface
-  does. `user.tool_result` is admitted on self-hosted-environment sessions as
-  the `agent_toolset` result channel (`src/core/auth/session-work-scope.ts`
-  authorizes it to the worker's `mawt_` token) and refused elsewhere.
+  does. `user.tool_result` is not implemented: session admission refuses it
+  with `400 invalid_request_error` / `self_hosted_tool_result_not_supported`
+  before persistence or execution, including whole-batch preflight. The worker
+  token's event-name allowlist grants permission to request this channel, not an
+  implemented answer lifecycle. Local worker results use `/v1/x/worker/complete`.
 - Every model request is bracketed by a `span.model_request_start` /
   `span.model_request_end` pair. The builtin strategy opens the start when the
   SDK prepares the step's request and the Pi translator opens its own; the end

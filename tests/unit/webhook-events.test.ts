@@ -41,8 +41,8 @@ describe('OFFICIAL_WEBHOOK_EVENTS', () => {
   });
 
   it('refuses the SDK-declared names this runtime can never produce', () => {
-    // `session.thread_*` belongs to the multiagent surface declared out of
-    // scope (decisions/0001) and `agent.deleted` to a delete route that does
+    // `session.thread_*` belongs to the unimplemented multiagent surface
+    // (decisions/0002) and `agent.deleted` to a delete route that does
     // not exist — a subscription
     // accepted for either would look live and never deliver, so they are
     // refused like any name outside the catalog.

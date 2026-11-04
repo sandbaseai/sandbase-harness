@@ -3,14 +3,14 @@
 Contract area: threads, the `multiagent_20261001` block (subagents, dynamic
 workflows, advisor), thread lifecycle and message events, thread listing and
 archive.
-Status: `not_applicable` — declared out of scope by
-[`decisions/0001-multiagent-out-of-scope.md`](../../decisions/0001-multiagent-out-of-scope.md). See §7.
+Status: `unavailable` — in scope under
+[decision 0002](../../decisions/0002-cma-multiagent-parity.md), not implemented. See §7.
 Source: `src/core/session/delegation-service.ts`,
 `src/core/orchestrator/agent-orchestrator.ts`, `src/core/agent/schema.ts`,
 `src/core/agent/update.ts`.
 
 <!-- capability-status
-threads-and-coordinator: not_applicable
+threads-and-coordinator: unavailable
 -->
 
 ---
@@ -142,18 +142,18 @@ with its own status transitions, while a delegated run is an internal turn.
 
 ## 5. Reason for the difference
 
-- The gap is a **recorded scope decision**
-  ([`decisions/0001`](../../decisions/0001-multiagent-out-of-scope.md)), not
-  an oversight and not a deferred implementation: threads, subagent
-  delegation, dynamic workflows, advisor consultations, and per-thread
-  event routing are a protocol surface of their own, and this runtime
-  implements none of them.
+- [Decision 0002](../../decisions/0002-cma-multiagent-parity.md) supersedes
+  the permanent exclusion in decision 0001. This is now an implementation gap:
+  threads, subagent delegation, workflows, advisor consultations, and
+  per-thread event routing need their own persistence and execution model.
+  [The roadmap](../../BACKLOG.md#cma-compatibility) records the acceptance
+  criteria; a scope change alone does not implement any of them.
 - The refusal exists because the alternative is worse than the gap. Accepting a
   `multiagent` block and storing it would let a caller build on delegation by
   roster or workflow — a controller that spawns threads, a UI that lists them,
   a run that starts agents — none of which would ever happen, and the caller
   would only find out from behaviour rather than from an error.
-- A partial implementation was rejected on purpose. Thread identity without
+- An incomplete implementation must not be enabled. Thread identity without
   context isolation, or a `workflow_run.created` with no run behind it, would
   be a surface that reports work it did not do. The runtime reports the gap and
   tells the caller which local field to use instead.
@@ -171,8 +171,9 @@ with its own status transitions, while a delegated run is an internal turn.
 
 ## 7. Status
 
-`not_applicable` — declared permanently out of scope by
-[`decisions/0001-multiagent-out-of-scope.md`](../../decisions/0001-multiagent-out-of-scope.md).
+`unavailable` — in scope under
+[decision 0002](../../decisions/0002-cma-multiagent-parity.md), which supersedes
+[decision 0001](../../decisions/0001-multiagent-out-of-scope.md).
 The runtime has no
 thread resource, no subagent/workflow/advisor surface, no thread lifecycle or
 message-direction events, no `workflow_run.*` events, no per-thread event

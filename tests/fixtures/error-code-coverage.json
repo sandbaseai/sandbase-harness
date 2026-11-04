@@ -120,6 +120,7 @@
     ],
     "model_not_found": [
       "tests/integration/model-qualified-reference.test.ts",
+      "tests/integration/settings-model-connection.test.ts",
       "tests/unit/model-auth-failed.test.ts",
       "tests/unit/model-error-hints.test.ts",
       "tests/unit/session-error-shape.test.ts"
@@ -142,6 +143,7 @@
       "tests/integration/sdk-error-envelope.test.ts",
       "tests/integration/self-hosted.test.ts",
       "tests/integration/session-artifacts-query-admission.test.ts",
+      "tests/integration/settings-model-connection.test.ts",
       "tests/integration/unrouted-path-404.test.ts",
       "tests/integration/vault-path-aliases.test.ts",
       "tests/unit/orchestrator.test.ts",
@@ -274,6 +276,9 @@
     "secret_not_configured": [
       "tests/integration/api.test.ts",
       "tests/unit/settings.test.ts"
+    ],
+    "self_hosted_tool_result_not_supported": [
+      "tests/integration/tool-result-admission.test.ts"
     ],
     "session_archived": [
       "tests/unit/session-archive.test.ts"
