@@ -85,7 +85,7 @@ a live-by-default stream, the `event: ping` keepalive carrying JSON, opt-in
 previews, and the rule that the
 default stream is buffered rather than token-by-token.
 
-Verified on 2026-11-02 with official TypeScript SDK `0.131.0` over real local
+Verified on 2026-11-04 with official TypeScript SDK `0.132.1` over real local
 HTTP: idle connection establishment, multi-page history, writes during history
 pagination, ordered live delivery, overlap deduplication, and a second connection
 recovering a write made during disconnection. This uses `session.updated`
