@@ -38,6 +38,16 @@
 
 ### Fixed
 
+- Upgrade the MCP SDK to 1.32.1. URL MCP connections and credential validation
+  now refuse cross-origin redirects, HTTPS downgrades, and redirects that change
+  a message POST's method. Same-origin redirects and default-port HTTP-to-HTTPS
+  upgrades on the same hostname remain supported. Operators whose endpoints
+  redirect to another host or port must configure the final server URL, create a
+  credential keyed to it (the existing URL binding is immutable), update
+  applicable host allowlists, and reconnect.
+  Rejected validation probes report `unknown` with the redirect response; tokens
+  are not sent to the refused target.
+
 - `user.tool_result` now fails with `400 invalid_request_error` and code
   `self_hosted_tool_result_not_supported` before persistence or execution,
   including whole-batch preflight. Previously it could return `accepted: true`
@@ -78,6 +88,17 @@
   published interval rather than the smaller residual the wall clock left.
 
 ### Changed
+
+- The AI SDK upgrade reports `stop_reason: "interrupted"` on model-derived
+  events when an OpenAI or Anthropic stream ends without its completion
+  signal. Partial text is retained; interruption alone does not emit a
+  `session.error`. Confirmation-required tool calls from an incomplete stream
+  remain ineligible for approval or execution.
+
+- Official TypeScript SDK conformance is pinned to `@anthropic-ai/sdk`
+  `0.132.1`. The route inventory remains 110 method/path pairs, with 90
+  resource mounts and 20 explicit refusals; the stream-first reconnect and
+  quickstart workflows are revalidated against this version.
 
 - `file` resources are now refused at session admission on `self_hosted`
   environments, matching the published contract ("自托管沙箱仅支持

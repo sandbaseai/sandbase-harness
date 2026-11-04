@@ -504,6 +504,23 @@ refused rather than partially connected.
 Whether a bound server is reachable, and whether it actually exposes the tools its
 toolset configs name, is checked at connection time rather than at save time.
 
+URL MCP connections and `mcp_oauth_validate` follow redirects only within the
+request's origin (scheme, hostname and port), with one exception: HTTP may upgrade
+to HTTPS on the same hostname when both use their default ports. Redirects must
+preserve the method; message POSTs follow only `307` and `308`. A different host
+or port, an HTTPS downgrade, or a method-changing POST redirect fails the
+connection; a validation probe reports `unknown`, with the redirect response in
+`mcp_probe.http_response`.
+
+**Upgrade note for MCP SDK 1.32.1:** endpoints that previously depended on
+cross-origin redirects must use the final endpoint URL in `mcp_servers`. Create
+an MCP credential keyed to that final URL: an existing credential's
+`mcp_server_url` is immutable. Update applicable credential and environment host
+allowlists if the final hostname changes, validate the replacement credential,
+then update the idle session's MCP declaration or create a new session. Archive
+the obsolete credential after verifying the new connection. Harness retains the
+SDK's restrictive default and does not expose a redirect bypass.
+
 An MCP tool is governed by the permission policy of the toolset that binds its
 server. When nothing is configured, the toolset kind supplies the default: an
 `mcp_toolset` requires approval and the built-in toolset does not, because an MCP
@@ -940,7 +957,7 @@ skip IDs already seen. Opening the stream first covers writes during the history
 read. Use each event payload's opaque `id` for this deduplication; history and
 stream expose the same ID. The numeric SSE frame `id` belongs to the local
 cursor extension and does not replace the payload `id` in the official SDK.
-This workflow is verified with pinned TypeScript SDK `0.131.0` over real local
+This workflow is verified with pinned TypeScript SDK `0.132.1` over real local
 HTTP using session updates; see the [streaming contract](../contracts/anthropic-cma/streaming.md#3-alignment)
 for the tested scope.
 
