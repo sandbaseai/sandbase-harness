@@ -1,3 +1,6 @@
+/** Object responses, plus strings when connected to an older runtime. */
+export type AgentModel = string | { id: string; speed?: string; effort?: { type: string } };
+
 /**
  * The canonical envelope: a `/v1` collection the pagination contract has converted.
  *
@@ -24,10 +27,10 @@ export type Agent = {
   name: string;
   description: string;
   system: string;
-  model: string;
+  model: AgentModel;
   /**
-   * The stored model profile. `effort` is echoed by the API read but does not
-   * reach a provider request; see `lib/agentModelConfig.ts` for the save rule.
+   * The local compatibility profile; canonical values live in `model`.
+   * Provider execution depends on model capabilities; see `lib/agentModelConfig.ts` for the save rule.
    */
   model_config?: { id?: string; speed: string; effort?: string };
   tools: AgentToolset[];

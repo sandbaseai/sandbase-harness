@@ -28,6 +28,39 @@ import {
 export const MAX_INITIAL_EVENTS = 50;
 
 /**
+ * Maximum session-create request body in bytes (32 MB).
+ *
+ * The published contract answers `413` when the create body exceeds 32 MB.
+ * The bound is checked before the body is parsed so an over-large payload is
+ * refused without materializing it as a session or a half-admitted batch. It
+ * is a request-size rule, not an `initial_events` rule — it applies to the
+ * whole create call — so it lives next to the event caps the same call
+ * enforces.
+ */
+export const MAX_SESSION_CREATE_BODY_BYTES = 32 * 1024 * 1024;
+
+/**
+ * Maximum number of `user.define_outcome` events in one creation call.
+ *
+ * The published contract admits at most one outcome declaration per session:
+ * a second is rejected with 400 rather than silently dropped or allowed to
+ * shadow the first, because two outcomes would race to own the session's
+ * `outcome_id` join.
+ */
+export const MAX_INITIAL_DEFINE_OUTCOME = 1;
+
+/**
+ * Maximum number of file-sourced `document` content blocks across the whole
+ * `initial_events` list.
+ *
+ * The published contract bounds the file-document fan-out at creation to 100
+ * blocks — `{type:"document", source:{type:"file"}}` — counted across every
+ * `user.message` in the batch, not per event. Enforced here so an over-large
+ * file expansion fails before any session row exists.
+ */
+export const MAX_INITIAL_FILE_DOCUMENT_BLOCKS = 100;
+
+/**
  * A `system.message` event as the deployment contract allows it in
  * `initial_events`. It is appended to the session's log as privileged context
  * but is not a `UserEvent` — it never answers a tool call or a steer — so it
@@ -99,6 +132,8 @@ export function normalizeInitialEvents(
   }
 
   const events: DeploymentInitialEvent[] = [];
+  let defineOutcomeCount = 0;
+  let fileDocumentBlocks = 0;
   for (const [index, raw] of value.entries()) {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
       return {
@@ -133,6 +168,17 @@ export function normalizeInitialEvents(
     }
 
     if (event.type === 'user.define_outcome') {
+      // The published contract admits at most one outcome declaration per
+      // session: a second races the first for the `outcome_id` join, so it is
+      // refused rather than normalized.
+      defineOutcomeCount += 1;
+      if (defineOutcomeCount > MAX_INITIAL_DEFINE_OUTCOME) {
+        return {
+          ok: false,
+          code: 'invalid_initial_events',
+          message: `initial_events accepts at most ${MAX_INITIAL_DEFINE_OUTCOME} user.define_outcome event; initial_events[${index}] is the second`,
+        };
+      }
       const outcome = normalizeDefineOutcome(event);
       if (!outcome.ok) {
         return {
@@ -163,10 +209,40 @@ export function normalizeInitialEvents(
         message: `initial_events[${index}].${redacted}`,
       };
     }
+    // The published bound counts file-sourced document blocks across the whole
+    // batch, not per event, so the tally is a running total rather than a
+    // per-message check. Counted on the normalized blocks so a coerced string
+    // payload contributes its real block count.
+    fileDocumentBlocks += content.filter(isFileSourcedDocumentBlock).length;
+    if (fileDocumentBlocks > MAX_INITIAL_FILE_DOCUMENT_BLOCKS) {
+      return {
+        ok: false,
+        code: 'invalid_initial_events',
+        message: `initial_events accepts at most ${MAX_INITIAL_FILE_DOCUMENT_BLOCKS} file-sourced document blocks across the list; initial_events[${index}] pushes the total past the bound`,
+      };
+    }
     events.push({ type: 'user.message', content });
   }
 
   return { ok: true, events };
+}
+
+/**
+ * A `document` content block whose bytes come from an uploaded file — the
+ * block shape the published file-document bound counts. `source.type:"file"`
+ * and a bare `file_id` reference are the same source by different spelling.
+ */
+function isFileSourcedDocumentBlock(block: unknown): boolean {
+  if (!block || typeof block !== 'object' || Array.isArray(block)) return false;
+  const record = block as Record<string, unknown>;
+  if (record.type !== 'document') return false;
+  const source = record.source;
+  if (source && typeof source === 'object' && !Array.isArray(source)) {
+    const kind = (source as Record<string, unknown>).type;
+    if (kind === 'file') return true;
+    if (typeof (source as Record<string, unknown>).file_id === 'string') return true;
+  }
+  return false;
 }
 
 type DefineOutcomeResult = { ok: true; event: UserDefineOutcomeEvent } | { ok: false; message: string };

@@ -130,13 +130,17 @@ describe('Credential rotation and audit (documented routes)', () => {
 
   it('lets an attached session pick up the rotated value without recreating it', async () => {
     const credential = await addCredential();
-    expect(resolveSessionCredentialInjections(db, 'sess_v', { targetHost: 'https://api.github.com' })
-      .environment.GITHUB_TOKEN).toBe('ghp_original');
+    // The environment channel only materializes as placeholders now, so the
+    // rotation observable is the value the boundary substitutes behind the
+    // stable token, not the process-facing value.
+    expect(resolveSessionCredentialInjections(db, 'sess_v', { targetHost: 'https://api.github.com', placeholders: true })
+      .placeholders[0]?.value).toBe('ghp_original');
 
     await post(`/v1/credential-vaults/vlt_test/credentials/${credential.id}/rotate`, { value: 'ghp_rotated' });
 
-    const bundle = resolveSessionCredentialInjections(db, 'sess_v', { targetHost: 'https://api.github.com' });
-    expect(bundle.environment.GITHUB_TOKEN).toBe('ghp_rotated');
+    const bundle = resolveSessionCredentialInjections(db, 'sess_v', { targetHost: 'https://api.github.com', placeholders: true });
+    expect(bundle.environment.GITHUB_TOKEN).toBe(`__cred_${credential.id}__`);
+    expect(bundle.placeholders[0]?.value).toBe('ghp_rotated');
     expect(bundle.credentials[0].id).toBe(credential.id);
   });
 

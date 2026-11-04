@@ -15,11 +15,17 @@ describe('official SDK vault update/delete and credential retrieve/delete', () =
         metadata: { keep: '1', drop: '2' },
       });
 
+      expect(created.type).toBe('vault');
+      expect((await client.beta.vaults.retrieve(created.id)).type).toBe('vault');
+      const listed = await client.beta.vaults.list();
+      expect(listed.data).toContainEqual(expect.objectContaining({ id: created.id, type: 'vault' }));
+
       const updated = await client.beta.vaults.update(created.id, {
         display_name: 'sdk-vault-renamed',
         metadata: { drop: null, added: '3' },
       });
       expect(updated.id).toBe(created.id);
+      expect(updated.type).toBe('vault');
       expect(updated.display_name).toBe('sdk-vault-renamed');
       expect(updated.metadata).toEqual({ keep: '1', added: '3' });
 
