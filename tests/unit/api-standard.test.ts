@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { toApiEvent, toApiSession, toApiSessionStatus } from '@/api/standard.js';
+import { toApiAgent, toApiEvent, toApiSession, toApiSessionStatus } from '@/api/standard.js';
 import type { AgentDefinition } from '@/types/agent.js';
 import type { Session, SessionEvent } from '@/types/session.js';
 
@@ -196,4 +196,11 @@ describe('standard API session serialization', () => {
   it('defaults stats.active_seconds to 0 for a session without event input', () => {
     expect(toApiSession(session(), agent).stats.active_seconds).toBe(0);
   });
+});
+
+it('projects legacy model profiles without changing the definition', () => {
+  const legacy = { ...agent, effort: 'max', model_config: { id: 'test-model', speed: 'extended' as const } };
+  const before = JSON.stringify(legacy);
+  expect(toApiAgent(legacy).model).toEqual({ id: 'test-model', speed: 'extended', effort: { type: 'max' } });
+  expect(JSON.stringify(legacy)).toBe(before);
 });

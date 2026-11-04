@@ -157,6 +157,75 @@
     ]
   },
   {
+    "id": "settings-test-model",
+    "group": "Runtime settings",
+    "title": "Test model connection",
+    "method": "POST",
+    "path": "/v1/x/settings/test-model",
+    "summary": "Explicitly send one small model request using the saved provider revision. May incur charges. No retries/tools, a 32-token output limit, a 20-second deadline and five requests per caller per minute. Does not save the model or activate settings. Stale revisions return 409 before networking.",
+    "parameters": [
+      {
+        "name": "model",
+        "type": "string",
+        "required": true,
+        "description": "Entered model reference, 1–256 characters after trimming. Normal provider-prefix and gateway resolution applies."
+      },
+      {
+        "name": "revision",
+        "type": "number",
+        "required": true,
+        "description": "Saved settings revision from GET /v1/x/settings."
+      }
+    ],
+    "response": [
+      {
+        "name": "ok",
+        "type": "boolean",
+        "description": "True only when the model returned nonempty text or reasoning output."
+      },
+      {
+        "name": "outcome",
+        "type": "string",
+        "description": "ok, configuration_invalid, authentication_failed, model_not_found, not_found, timeout, cancelled, rate_limited, network_error, invalid_response, or provider_error."
+      },
+      {
+        "name": "model",
+        "type": "string",
+        "description": "Requested model reference."
+      },
+      {
+        "name": "resolved_model",
+        "type": "string",
+        "description": "Model ID sent to the provider, when resolution succeeded."
+      },
+      {
+        "name": "provider",
+        "type": "string",
+        "description": "Saved provider vendor."
+      },
+      {
+        "name": "config_source",
+        "type": "saved",
+        "description": "Always saved; a successful probe does not activate pending settings."
+      },
+      {
+        "name": "revision",
+        "type": "number",
+        "description": "Saved revision tested."
+      },
+      {
+        "name": "elapsed_ms",
+        "type": "number",
+        "description": "Elapsed diagnostic time in milliseconds."
+      },
+      {
+        "name": "http_status",
+        "type": "number",
+        "description": "Optional provider HTTP error status. Raw error messages, credentials, URLs and response bodies are never returned."
+      }
+    ]
+  },
+  {
     "id": "settings-save",
     "group": "Runtime settings",
     "title": "Save settings",
