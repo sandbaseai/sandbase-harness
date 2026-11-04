@@ -42,7 +42,7 @@ import {
 } from '@/core/auth/external-authorization.js';
 import { toolError, toolErrorText } from '@/core/tool-result-error.js';
 import { MODEL_AUTH_FAILED_CODE, MODEL_NOT_FOUND_CODE } from '@/model/errors.js';
-import { resolvedModelIdOf } from '@/model/registry.js';
+import { resolvedModelIdOf, miniMaxReplayScopeOf } from '@/model/registry.js';
 import { anthropicCallOptions } from '@/model/anthropic-options.js';
 import type { ModelEffortLevel } from '@/core/agent/model-object.js';
 import { applyAnthropicCacheBreakpoints } from '@/strategy/anthropic-cache-breakpoints.js';
@@ -215,6 +215,7 @@ export class DefaultStrategy implements AgentStrategy {
     }
 
     let totalSteps = 0;
+    const privateReasoning = miniMaxReplayScopeOf(model) ? context.transientReasoning : undefined;
     let totalTokensIn = 0;
     let totalTokensOut = 0;
     const confirmTools = new Set(config.confirmTools ?? []);
@@ -516,6 +517,13 @@ export class DefaultStrategy implements AgentStrategy {
               metadata: { signal: 'reasoning' },
             });
             broadcast(thinkingEvent);
+            // A completed provider-parsed step remains valid history if the
+            // next request fails or is interrupted. This private supplement
+            // grants no tool authority: parked calls still need the full raw
+            // stream guard, and terminal session cleanup discards the cache.
+            if (!abortSignal?.aborted && (step.finishReason === 'stop' || step.finishReason === 'tool-calls')) {
+              privateReasoning?.remember(thinkingEvent.id, reasoning);
+            }
             // The canonical preview for `agent.thinking` is `event_start` only:
             // the buffered event carries no reasoning text, so a delta would
             // have to invent content. The carrier is keyed to the persisted

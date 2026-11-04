@@ -133,7 +133,7 @@ export class ContextCompactor {
    * group-start event; tool calls and their results therefore share a group
    * even when confirmations or lifecycle events sit between them.
    */
-  splitAtomicGroups(events: SessionEvent[]): AtomicGroup[] {
+  splitAtomicGroups(events: SessionEvent[], supplementalTokens?: ReadonlyMap<string, number>): AtomicGroup[] {
     const groups: AtomicGroup[] = [];
     let current: AtomicGroup | undefined;
     for (const event of events) {
@@ -142,7 +142,7 @@ export class ContextCompactor {
         groups.push(current);
       }
       current.events.push(event);
-      current.tokens += estimateEventTokens(event);
+      current.tokens += estimateEventTokens(event) + (supplementalTokens?.get(event.id) ?? 0);
     }
     return groups;
   }
@@ -157,12 +157,15 @@ export class ContextCompactor {
     priorBoundary: CompactionBoundaryInput | null,
     model: LanguageModel,
     contextWindowTokens?: number,
+    supplementalTokens?: ReadonlyMap<string, number>,
   ): Promise<CompactionResult | null> {
     const window = contextWindowTokens ?? this.config.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW;
     const scope = priorBoundary
       ? events.filter((e) => e.seq > priorBoundary.eventSeqBefore)
       : events;
-    const groups = this.splitAtomicGroups(scope);
+    // Private provider replay contributes only a numeric budget. Its text must
+    // never enter the summary prompt, persisted summary, or memory extraction.
+    const groups = this.splitAtomicGroups(scope, supplementalTokens);
     if (groups.length <= 1) return null; // one turn cannot be split
 
     // The newest group always survives. When it alone overflows the whole

@@ -20,7 +20,8 @@ import type { AgentDefinition } from '@/types/agent.js';
 import type { SandboxInstance, SandboxProvider, EnvironmentConfig } from '@/types/sandbox.js';
 import type { SandboxProviderRegistry } from '@/sandbox/registry.js';
 import type { AgentStrategy, ExternalAuthorizationHook, StrategyContext } from '@/types/strategy.js';
-import { ModelRegistry } from '@/model/registry.js';
+import { ModelRegistry, miniMaxReplayScopeOf } from '@/model/registry.js';
+import { TransientReasoningStore } from './transient-reasoning.js';
 import type { McpServerStatus } from '@/core/mcp/mcp-manager.js';
 import { EventLogger } from './event-logger.js';
 import { parkedCalls } from './parked-calls.js';
@@ -189,6 +190,7 @@ export class DefaultSessionExecutor implements SessionExecutor {
   private readonly contextBuilder: ContextBuilder;
   private readonly delegationService: DelegationService;
   private readonly toolResolver: ToolResolver;
+  private readonly transientReasoning = new TransientReasoningStore();
 
   constructor(private readonly deps: ExecutorDeps) {
     // Named rather than spread: these are the two dependencies that decide
@@ -317,6 +319,12 @@ export class DefaultSessionExecutor implements SessionExecutor {
           headers: this.modelRequestHeaders(session, agent),
         });
 
+    const replayScope = miniMaxReplayScopeOf(model);
+    if (!replayScope) this.transientReasoning.delete(session.id);
+    const transientReasoning = replayScope
+      ? this.transientReasoning.forSession(session.id, replayScope)
+      : undefined;
+
     // 3. Provision sandbox (or reuse the one bound to this session).
     // Assigned skill packages are materialized into the sandbox workdir at the
     // same `skills/<name>/` root a self-hosted worker downloads to, so file and
@@ -399,6 +407,7 @@ export class DefaultSessionExecutor implements SessionExecutor {
       model,
       broadcast,
       {
+        transientReasoning,
         repositorySkills,
         sandboxProvider: this.sandboxLifecycle.resolveProviderType(session),
         skillPackagePaths: this.sandboxLifecycle.materializedSkillPaths(session.id),
@@ -447,6 +456,7 @@ export class DefaultSessionExecutor implements SessionExecutor {
       messages: messages as any,
       modelConfig,
       model,
+      transientReasoning,
       ...(this.deps.skillsDir ? { skillDirs: this.skillDirsFor(agent) } : {}),
       tools,
       // Names the strategy must expose but never execute. Derived from the same
@@ -675,6 +685,7 @@ export class DefaultSessionExecutor implements SessionExecutor {
    * SessionManager when the session reaches a terminal state.
    */
   async cleanupSession(sessionId: string): Promise<void> {
+    this.transientReasoning.delete(sessionId);
     // Engine-owned children stop first. A session-owned child still running
     // would keep using a work directory the runtime has just released, and its
     // cleanup failures (such as `pi_cleanup_pending`) are ownership failures
