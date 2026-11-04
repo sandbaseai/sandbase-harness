@@ -292,3 +292,10 @@ make the commit subject match the PR title.
 
 [`BACKLOG.md`](./BACKLOG.md) is the public product roadmap. Read it before
 proposing roadmap work, and update it when a product gap is confirmed or closes.
+
+The CMA compatibility target includes the official multiagent surface under
+[decision 0002](decisions/0002-cma-multiagent-parity.md). Current capability
+statuses describe shipped behavior, not the target: keep unimplemented
+operations refused until their execution and lifecycle are covered. Report
+route coverage, semantic differences, backend limits, and explicit scope
+decisions separately; none is a percentage of complete CMA compatibility.

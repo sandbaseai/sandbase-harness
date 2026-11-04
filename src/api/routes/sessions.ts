@@ -18,8 +18,10 @@ import { existsSync, readFileSync } from 'node:fs';
 import type { ServerDeps } from '../server.js';
 import type { ApiSessionStatus, SessionEvent, SessionLoopEngine, SessionStatus } from '@/types/session.js';
 import type { UserEvent } from '@/types/cma-protocol.js';
+import { CMA_EVENT_TYPES } from '@/types/cma-protocol.js';
 import type { AgentDefinition } from '@/types/agent.js';
 import { UnsupportedCapabilityError } from '@/core/capabilities/registry.js';
+import { SelfHostedToolResultUnsupportedError } from '@/core/session/tool-result-admission.js';
 import { cursorPageOf, cursorQueryMismatch, decodeCursor, encodeCursor, normalizeCollectionFilter, toApiEvent, toApiSession } from '../standard.js';
 import { unsupportedCapability } from '../capability-errors.js';
 import { isTerminal } from '@/core/session/state-machine.js';
@@ -43,7 +45,7 @@ import { activeSecondsFromEvents, activeSecondsFromTicks } from '@/core/session/
 import { outcomeEvaluationsFromEvents } from '@/core/outcomes/session-outcomes.js';
 import { SESSION_WORK_SENDABLE_EVENTS, sessionWorkAuthFromHeader } from '@/core/auth/session-work-scope.js';
 import { parseIncludeArchived, rejectUnexpectedQueryParams } from './query-params.js';
-import { normalizeDefineOutcome, normalizeInitialEvents } from './initial-events.js';
+import { MAX_SESSION_CREATE_BODY_BYTES, normalizeDefineOutcome, normalizeInitialEvents } from './initial-events.js';
 import { isBudgetError, parseSessionBudget, BUDGET_ERROR_CODES } from '@/core/session/session-budget.js';
 import { isOutcomeGraderUnavailableError } from '@/core/outcomes/loop.js';
 import { isPiSessionAdmissionError } from '@/core/session/pi-policy.js';
@@ -54,8 +56,10 @@ import {
   resolveRequestedLoopEngine,
 } from '@/core/session/loop-engine-admission.js';
 import {
+  modelSupportsMidConversationSystem,
   normalizeSystemMessageContent,
   systemMessageContentError,
+  systemMessageOrderingViolationIndex,
 } from './system-message.js';
 import { publishOperationEvent } from './operation-events.js';
 import type { LoopEngineSteerReceipt } from '@/strategy/loop-engine/adapter.js';
@@ -102,16 +106,61 @@ export function sessionsRoutes(deps: ServerDeps) {
 
   // POST / - Create session
   app.post('/', async (c) => {
+    // The published contract answers 413 for a create body over 32 MB. The
+    // Content-Length header is the cheap check; when it is absent or
+    // unreliable the parsed body's serialized length is the backstop, so an
+    // over-large payload is refused either way before a session row exists.
+    const declared = Number(c.req.header('content-length'));
+    if (Number.isFinite(declared) && declared > MAX_SESSION_CREATE_BODY_BYTES) {
+      return c.json(
+        {
+          error: {
+            type: 'invalid_request_error',
+            code: 'request_too_large',
+            message: `Request body exceeds the ${MAX_SESSION_CREATE_BODY_BYTES}-byte limit`,
+          },
+        },
+        413,
+      );
+    }
     let body: any;
     try {
       body = await c.req.json();
     } catch {
       return invalid(c, 'Request body must be valid JSON');
     }
+    // Content-Length is advisory — a chunked or header-less request can still
+    // exceed the bound, so the parsed body's own size is the authoritative
+    // backstop. Reserializing costs one pass over a body already in memory.
+    try {
+      if (Buffer.byteLength(JSON.stringify(body), 'utf8') > MAX_SESSION_CREATE_BODY_BYTES) {
+        return c.json(
+          {
+            error: {
+              type: 'invalid_request_error',
+              code: 'request_too_large',
+              message: `Request body exceeds the ${MAX_SESSION_CREATE_BODY_BYTES}-byte limit`,
+            },
+          },
+          413,
+        );
+      }
+    } catch {
+      // A body that cannot be reserialized is malformed regardless of size.
+      return invalid(c, 'Request body must be valid JSON');
+    }
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       return invalid(c, 'Request body must be an object');
     }
     const { agent, environment_id, title, metadata } = body;
+    // `title` is an optional string on create exactly as on update; a non-string
+    // is refused rather than coerced, because a persisted number or object would
+    // surface back as a title the caller never set. The update path makes the
+    // same refusal (`title must be a string or null`), so the two ingresses
+    // agree on the type.
+    if (title !== undefined && title !== null && typeof title !== 'string') {
+      return invalid(c, 'title must be a string or null');
+    }
     const agentRef = normalizeAgentRef(agent);
     const environment = normalizeEnvironmentId(deps, environment_id);
     const resources = normalizeResources(deps, body.resources);
@@ -225,6 +274,12 @@ export function sessionsRoutes(deps: ServerDeps) {
       // not an internal failure, so it answers with its own code instead of 500.
       if (isEnvironmentConfigError(err)) {
         return invalidWithCode(c, err.code, err.message);
+      }
+      // Every other coded refusal is a well-formed request asking for something
+      // the contract does not allow — here, an `allowed_domains` entry outside
+      // the Environment's `allowed_hosts` — never an internal failure.
+      if (typeof (err as { code?: unknown }).code === 'string') {
+        return invalidWithCode(c, (err as { code: string }).code, (err as Error).message);
       }
       if (err instanceof Error && err.message.includes('Agent not found')) {
         return c.json({ error: { type: 'not_found', message: err.message } }, 404);
@@ -564,6 +619,32 @@ export function sessionsRoutes(deps: ServerDeps) {
       return c.json({ error: { type: 'conflict', message: `Session ${sessionId} is in terminal state: ${session.status}` } }, 409);
     }
 
+    // Two published `system.message` gates need the session, not just the
+    // payload shape, so they run after the row resolves: the model must support
+    // mid-conversation system injection, and a session idle on `requires_action`
+    // only admits one that trails a tool-answer event in the same batch.
+    if (events.some((event: any) => event?.type === 'system.message')) {
+      const model = (session.agentDefinition ?? findAgentById(deps, session.agentId))?.model;
+      if (!modelSupportsMidConversationSystem(model)) {
+        return c.json({
+          error: {
+            type: 'invalid_request_error',
+            code: 'model_does_not_support_mid_conversation_system',
+            message: `model "${model ?? 'unknown'}" does not support mid-conversation system injection`,
+          },
+        }, 400);
+      }
+      const badIndex = systemMessageOrderingViolationIndex(events, session.status === 'requires_action');
+      if (badIndex !== -1) {
+        return c.json({
+          error: {
+            type: 'invalid_request_error',
+            message: 'system.message must trail a tool result event in the same request while the session awaits action on a pending tool call',
+          },
+        }, 400);
+      }
+    }
+
     try {
       // Evaluate every event before appending any one of them so a later Pi
       // policy failure cannot partially apply a mixed CMA batch.
@@ -594,6 +675,9 @@ export function sessionsRoutes(deps: ServerDeps) {
           code: err.code,
           message: err.message,
         } }, 400);
+      }
+      if (err instanceof SelfHostedToolResultUnsupportedError) {
+        return invalidWithCode(c, err.code, err.message);
       }
       // A session at its ceiling refuses the event that would start the next
       // model request. That is a well-formed request asking for something the
@@ -798,7 +882,7 @@ export function sessionsRoutes(deps: ServerDeps) {
   // pagination.md` already described this route as carrying `{session_id, after_id}` in
   // its cursor; the route never did, and now it does.
   app.get('/:id/events', (c) => {
-    const rejected = rejectUnexpectedQueryParams(c, ['limit', 'after_id', 'page']);
+    const rejected = rejectUnexpectedQueryParams(c, ['limit', 'after_id', 'page', 'types', 'types[]']);
     if (rejected) return rejected;
     const sessionId = c.req.param('id');
 
@@ -810,12 +894,40 @@ export function sessionsRoutes(deps: ServerDeps) {
     const rawLimit = parseInt(c.req.query('limit') ?? '1000', 10) || 1000;
     const limit = Math.min(1000, Math.max(1, rawLimit));
 
+    // `types[]` is the SDK's array spelling and `types` the bare one; both are
+    // repeatable and every value must be an event type this runtime can emit,
+    // because an unknown string silently filters to an empty page — the same
+    // wrong answer the statuses filter refuses to give.
+    const typeValues = [
+      ...(c.req.queries('types') ?? []),
+      ...(c.req.queries('types[]') ?? []),
+    ];
+    const badType = typeValues.find((value) => !CMA_EVENT_TYPES.has(value));
+    if (badType !== undefined) {
+      return c.json({
+        error: {
+          type: 'invalid_request_error',
+          message: `Invalid types value "${badType}". This route accepts the event types this runtime emits.`,
+        },
+      }, 400);
+    }
+    const types = typeValues.length === 0 ? undefined : new Set(typeValues);
+
     // `after_id` is the local spelling of the position and stays supported; `page` is
     // the published one. Both name the last event the caller already has, and the
     // cursor carries that id together with the session it came from, so a cursor
     // issued by another session is refused by the shared filter check rather than
-    // silently applied to this session's log.
-    const cursorState = { order: EVENTS_LIST_ORDER, filter: { session_id: sessionId } };
+    // silently applied to this session's log. The `types` filter rides in the
+    // cursor's filter bag for the same reason `statuses` does on the session
+    // list — a cursor replayed under a different filter is refused rather than
+    // resumed mid-set.
+    const cursorState = {
+      order: EVENTS_LIST_ORDER,
+      filter: {
+        session_id: sessionId,
+        ...(types ? { types: [...types].sort().join(',') } : {}),
+      },
+    };
     let afterId = c.req.query('after_id');
     let fromCursor = false;
     const rawPage = c.req.query('page');
@@ -850,7 +962,8 @@ export function sessionsRoutes(deps: ServerDeps) {
       }, 400);
     }
 
-    const events = start > 0 ? allEvents.slice(start) : allEvents;
+    const events = (start > 0 ? allEvents.slice(start) : allEvents)
+      .filter((event) => types === undefined || types.has(event.type));
     const limited = events.slice(0, limit);
 
     const last = limited[limited.length - 1];

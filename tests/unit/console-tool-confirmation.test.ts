@@ -132,6 +132,7 @@ describe('Console custom tool result submission', () => {
     const entries = conversationEntries([customResult('cust_missing')]);
     expect(entries).toHaveLength(1);
     expect(entries[0].role).toBe('tool');
+    if (entries[0].role !== 'tool') throw new Error('Expected an unpaired tool result');
     expect(entries[0].result).toBe('sunny, 21°C');
   });
 

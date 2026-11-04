@@ -73,7 +73,10 @@ const definition = {
   system: 'Stay put.',
 };
 
-const roster = { type: 'coordinator', agents: [{ type: 'agent', id: 'agent_example' }] };
+const roster = {
+  type: 'multiagent_20261001',
+  subagents: { predefined_agents: [{ type: 'agent', id: 'agent_example' }] },
+};
 
 function storedDefinitions(ctx: TestContext): AgentDefinition[] {
   return (ctx.db.prepare('SELECT definition FROM agents').all() as Array<{ definition: string }>)
@@ -95,8 +98,18 @@ describe('canonical multiagent roster', () => {
     // The refusal names the reason rather than only the field, and it points at
     // the local extension the caller can use instead.
     expect(attempt.body.error.details[0].message).toContain('thread');
+    expect(attempt.body.error.details[0].message).toContain('not implemented');
+    expect(attempt.body.error.details[0].message).toContain('decisions/0002');
     expect(attempt.body.error.details[0].message).toContain('enable_general_subagent');
     expect(storedDefinitions(ctx)).toEqual([]);
+
+    const inventory = await request(ctx.app, 'GET', '/v1/x/capabilities');
+    expect(inventory.res.status).toBe(200);
+    for (const id of ['multiagent-roster', 'threads-and-coordinator']) {
+      expect(inventory.body.contract.capabilities).toContainEqual(expect.objectContaining({
+        id, status: 'unavailable', reason: expect.stringContaining('decisions/0002'),
+      }));
+    }
   });
 
   it('refuses a roster on update with the same capability id', async () => {
