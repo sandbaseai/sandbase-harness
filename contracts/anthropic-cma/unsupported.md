@@ -102,11 +102,11 @@ unsupported capability and its reason, and separating "not implemented" from
 
 ## 7. Status
 
-Mixed, per the table in §2. Two entries are `not_applicable` by design and the
-rest are `unavailable`. Every one is recorded in the capability matrix with its
-reason rather than being omitted. Five entries that used to be here are no
-longer: session budget, `web_search` execution, dreams, and
-`mcp_oauth_validate` each have their own coverage because they were
-implemented, and the multiagent surface is `not_applicable` by decision
-([`decisions/0001`](../../decisions/0001-multiagent-out-of-scope.md)) rather
-than `unavailable` — its file is [`threads.md`](./threads.md).
+The two matrix entries owned by this file remain `not_applicable`; hosted
+user profiles are also refused and tracked in the route inventory. These
+exclusions remain visible limitations against the full compatibility target.
+Session budget, `web_search`, dreams, and `mcp_oauth_validate` have their own
+contracts because implementations now exist. Multiagent is `unavailable`
+under [decision 0002](../../decisions/0002-cma-multiagent-parity.md), which
+supersedes its earlier scope exclusion; [`threads.md`](./threads.md) records
+that open implementation gap and its continuing refusals.

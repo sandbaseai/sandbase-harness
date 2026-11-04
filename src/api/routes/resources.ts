@@ -16,9 +16,10 @@ export function resourceRoutes(deps: ServerDeps) {
   // references use. That router declares its paths relative to its mount, so this
   // pair of mounts *is* the alias — there is no second route list to keep in step,
   // and a route added there is reachable at both prefixes with no edit here. The
-  // local spelling is neither deprecated, nor redirected, nor removed.
+  // local spelling keeps its credential_vault discriminator; the published
+  // mount uses vault. All operations still share the same implementation.
   app.route('/credential-vaults', credentialVaultRoutes(deps));
-  app.route('/vaults', credentialVaultRoutes(deps));
+  app.route('/vaults', credentialVaultRoutes(deps, 'vault'));
   app.route('/', memoryStoreRoutes(deps));
 
   return app;

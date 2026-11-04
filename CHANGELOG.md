@@ -2,7 +2,52 @@
 
 ## Unreleased
 
+### Added
+
+- Settings > Setup can explicitly test a model connection using the saved
+  provider and the entered model reference. `POST /v1/x/settings/test-model`
+  checks the saved revision before one request with a 32-token output limit,
+  a 20-second deadline, no retries or tools, and five requests per caller per
+  minute. Results distinguish readiness,
+  authentication, missing models/endpoints, timeout, rate limit, transport,
+  and response failures without exposing upstream bodies or credentials.
+  The probe may incur provider charges; it neither saves the entered model nor
+  activates settings or creates a session. Existing configuration checks remain
+  available separately.
+
+### Compatibility scope
+
+- Official multiagent behavior returns to the CMA target under decision 0002.
+  `/v1/x/capabilities` now reports `multiagent-roster` and
+  `threads-and-coordinator` as `unavailable` instead of `not_applicable`.
+  Agent writes and thread routes still refuse the unsupported surface; their
+  explanations now identify an implementation gap. The roadmap records
+  remaining protocol, execution, and verification work and removes completed
+  package-installation, declarative-apply, session CLI, and snapshot tasks.
+
 ### Fixed
+
+- `user.tool_result` now fails with `400 invalid_request_error` and code
+  `self_hosted_tool_result_not_supported` before persistence or execution,
+  including whole-batch preflight. Previously it could return `accepted: true`
+  and append an answer the runtime could not consume. Official self-hosted
+  built-in tool answers remain unimplemented; existing local worker completions
+  and `user.custom_tool_result` retain their separate protocols.
+
+- Agent responses now return `model` as `{id, speed, effort?: {type}}` across
+  CRUD, versions, session snapshots and update events. **Breaking wire change:**
+  string readers must use `agent.model.id`; Console, CLI and the local SDK are
+  migrated. Object-form effort can be saved back without rejection, and SDK
+  partial updates preserve omitted fields without reposting a read projection.
+  `model_config` remains a compatibility extension. Omitted effort still follows
+  runtime/provider defaults; official save-time default resolution remains open.
+
+- Vault objects at `/v1/vaults` now return the published `type: "vault"` on
+  create, retrieve, list, update, and archive. `/v1/credential-vaults` retains
+  `type: "credential_vault"` for local clients; both prefixes share records and
+  credential handling without a database migration. Clients using the published
+  prefix must accept `vault`, or use the local prefix for the legacy value.
+  Credential subresource types and `vault_deleted` are unchanged.
 
 - `POST /v1/deployments` now enforces the published per-organization cap of
   1,000 live deployments (`official-docs/scheduled-deployments.md`). A create

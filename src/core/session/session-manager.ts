@@ -11,6 +11,7 @@
  */
 
 import { nanoid } from 'nanoid';
+import { assertToolResultSupported } from './tool-result-admission.js';
 import type { Database } from '@/core/db/database.js';
 import type { ArtifactStore } from '@/core/storage/artifact-store.js';
 import { parseSessionVaultIds } from '@/core/credentials/injection.js';
@@ -1139,6 +1140,10 @@ export class SessionManager {
     if (isTerminal(session.status)) {
       throw new Error(`Session ${sessionId} is in terminal state: ${session.status}`);
     }
+    // TypeScript's UserEvent union is not an ingress guard. Refuse the official
+    // worker result before a raw HTTP/direct caller can persist an answer that
+    // no executor consumes. This also runs during whole-batch preflight.
+    assertToolResultSupported(event);
     // Existing Pi rows can predate the creation guard. Reject them before
     // repair/persistence or queuing so a resumed turn cannot bypass policy.
     this.assertPiSessionCanExecute(session, event);

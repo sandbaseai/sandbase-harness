@@ -900,7 +900,7 @@ async function listAgents(opts: { port: string }) {
     }
     console.log('Loaded agents:\n');
     for (const agent of body.data) {
-      console.log(`  ${agent.id}  ${agent.name}  (model: ${agent.model}, status: ${agent.status})`);
+      console.log(`  ${agent.id}  ${agent.name}  (model: ${typeof agent.model === 'string' ? agent.model : agent.model.id}, status: ${agent.status})`);
     }
   } catch {
     console.error(`Error: [LIST] Cannot connect to server on port ${opts.port}`);

@@ -77,7 +77,7 @@ describe('doc cURL examples replayed verbatim', () => {
     expect(created.body).toMatchObject({
       type: 'agent',
       name: 'Coding Assistant',
-      model: 'claude-opus-5-5',
+      model: { id: 'claude-opus-5-5', speed: 'standard' },
       system: 'You are a helpful coding agent.',
     });
     expect(created.body.id).toMatch(/^agent_/);
@@ -112,12 +112,7 @@ describe('doc cURL examples replayed verbatim', () => {
 
     expect(created.status).toBe(201);
     expect(created.body).toMatchObject({
-      // The doc's response carries `"type": "vault"`; this runtime answers
-      // `credential_vault`, the resource kind its Console and stored
-      // references already read. That divergence is recorded in
-      // credentials.md §4 rather than renamed, so the oracle asserts the
-      // actual value and the field stays pinned by name.
-      type: 'credential_vault',
+      type: 'vault',
       display_name: 'Alice',
       metadata: { external_user_id: 'usr_abc123' },
     });

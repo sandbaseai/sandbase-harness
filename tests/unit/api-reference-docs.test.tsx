@@ -56,6 +56,7 @@ describe('API reference docs', () => {
     expect(API_REFERENCE_DOCS.some((endpoint) => !endpoint.id.includes('create'))).toBe(true);
     expect(API_REFERENCE_DOCS.some((endpoint) => endpoint.id.includes('delete'))).toBe(true);
     expect(API_REFERENCE_DOCS.some((endpoint) => endpoint.id === 'settings-validate')).toBe(true);
+    expect(API_REFERENCE_DOCS.some((endpoint) => endpoint.id === 'settings-test-model')).toBe(true);
     expect(API_REFERENCE_DOCS.some((endpoint) => endpoint.path === '/v1/x/metrics/summary')).toBe(true);
     expect(ids.has(DEFAULT_API_REFERENCE_ENDPOINT_ID)).toBe(true);
   });
@@ -63,6 +64,7 @@ describe('API reference docs', () => {
   it('documents the full Runtime Settings response shape used by the Console', () => {
     const getSettings = API_REFERENCE_DOCS.find((endpoint) => endpoint.id === 'settings-get');
     const saveSettings = API_REFERENCE_DOCS.find((endpoint) => endpoint.id === 'settings-save');
+    const testModel = API_REFERENCE_DOCS.find((endpoint) => endpoint.id === 'settings-test-model');
     const restartRuntime = API_REFERENCE_DOCS.find((endpoint) => endpoint.id === 'runtime-restart');
     const expectedStateFields = [
       'schema_version',
@@ -84,6 +86,10 @@ describe('API reference docs', () => {
       'adapters',
     ]));
     expect(saveSettings?.response.map((field) => field.name)).toEqual(expect.arrayContaining(expectedStateFields));
+    expect(testModel?.parameters?.map((field) => field.name)).toEqual(['model', 'revision']);
+    expect(testModel?.response.map((field) => field.name)).toEqual(expect.arrayContaining([
+      'ok', 'outcome', 'model', 'resolved_model', 'provider', 'config_source', 'revision', 'elapsed_ms', 'http_status',
+    ]));
     expect(restartRuntime?.response.map((field) => field.name)).toEqual(['restarting', 'status']);
   });
 

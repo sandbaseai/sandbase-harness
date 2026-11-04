@@ -189,6 +189,9 @@
     "secret_not_configured": [
       "src/core/settings/schema.ts"
     ],
+    "self_hosted_tool_result_not_supported": [
+      "src/core/session/tool-result-admission.ts"
+    ],
     "session_archived": [
       "src/api/routes/sessions.ts"
     ],
