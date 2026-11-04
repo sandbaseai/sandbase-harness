@@ -17,6 +17,9 @@ import {
 
 export type ValidationResult<T> = { ok: true; value: T } | { ok: false; message: string };
 
+/** The published bound: at most 500 file resources attached per session. */
+const MAX_FILE_RESOURCES_PER_SESSION = 500;
+
 export function normalizeMessageContent(content: unknown): ContentBlock[] | null {
   if (typeof content === 'string') {
     return [{ type: 'text', text: content }];
@@ -153,6 +156,7 @@ export function normalizeResources(deps: ServerDeps, value: unknown): Validation
 
   const resources: Array<Record<string, unknown>> = [];
   let memoryStoreCount = 0;
+  let fileCount = 0;
   const memoryMounts = new Set<string>();
   for (const [index, resource] of value.entries()) {
     if (!resource || typeof resource !== 'object' || Array.isArray(resource)) {
@@ -161,6 +165,13 @@ export function normalizeResources(deps: ServerDeps, value: unknown): Validation
     if ((resource as Record<string, unknown>).type === 'memory_store') memoryStoreCount += 1;
     if (memoryStoreCount > MAX_MEMORY_STORES_PER_SESSION) {
       return { ok: false, message: `A session may attach at most ${MAX_MEMORY_STORES_PER_SESSION} memory stores` };
+    }
+    // The published bound is 500 files per session: `file` resources are the
+    // file attachments, so the counter keys on that type alone — a memory
+    // store or a github repository does not draw it down.
+    if ((resource as Record<string, unknown>).type === 'file') fileCount += 1;
+    if (fileCount > MAX_FILE_RESOURCES_PER_SESSION) {
+      return { ok: false, message: `A session may attach at most ${MAX_FILE_RESOURCES_PER_SESSION} file resources` };
     }
     const normalized = normalizeSessionResource(deps, resource as Record<string, unknown>, index);
     if (!normalized.ok) return normalized;

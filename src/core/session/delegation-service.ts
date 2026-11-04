@@ -186,7 +186,9 @@ export class DelegationService {
     // `session.vaultIds` is the hydrated row value, and an absent list narrows
     // the child to none rather than widening it to anything the store holds.
     // Placeholders go to the child's own sandbox boundary, provisioned above,
-    // so the secret still never enters a delegated process environment.
+    // so the secret still never enters a delegated process environment — and
+    // a child sandbox with no boundary has its environment credentials
+    // refused, never materialized as plaintext.
     const usePlaceholders = typeof sandbox.configureEgressSubstitutions === 'function';
     const childCredentialTarget = (): CredentialInjectionTarget => ({
       vaultIds: session.vaultIds ?? [],

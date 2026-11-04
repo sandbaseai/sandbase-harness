@@ -20,6 +20,7 @@ function agentFixture(version: number, overrides: Partial<Agent> = {}): Agent {
     metadata: {},
     status: 'active',
     version,
+    multiagent: null,
     created_at: '2026-09-01T00:00:00Z',
     updated_at: '2026-09-01T00:00:00Z',
     archived_at: null,

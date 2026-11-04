@@ -1,9 +1,11 @@
+import { agentModelId } from '../../../lib/agentModelConfig';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, Bot, CheckCircle2, KeyRound } from 'lucide-react';
 import { putJson } from '../../../api';
 import { agentModelFieldHint, agentModelUpdateBody, pendingRestartNote, type SetupModelProvider } from '../../../lib/modelSetupGuidance';
 import type { ConsoleData } from '../../../types';
+import { ModelConnectionTest } from './ModelConnectionTest';
 
 type RowState = { kind: 'ok' | 'error'; text: string };
 
@@ -55,7 +57,7 @@ export function SetupAgentModels({
       const next = { ...current };
       let changed = false;
       for (const agent of data.agents) {
-        const stored = agent.model ?? '';
+        const stored = agentModelId(agent.model) ?? '';
         const previous = storedModels.current[agent.id];
         if (previous !== undefined && previous !== stored && next[agent.id] !== undefined) {
           delete next[agent.id];
@@ -79,7 +81,7 @@ export function SetupAgentModels({
   const save = async (agentId: string) => {
     const agent = data.agents.find((item) => item.id === agentId);
     if (!agent) return;
-    const update = agentModelUpdateBody(agent, draftFor(agent.id, agent.model ?? ''), t);
+    const update = agentModelUpdateBody(agent, draftFor(agent.id, agentModelId(agent.model) ?? ''), t);
     if (!update.ok) {
       setRowState(agentId, { kind: 'error', text: update.error });
       return;
@@ -119,6 +121,7 @@ export function SetupAgentModels({
         </div>
       </div>
       <p className="setupAgentHint">{agentModelFieldHint(provider, t)}</p>
+      <p className="setupAgentHint">{t('setupModels.connection.hint')}</p>
       {restartNote ? (
         <div className="setupProviderWarning">
           <AlertTriangle size={15} />
@@ -138,14 +141,14 @@ export function SetupAgentModels({
       {agents.length ? (
         <ul className="setupAgentList">
           {agents.map((agent) => {
-            const draft = draftFor(agent.id, agent.model ?? '');
+            const draft = draftFor(agent.id, agentModelId(agent.model) ?? '');
             const state = rowStates[agent.id];
             const saving = savingId === agent.id;
             return (
               <li key={agent.id} className="setupAgentRow">
                 <div className="setupAgentIdentity">
                   <strong>{agent.name}</strong>
-                  <span><KeyRound size={13} />{agent.model || t('setupModels.noModel')}</span>
+                  <span><KeyRound size={13} />{agentModelId(agent.model) || t('setupModels.noModel')}</span>
                 </div>
                 <form
                   className="setupAgentForm"
@@ -171,6 +174,8 @@ export function SetupAgentModels({
                     {saving ? t('setupModels.saving') : t('setupModels.save')}
                   </button>
                 </form>
+                <ModelConnectionTest model={draft} agentName={agent.name} revision={data.settings?.revision}
+                  disabled={saving} onRefresh={onRefresh} />
                 {state ? (
                   <div className={`inlineStatus ${state.kind === 'error' ? 'error' : 'neutral'}`}>
                     {state.kind === 'ok' ? <CheckCircle2 size={14} /> : <AlertTriangle size={14} />}

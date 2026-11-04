@@ -6,6 +6,7 @@
  * SSE streaming (`tail`) and a convenience `chat` (send + stream the reply).
  */
 
+import type { AgentModelResponse } from '@/types/agent-model.js';
 import type { ContentBlock, SessionBudget } from '@/types/cma-protocol.js';
 import type { ApiSessionStatus } from '@/types/session.js';
 import { withCompatibilityHeaders } from './headers.js';
@@ -64,7 +65,7 @@ export interface AgentSummary {
   name: string;
   description: string;
   system: string;
-  model: string;
+  model: AgentModelResponse;
   /**
    * The stored model profile. `effort` and `speed` are echoed here — on the
    * agent read, the version read, and a session's agent snapshot — and on the
@@ -260,6 +261,20 @@ export interface RuntimeSettingsValidationResult {
   normalized_config?: RuntimeSettingsConfig;
 }
 
+/** Result of an explicitly requested one-shot provider/model request. */
+export interface ModelConnectionTestResult {
+  ok: boolean;
+  outcome: 'ok' | 'configuration_invalid' | 'authentication_failed' | 'model_not_found'
+    | 'not_found' | 'timeout' | 'cancelled' | 'rate_limited' | 'network_error' | 'invalid_response' | 'provider_error';
+  model: string;
+  resolved_model?: string;
+  provider: string;
+  config_source: 'saved';
+  revision: number;
+  elapsed_ms: number;
+  http_status?: number;
+}
+
 /**
  * A partial settings document, merged over the stored one by `SettingsResource.patch`.
  *
@@ -361,7 +376,11 @@ export interface EnvironmentSummary {
    * stored config cannot be resolved.
    */
   effective_sandbox_provider: string | null;
-  /** Local extension: declared packages are recorded but not installed. */
+  /**
+   * Local extension: declared `config.packages` are installed at provisioning.
+   * `true` on an environment that resolves to a backend — every shipped
+   * provider executes commands — and `false` when resolution fails.
+   */
   packages_enforced: boolean;
   /** Local extension: the declared network policy is recorded but not enforced. */
   networking_enforced: boolean;
@@ -595,7 +614,7 @@ class AgentsResource {
   create(input: {
     name: string;
     description?: string;
-    model: string | Record<string, unknown>;
+    model: string | AgentModelResponse | Record<string, unknown>;
     system: string;
     tools?: Array<Record<string, unknown>>;
     mcp_servers?: Array<Record<string, unknown>>;
@@ -608,7 +627,7 @@ class AgentsResource {
   async update(id: string, input: Partial<{
     name: string;
     description: string;
-    model: string | Record<string, unknown>;
+    model: string | AgentModelResponse | Record<string, unknown>;
     system: string;
     tools: Array<Record<string, unknown>>;
     mcp_servers: Array<Record<string, unknown>>;
@@ -616,19 +635,9 @@ class AgentsResource {
     metadata: Record<string, unknown>;
     expected_version: number;
   }>): Promise<AgentSummary> {
-    const current = await this.get(id);
-    const { expected_version, ...patch } = input;
-    return this.client.request('PUT', `/v1/agents/${encodeURIComponent(id)}`, {
-      name: current.name,
-      description: current.description,
-      model: current.model,
-      system: current.system,
-      tools: current.tools,
-      mcp_servers: current.mcp_servers,
-      skills: current.skills,
-      ...patch,
-      ...(expected_version !== undefined ? { expected_version } : {}),
-    });
+    // The API preserves omitted fields. Reposting a read projection would
+    // materialize defaults and can create a version for an otherwise empty edit.
+    return this.client.request('PUT', `/v1/agents/${encodeURIComponent(id)}`, input);
   }
 
   versions(id: string): Promise<{ data: AgentSummary[]; prev_page: string | null; next_page: string | null }> {
@@ -938,6 +947,11 @@ class SettingsResource {
 
   get(): Promise<RuntimeSettingsSummary> {
     return this.client.request('GET', '/v1/x/settings');
+  }
+
+  /** Send one bounded live request using the saved provider and an entered model reference. */
+  testModel(model: string, revision: number): Promise<ModelConnectionTestResult> {
+    return this.client.request('POST', '/v1/x/settings/test-model', { model, revision });
   }
 
   /**

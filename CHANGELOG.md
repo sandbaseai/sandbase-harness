@@ -4,6 +4,111 @@
 
 ### Added
 
+- Settings > Setup can explicitly test a model connection using the saved
+  provider and the entered model reference. `POST /v1/x/settings/test-model`
+  checks the saved revision before one request with a 32-token output limit,
+  a 20-second deadline, no retries or tools, and five requests per caller per
+  minute. Results distinguish readiness,
+  authentication, missing models/endpoints, timeout, rate limit, transport,
+  and response failures without exposing upstream bodies or credentials.
+  The probe may incur provider charges; it neither saves the entered model nor
+  activates settings or creates a session. Existing configuration checks remain
+  available separately.
+
+### Compatibility scope
+
+- Official multiagent behavior returns to the CMA target under decision 0002.
+  `/v1/x/capabilities` now reports `multiagent-roster` and
+  `threads-and-coordinator` as `unavailable` instead of `not_applicable`.
+  Agent writes and thread routes still refuse the unsupported surface; their
+  explanations now identify an implementation gap. The roadmap records
+  remaining protocol, execution, and verification work and removes completed
+  package-installation, declarative-apply, session CLI, and snapshot tasks.
+
+### Fixed
+
+- `user.tool_result` now fails with `400 invalid_request_error` and code
+  `self_hosted_tool_result_not_supported` before persistence or execution,
+  including whole-batch preflight. Previously it could return `accepted: true`
+  and append an answer the runtime could not consume. Official self-hosted
+  built-in tool answers remain unimplemented; existing local worker completions
+  and `user.custom_tool_result` retain their separate protocols.
+
+- Agent responses now return `model` as `{id, speed, effort?: {type}}` across
+  CRUD, versions, session snapshots and update events. **Breaking wire change:**
+  string readers must use `agent.model.id`; Console, CLI and the local SDK are
+  migrated. Object-form effort can be saved back without rejection, and SDK
+  partial updates preserve omitted fields without reposting a read projection.
+  `model_config` remains a compatibility extension. Omitted effort still follows
+  runtime/provider defaults; official save-time default resolution remains open.
+
+- Vault objects at `/v1/vaults` now return the published `type: "vault"` on
+  create, retrieve, list, update, and archive. `/v1/credential-vaults` retains
+  `type: "credential_vault"` for local clients; both prefixes share records and
+  credential handling without a database migration. Clients using the published
+  prefix must accept `vault`, or use the local prefix for the legacy value.
+  Credential subresource types and `vault_deleted` are unchanged.
+
+- `POST /v1/deployments` now enforces the published per-organization cap of
+  1,000 live deployments (`official-docs/scheduled-deployments.md`). A create
+  at the cap is refused with 400 `invalid_request_error` /
+  `too_many_deployments` instead of succeeding past the documented bound; the
+  count is of non-archived rows, so archiving or deleting a deployment frees a
+  slot.
+
+- A manual `POST /v1/deployments/{id}/run` no longer consumes the deployment's
+  armed scheduled run. The run is additive — it fires outside the cadence and
+  leaves `next_run_at`, `due_at`, and `last_run_at` untouched — so a manual
+  trigger issued inside the execution-jitter window can no longer overwrite
+  `next_run_at` with `nextCronRun(startedAt)` and discard the instant the
+  scheduler was still owed. The jittered `due_at` for the instant a timed run
+  arms is now also drawn over the cadence it consumes (`nextRun −
+  scheduled_at`) instead of `nextRun − startedAt`, so the drawn delay spans the
+  published interval rather than the smaller residual the wall clock left.
+
+### Changed
+
+- `file` resources are now refused at session admission on `self_hosted`
+  environments, matching the published contract ("自托管沙箱仅支持
+  `memory_store` 资源；包含 `file` 或 `github_repository` 资源的会话会被
+  拒绝并返回 400"). Previously the shipped worker downloaded an attached file
+  under its own root, which admitted a resource the contract says does not
+  exist on that backend and diverged from the official 400. The refusal is the
+  same `resource_not_mountable` the `kubernetes` path rule produces — at
+  creation and on `POST /v1/sessions/{id}/resources`, before any record is
+  written — and a session row that predates the rule fails its work item
+  rather than silently materializing the mount. `memory_store` resources are
+  unaffected: they reach the worker through their own materialization and are
+  the contract's only self-hosted resource.
+
+### Added
+
+- `managed-agents apply <file...>` — the declarative manifest workflow (the
+  `ant apply` pattern). A Markdown frontmatter document creates or updates an
+  agent (the body becomes its system prompt) or a scheduled deployment
+  (frontmatter carries `name`, `agent`, `environment`, `schedule`; the body
+  becomes the initial `user.message`), and a `.yaml`/`.json` document carries
+  an environment. Resolved ids are recorded in `managed-agents-lock.json`
+  keyed by each file's path relative to the lock, so re-applying an edited
+  manifest updates the same row rather than creating a duplicate. A later file
+  may reference an earlier one by name — a deployment's `agent: Coding
+  Assistant` binds the id the agent file applied before it created — which is
+  what makes one command able to stand up a whole stack. A stale lock entry or
+  a moved file falls back to the live list by name, and a manifest that is
+  none of the three kinds is refused before any request is made.
+- `config.packages` on an Environment is now enforced rather than inert. Both
+  spellings — the published per-manager object (`apt`, `cargo`, `gem`, `go`,
+  `npm`, `pip`) and the local `{manager, package}` array — are folded into one
+  declaration and installed when a session provisions: after snapshot restore
+  and before file resources, each manager runs one install command through the
+  sandbox's `execute` channel in alphabetical order, so it works on every
+  backend that runs commands (docker exec, local subprocess, self-hosted work
+  item). A nonzero install exit fails provisioning rather than starting a
+  half-installed session, and a `limited` network policy without
+  `allow_package_managers` refuses the declaration at write time with
+  `invalid_environment_config`, matching the published rule that packages and
+  denied package-manager egress cannot both hold. Environment reads now report
+  `packages_enforced: true` whenever the environment resolves to a backend.
 - An optional external authorization-freshness boundary for long-running
   sessions (#812). Setting `MANAGED_AGENTS_EXTERNAL_AUTHZ_ENDPOINT` makes the
   runtime present every governed tool call the local permission policy
