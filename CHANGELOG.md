@@ -44,6 +44,12 @@
 
 ### Fixed
 
+- The DSH MCP bundle resolves its executable from the active profile directory
+  instead of always using `profiles/web`. Desktop and custom profiles now use
+  their own installed package, including when the profile path contains spaces.
+  The bundle requires DSH's launcher-provided `profileContext` (verified with
+  `0.2.0-rc.2`); it does not bypass package build approval or fix Git transport.
+
 - Upgrade the MCP SDK to 1.32.1. URL MCP connections and credential validation
   now refuse cross-origin redirects, HTTPS downgrades, and redirects that change
   a message POST's method. Same-origin redirects and default-port HTTP-to-HTTPS

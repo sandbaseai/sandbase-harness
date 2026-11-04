@@ -78,8 +78,18 @@ The command copies the complete open-source Skill to
 page-reading tools without a SandBase account; optional provider-backed
 workflows remain opt-in.
 
-The bundle resolves its MCP entry from the installed Web profile, so a clean
-profile needs neither a global `npm link` nor a custom `PATH` entry.
+The tagged `v0.3.8` instructions above target the Web profile. That release's
+bundle still resolves its MCP entry under `profiles/web`.
+
+For Desktop or a custom profile, build the current source from `main` instead
+of `v0.3.8`, then add that checkout to the intended profile. The source bundle
+resolves its MCP entry from DSH's active `profileContext.dir`, so each profile
+uses its own installed package. A clean profile needs neither a global
+`npm link` nor a custom `PATH` entry. Use the same profile for installation and
+launch; for Desktop, initialize its profile in the app and quit it before
+running `dsh plugin --profile desktop add -w ../sandbase-harness`.
+This profile-aware bundle requires a DSH launcher that provides
+`profileContext` (verified against `0.2.0-rc.2`).
 
 DSH receives these tools under its stable MCP namespace:
 
@@ -168,11 +178,15 @@ npm run typecheck
 npm test
 npm run build:runtime
 npm run package:check
+npm run smoke:dsh-profile
 ```
 
-The unit suite validates the MCP schemas and handler behavior. A stdio MCP
-client can additionally connect to `dist/mcp/index.js` and call `tools/list`
-without starting the managed-agents HTTP runtime.
+The unit suite validates the MCP schemas and handler behavior. The profile
+smoke command packs the current build, installs that artifact with lifecycle
+scripts disabled, and checks MCP startup and `tools/list` for Web, Desktop
+and custom profile paths containing spaces. It runs on Windows in the scoped
+CI workflow. It does not launch the DSH application or call runtime-backed
+tools, and needs registry access to install the packaged dependencies.
 
 ## License and security
 
