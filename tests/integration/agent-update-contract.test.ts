@@ -131,7 +131,7 @@ describe('PUT /v1/agents/:id partial update', () => {
     expect(updated.body.version).toBe(agent.version + 1);
     expect(updated.body.system).toBe('New system.');
     expect(updated.body.name).toBe('Contract agent');
-    expect(updated.body.model).toBe('gpt-4o');
+    expect(updated.body.model.id).toBe('gpt-4o');
     expect(updated.body.description).toBe('Original description.');
     expect(updated.body.tools).toHaveLength(2);
     expect(updated.body.skills).toEqual([{ type: 'custom', skill_id: 'research' }]);
@@ -165,7 +165,7 @@ describe('PUT /v1/agents/:id partial update', () => {
       model: { id: 'gpt-5', speed: 'fast' },
     });
     expect(modeled.res.status).toBe(200);
-    expect(modeled.body.model).toBe('gpt-5');
+    expect(modeled.body.model.id).toBe('gpt-5');
     // The server echoes the derived config whole: id and speed both visible.
     expect(modeled.body.model_config).toEqual({ id: 'gpt-5', speed: 'fast' });
     expect(modeled.body.system).toBe('Original system.');
@@ -174,7 +174,7 @@ describe('PUT /v1/agents/:id partial update', () => {
     // A bare string model replaces the derived config too: no stale speed
     // may keep pointing at the previous model.
     const reverts = await request(ctx.app, 'PUT', `/v1/agents/${agent.id}`, { model: 'gpt-4o' });
-    expect(reverts.body.model).toBe('gpt-4o');
+    expect(reverts.body.model.id).toBe('gpt-4o');
     expect(reverts.body.model_config).toBeUndefined();
   });
 
@@ -311,7 +311,7 @@ describe('PUT /v1/agents/:id partial update', () => {
     }
     const unchanged = await request(ctx.app, 'GET', `/v1/agents/${agent.id}`);
     expect(unchanged.body.name).toBe('Contract agent');
-    expect(unchanged.body.model).toBe('gpt-4o');
+    expect(unchanged.body.model.id).toBe('gpt-4o');
   });
 
   it('enforces expected_version as an optimistic precondition', async () => {
@@ -474,7 +474,7 @@ describe('PUT /v1/agents/:id partial update', () => {
     const again = await request(ctx.app, 'PUT', `/v1/agents/${agent.id}`, { system: 'Original system.' });
     expect(again.body.name).toBe('Contract agent');
     expect(again.body.system).toBe('Original system.');
-    expect(again.body.model).toBe('gpt-4o');
+    expect(again.body.model.id).toBe('gpt-4o');
     expect(again.body.description).toBe('Original description.');
     expect(again.body.tools).toHaveLength(2);
     expect(again.body.skills).toEqual([{ type: 'custom', skill_id: 'research' }]);
@@ -676,7 +676,7 @@ describe('PUT /v1/agents/:id partial update', () => {
       expect(published.res.status).toBe(200);
       expect(published.body.system).toBe('Updated from the published example.');
       expect(published.body.name).toBe(truth.name);
-      expect(published.body.model).toBe(truth.model);
+      expect(published.body.model).toEqual(truth.model);
       expect(published.body.version).toBe(agent.version + 1);
     });
 

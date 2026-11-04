@@ -138,8 +138,8 @@ describe('credential network policy', () => {
 
     it('injects an allowed credential and marks it used', () => {
       insertCredential({ id: 'crd_allowed', network: { type: 'limited', allowed_hosts: ['api.example.com'] } });
-      const bundle = resolveSessionCredentialInjections(db, 'sess_test', { targetHost: 'https://api.example.com/v1' });
-      expect(bundle.environment.CRD_ALLOWED).toBe('super-secret-value');
+      const bundle = resolveSessionCredentialInjections(db, 'sess_test', { targetHost: 'https://api.example.com/v1', placeholders: true });
+      expect(bundle.environment.CRD_ALLOWED).toBe('__cred_crd_allowed__');
       expect(bundle.denied).toEqual([]);
       expect(auditActions('crd_allowed').map((row) => row.action)).toEqual(['runtime_inject']);
       expect((db.prepare('SELECT last_used_at FROM credential_records WHERE id = ?').get('crd_allowed') as { last_used_at: string | null }).last_used_at).not.toBeNull();
@@ -151,7 +151,7 @@ describe('credential network policy', () => {
         network: { type: 'limited', allowed_hosts: ['api.example.com'] },
         invalidCiphertext: true,
       });
-      const bundle = resolveSessionCredentialInjections(db, 'sess_test', { targetHost: 'evil.test' });
+      const bundle = resolveSessionCredentialInjections(db, 'sess_test', { targetHost: 'evil.test', placeholders: true });
       expect(bundle.environment).toEqual({});
       expect(bundle.request_headers).toEqual({});
       expect(bundle.request_body).toEqual({});
@@ -166,23 +166,47 @@ describe('credential network policy', () => {
     });
 
     it('denies limited credentials when no target host is supplied', () => {
-      insertCredential({ id: 'crd_unverified', network: { type: 'limited', allowed_hosts: ['api.example.com'] } });
-      const bundle = resolveSessionCredentialInjections(db, 'sess_test');
-      expect(bundle.environment).toEqual({});
+      // A bearer token keeps this denial under placeholders: the scoped-env
+      // admission only covers the environment channel, whose placeholder can be
+      // materialized on the wire inside its own allowed_hosts. A header value is
+      // presented by the runtime itself, so an unverifiable host still denies.
+      insertCredential({
+        id: 'crd_unverified',
+        network: { type: 'limited', allowed_hosts: ['api.example.com'] },
+        authType: 'bearer_token',
+      });
+      const bundle = resolveSessionCredentialInjections(db, 'sess_test', { placeholders: true });
+      expect(bundle.request_headers).toEqual({});
       expect(bundle.denied[0]).toMatchObject({ host: null, reason: 'host_unverified', code: CREDENTIAL_POLICY_CODES.host_unverified });
     });
 
     it('still injects explicit unrestricted credentials without a target host', () => {
       insertCredential({ id: 'crd_open', network: { type: 'unrestricted', allowed_hosts: [] } });
-      const bundle = resolveSessionCredentialInjections(db, 'sess_test');
-      expect(bundle.environment.CRD_OPEN).toBe('super-secret-value');
+      const bundle = resolveSessionCredentialInjections(db, 'sess_test', { placeholders: true });
+      expect(bundle.environment.CRD_OPEN).toBe('__cred_crd_open__');
       expect(bundle.denied).toEqual([]);
+    });
+
+    it('refuses an environment credential a boundary-less caller cannot substitute', () => {
+      insertCredential({ id: 'crd_noboundary', network: { type: 'unrestricted', allowed_hosts: [] }, invalidCiphertext: true });
+      const bundle = resolveSessionCredentialInjections(db, 'sess_test');
+      expect(bundle.environment).toEqual({});
+      expect(bundle.credentials).toEqual([]);
+      expect(bundle.denied).toHaveLength(1);
+      expect(bundle.denied[0]).toMatchObject({
+        credential_id: 'crd_noboundary',
+        host: null,
+        reason: 'backend_unsupported',
+        code: 'credential_backend_unsupported',
+      });
+      expect(auditActions('crd_noboundary').map((row) => row.action)).toEqual(['runtime_denied']);
+      expect((db.prepare('SELECT last_used_at FROM credential_records WHERE id = ?').get('crd_noboundary') as { last_used_at: string | null }).last_used_at).toBeNull();
     });
 
     it('keeps allowed and denied credentials in the same bundle', () => {
       insertCredential({ id: 'crd_ok', network: { type: 'unrestricted', allowed_hosts: [] } });
       insertCredential({ id: 'crd_no', network: { type: 'limited', allowed_hosts: ['only.test'] } });
-      const bundle = resolveSessionCredentialInjections(db, 'sess_test', { targetHost: 'api.example.com' });
+      const bundle = resolveSessionCredentialInjections(db, 'sess_test', { targetHost: 'api.example.com', placeholders: true });
       expect(Object.keys(bundle.environment)).toEqual(['CRD_OK']);
       expect(bundle.denied.map((entry) => entry.credential_id)).toEqual(['crd_no']);
     });

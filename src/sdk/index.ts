@@ -14,6 +14,7 @@
 export {
   ManagedAgentsClient,
   ManagedAgentsApiError,
+  type ModelConnectionTestResult,
   RuntimeSettingsValidationError,
   type ClientOptions,
   type AgentSummary,
@@ -59,3 +60,5 @@ export type {
   SandboxInstance,
   SandboxProvider,
 } from '../types/sandbox.js';
+
+export type { AgentModelResponse } from '../types/agent-model.js';
