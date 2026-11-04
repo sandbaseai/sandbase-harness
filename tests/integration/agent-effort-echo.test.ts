@@ -92,7 +92,7 @@ describe('the model profile echoes the effort the definition carries', () => {
 
     const created = await request(ctx.app, 'POST', '/v1/agents', definition);
     expect(created.res.status).toBe(201);
-    expect(created.body.model).toBe('gpt-4o');
+    expect(created.body.model.id).toBe('gpt-4o');
     expect(created.body.model_config).toEqual({ id: 'gpt-4o', speed: 'standard', effort: 'high' });
 
     const read = await request(ctx.app, 'GET', `/v1/agents/${created.body.id}`);

@@ -1,12 +1,13 @@
 /**
  * Integration test: a session's vault credentials reach its sandbox commands.
  *
- * The reviewed snapshot carried exactly this case and nothing else: the executor
- * resolves the session's vault, the bash tool runs with the injected environment,
- * the string the strategy sees is redacted, and no persisted event carries the
- * secret. `resolveSessionCredentialInjections` and `createCredentialRedactor`
- * already existed and were unit-tested; what this asserts is the wiring between
- * them and `DefaultSessionExecutor`.
+ * Two materialization shapes, both through `DefaultSessionExecutor`:
+ *
+ * - a sandbox that owns an egress boundary receives placeholders (`__cred_<id>__`)
+ *   while the boundary is handed the real values for on-the-wire substitution;
+ * - a boundary-less sandbox has its environment credentials refused — the
+ *   published contract does not support `environment_variable` where nothing
+ *   substitutes them, and plaintext would expose the secret to the process.
  */
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -35,7 +36,7 @@ describe('credential execution wiring', () => {
     if (tmpDir) rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('resolves the vault in DefaultSessionExecutor, injects bash env, and redacts event payloads', async () => {
+  it('refuses the environment credential on a backend with no egress boundary', async () => {
     tmpDir = mkdtempSync(join(tmpdir(), 'ma-credential-execution-'));
     db = new Database(join(tmpDir, 'test.db'));
     db.runMigrations();
@@ -60,7 +61,8 @@ describe('credential execution wiring', () => {
       sessionId: 'sess_exec',
       async execute(_command, options) {
         executeOptions = options as Record<string, unknown>;
-        return { exitCode: 0, stdout: `TOKEN=${SECRET}`, stderr: '', timedOut: false };
+        const env = (options as { env?: Record<string, string> } | undefined)?.env ?? {};
+        return { exitCode: 0, stdout: `TOKEN=${env.TOKEN ?? ''}`, stderr: '', timedOut: false };
       },
       async writeFile() {},
       async readFile() { return ''; },
@@ -91,6 +93,7 @@ describe('credential execution wiring', () => {
         });
       },
     };
+
     const modelRegistry = new ModelRegistry();
     modelRegistry.register({ name: 'm', provider: 'openai', model: 'm', is_default: true });
     const executor = new DefaultSessionExecutor({
@@ -115,8 +118,16 @@ describe('credential execution wiring', () => {
       // drain
     }
 
-    expect(executeOptions).toEqual({ env: { TOKEN: SECRET } });
-    expect(observedOutput).toBe(`TOKEN=${SECRET}`.replace(SECRET, '[REDACTED]'));
+    // The credential is refused on this boundary-less sandbox rather than
+    // materialized as plaintext, so the command environment carries nothing
+    // and the denial — not an injection — reaches the audit trail.
+    expect((executeOptions?.env as Record<string, string> | undefined)?.TOKEN).toBeUndefined();
+    expect(JSON.stringify(executeOptions ?? {})).not.toContain(SECRET);
+    const denied = db.prepare(
+      "SELECT action, metadata FROM credential_audit_events WHERE credential_id = 'crd_exec'",
+    ).all() as Array<{ action: string; metadata: string }>;
+    expect(denied.map((row) => row.action)).toEqual(['runtime_denied']);
+    expect(JSON.parse(denied[0]?.metadata ?? '{}').reason).toBe('backend_unsupported');
     const events = new EventLogger(db).getEvents(session.id);
     expect(JSON.stringify(events)).not.toContain(SECRET);
     await executor.cleanupSession(session.id);

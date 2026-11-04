@@ -43,6 +43,13 @@ describe('initial_events transaction semantics', () => {
     agentId = 'agent_x';
 
     sessionManager = new SessionManager(db);
+    // A grader is registered so a single user.define_outcome is admissible —
+    // without one the runtime refuses any declared outcome with
+    // outcome_grader_unavailable downstream of normalization, and the
+    // single-vs-second bound could not be told apart from that refusal.
+    sessionManager.setOutcomeGrader({
+      grade: async () => ({ result: 'satisfied', explanation: 'nothing to check' }),
+    });
     app = createServer({
       db,
       sessionManager,
@@ -224,5 +231,121 @@ describe('initial_events transaction semantics', () => {
     // executor in this harness it stays null, which is the correct state — the
     // event is durable and awaits processing.
     expect(userEvents[0]).toHaveProperty('processed_at');
+  });
+
+  it('rejects a second user.define_outcome in the batch before any session row exists', async () => {
+    const before = countSessions();
+    const { status, body } = await postSession({
+      agent: agentId,
+      initial_events: [
+        {
+          type: 'user.define_outcome',
+          description: 'first outcome',
+          rubric: { type: 'text', content: 'done when x' },
+        },
+        {
+          type: 'user.define_outcome',
+          description: 'second outcome',
+          rubric: { type: 'text', content: 'done when y' },
+        },
+      ],
+    });
+
+    expect(status).toBe(400);
+    // The count bound fires in normalizeInitialEvents — upstream of the
+    // grader-availability refusal — so a second outcome reports the list rule,
+    // not outcome_grader_unavailable, even though a grader is registered.
+    expect(body.error.code).toBe('invalid_initial_events');
+    expect(body.error.message).toContain('user.define_outcome');
+    expect(countSessions()).toBe(before);
+  });
+
+  it('admits a single user.define_outcome alongside user.message events', async () => {
+    const before = countSessions();
+    const { status, body } = await postSession({
+      agent: agentId,
+      initial_events: [
+        { type: 'user.message', content: 'work the outcome' },
+        {
+          type: 'user.define_outcome',
+          description: 'the outcome',
+          rubric: { type: 'text', content: 'done when x' },
+        },
+      ],
+    });
+
+    expect(status, JSON.stringify(body)).toBe(201);
+    expect(countSessions()).toBe(before + 1);
+  });
+
+  it('rejects more than 100 file-sourced document blocks across the batch', async () => {
+    const before = countSessions();
+    const documentBlock = (n: number) => ({
+      type: 'document',
+      source: { type: 'file', file_id: `file_${n}` },
+    });
+    const { status, body } = await postSession({
+      agent: agentId,
+      initial_events: [
+        // 60 + 50 = 110 file document blocks, split across two events so the
+        // across-the-list bound — not a per-event bound — is what trips.
+        { type: 'user.message', content: Array.from({ length: 60 }, (_, i) => documentBlock(i)) },
+        { type: 'user.message', content: Array.from({ length: 50 }, (_, i) => documentBlock(60 + i)) },
+      ],
+    });
+
+    expect(status).toBe(400);
+    expect(body.error.code).toBe('invalid_initial_events');
+    expect(body.error.message).toContain('file-sourced document');
+    expect(countSessions()).toBe(before);
+  });
+
+  it('admits file document blocks at the 100-block bound', async () => {
+    const documentBlock = (n: number) => ({
+      type: 'document',
+      source: { type: 'file', file_id: `file_${n}` },
+    });
+    const { status, body } = await postSession({
+      agent: agentId,
+      initial_events: [
+        { type: 'user.message', content: Array.from({ length: 100 }, (_, i) => documentBlock(i)) },
+      ],
+    });
+
+    expect(status, JSON.stringify(body)).toBe(201);
+  });
+
+  it('does not count text or non-file document blocks against the file-document bound', async () => {
+    const { status, body } = await postSession({
+      agent: agentId,
+      initial_events: [
+        {
+          type: 'user.message',
+          content: [
+            { type: 'text', text: 'context' },
+            // A base64 document block is not a file-sourced block, so it must
+            // not draw down the 100-block file budget.
+            { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'aGk=' } },
+          ],
+        },
+      ],
+    });
+
+    expect(status, JSON.stringify(body)).toBe(201);
+  });
+
+  it('answers 413 when the create body exceeds 32 MB', async () => {
+    // A single oversized string field pushes the serialized body past the
+    // published bound without building 32 MB of events.
+    const before = countSessions();
+    const res = await app.request('/v1/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent: agentId, metadata: { pad: 'x'.repeat(33 * 1024 * 1024) } }),
+    });
+    expect(res.status).toBe(413);
+    const body = (await res.json()) as any;
+    expect(body.error.code).toBe('request_too_large');
+    expect(countSessions()).toBe(before);
   });
 });

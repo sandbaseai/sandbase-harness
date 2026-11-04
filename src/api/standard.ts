@@ -1,3 +1,4 @@
+import type { AgentModelResponse } from '@/types/agent-model.js';
 import type { AgentDefinition, AgentToolset, McpServerConfig } from '@/types/agent.js';
 import type { OutcomeRubric } from '@/types/cma-protocol.js';
 import type { ApiSessionStatus, Session, SessionEvent, SessionLoopEngine, SessionStatus } from '@/types/session.js';
@@ -195,7 +196,7 @@ export interface ApiAgent {
   name: string;
   description: string;
   system: string;
-  model: string;
+  model: AgentModelResponse;
   model_config?: {
     id?: string;
     speed: 'fast' | 'standard' | 'extended';
@@ -485,22 +486,7 @@ function toApiToolsets(toolsets: AgentToolset[]): AgentToolset[] {
   });
 }
 
-/**
- * The model profile as the read projection returns it.
- *
- * `effort` is echoed because the definition retains it: a value that is stored but
- * never returned is the silent loss the model profile exists to prevent, and the
- * published response shape is documented as echoing the profile it was given. On
- * Anthropic provider models the level also reaches the request through
- * `providerOptions.anthropic.effort`, gated by the capability table; on other
- * providers it remains a stored-and-echoed field.
- *
- * `model_config` is still omitted for the ordinary case (the local `standard`
- * speed and no effort), so this projection is unchanged for every agent that never
- * sent either. Definitions written before `effort` moved inside `model_config`
- * kept it beside the config, and are honoured here rather than losing the value on
- * their first read after the change.
- */
+/** Local compatibility projection; canonical model objects are returned separately. */
 function apiModelConfig(agent: AgentDefinition): ApiAgent['model_config'] | undefined {
   const config = agent.model_config;
   if (!config) return undefined;
@@ -525,13 +511,18 @@ export function toApiAgent(
   },
 ): ApiAgent {
   const modelConfig = apiModelConfig(agent);
+  const effort = agent.model_config?.effort ?? (agent as { effort?: string }).effort;
   return {
     id: dates?.id ?? agentId(agent.name),
     type: 'agent',
     name: agent.name,
     description: agent.description ?? '',
     system: agent.system,
-    model: agent.model,
+    model: {
+      id: agent.model,
+      speed: agent.model_config?.speed ?? 'standard',
+      ...(effort ? { effort: { type: effort } } : {}),
+    },
     ...(modelConfig ? { model_config: modelConfig } : {}),
     tools: toApiToolsets(agent.tools ?? []),
     mcp_servers: toApiMcpServers(agent.mcp_servers ?? []),

@@ -1,8 +1,9 @@
 /**
- * Integration test: a self-hosted worker downloads the session's attached
- * file resources into `<workdir>/mnt/session/uploads/...` — the canonical
- * mount path mapped into the worker's own root, the same mapping every
- * work-item path takes.
+ * Integration test: the published contract admits only `memory_store`
+ * resources on a self-hosted environment, so a session row carrying an
+ * attached `file` — written before the admission refusal landed, or inserted
+ * out of band — fails its work item rather than silently serving a mount the
+ * contract excludes.
  *
  * Everything runs against the real routes: the session retrieve that names
  * the attached `file` resources, the file-content route that serves the
@@ -137,7 +138,7 @@ describe('worker file resource materialization', () => {
     expect(other.status).toBe(401);
   });
 
-  it('worker run writes the attached file at its mount path under the workdir', async () => {
+  it('worker run fails the item whose session still carries a file resource', async () => {
     const queue = new WorkQueue(db);
     const itemId = queue.enqueue('sess_files', 'read', { path: '/mnt/session/uploads/notes.txt' });
 
@@ -168,11 +169,12 @@ describe('worker file resource materialization', () => {
       process.env = envBackup;
     }
 
-    // The attached file landed at its canonical mount path mapped under the
-    // worker root, and the work item read it back through the same path.
-    expect(readFileSync(join(workdir, 'mnt', 'session', 'uploads', 'notes.txt'), 'utf8')).toBe('attached bytes');
-    expect(existsSync(join(workdir, 'mnt', 'session', 'uploads', 'other.txt'))).toBe(false);
-    expect(queue.get(itemId)!.status).toBe('applied');
-    expect(queue.get(itemId)!.result).toBe('attached bytes');
+    // The session row carries a `file` resource the contract says cannot
+    // exist on self-hosted: the item fails rather than downloading it, and no
+    // file lands under the worker root.
+    expect(existsSync(join(workdir, 'mnt', 'session', 'uploads', 'notes.txt'))).toBe(false);
+    const item = queue.get(itemId)!;
+    expect(item.status).toBe('failed');
+    expect(String((item.result as { message?: string })?.message ?? item.result ?? '')).toContain('file resources are not mountable');
   });
 });

@@ -83,6 +83,7 @@ describe('Vault paths, published and local', () => {
     const created = await send(server, 'POST', PUBLISHED, { name: 'deploy secrets' });
     expect(created.status).toBe(201);
     expect(created.body?.name).toBe('deploy secrets');
+    expect(created.body?.type).toBe('vault');
     const id = created.body!.id as string;
 
     // The same vault, addressed either way. This is the whole feature: a caller
@@ -92,7 +93,8 @@ describe('Vault paths, published and local', () => {
     const viaCanonical = await send(server, 'GET', `${CANONICAL}/${id}`);
     expect(viaPublished.status).toBe(200);
     expect(viaCanonical.status).toBe(200);
-    expect(viaPublished.body).toEqual(viaCanonical.body);
+    expect(viaPublished.body).toEqual({ ...viaCanonical.body, type: 'vault' });
+    expect(viaCanonical.body?.type).toBe('credential_vault');
   });
 
   it('lists the same vaults at both spellings', async () => {
@@ -104,9 +106,60 @@ describe('Vault paths, published and local', () => {
     const canonical = await send(server, 'GET', CANONICAL);
     expect(published.status).toBe(200);
     expect(canonical.status).toBe(200);
-    expect(published.body).toEqual(canonical.body);
+    expect(published.body).toEqual({
+      ...canonical.body,
+      data: canonical.body!.data.map((vault: Record<string, unknown>) => ({ ...vault, type: 'vault' })),
+    });
+    expect(canonical.body!.data.every((vault: Record<string, unknown>) => vault.type === 'credential_vault')).toBe(true);
     expect((published.body!.data as { name: string }[]).map((vault) => vault.name).sort())
       .toEqual(['one', 'two']);
+  });
+
+  it.each([PUBLISHED, CANONICAL])('preserves shared state and the mount kind through %s lifecycle', async (prefix) => {
+    const server = setUp();
+    const kind = prefix === PUBLISHED ? 'vault' : 'credential_vault';
+    const other = prefix === PUBLISHED ? CANONICAL : PUBLISHED;
+    const otherKind = prefix === PUBLISHED ? 'credential_vault' : 'vault';
+    const created = await send(server, 'POST', prefix, {
+      display_name: 'shared', metadata: { keep: 'yes', remove: 'old' },
+    });
+    expect(created.status).toBe(201);
+    expect(created.body?.type).toBe(kind);
+    const id = created.body!.id as string;
+
+    const updated = await send(server, 'POST', `${other}/${id}`, {
+      display_name: 'renamed', metadata: { remove: null, added: 'new' },
+    });
+    expect(updated.status).toBe(200);
+    expect(updated.body).toMatchObject({ id, type: otherKind, metadata: { keep: 'yes', added: 'new' } });
+    const read = await send(server, 'GET', `${prefix}/${id}`);
+    expect(read.status).toBe(200);
+    expect(read.body).toEqual({ ...updated.body, type: kind });
+
+    // Page cursors address the shared collection, not a representation.
+    await send(server, 'POST', other, { display_name: 'newer' });
+    const first = await send(server, 'GET', `${prefix}?limit=1`);
+    expect(first.status).toBe(200);
+    expect(first.body!.data[0].type).toBe(kind);
+    expect(first.body!.next_page).toEqual(expect.any(String));
+    const next = await send(server, 'GET', `${other}?limit=1&page=${encodeURIComponent(first.body!.next_page)}`);
+    expect(next.status).toBe(200);
+    expect(next.body!.data).toEqual([{ ...read.body, type: otherKind }]);
+
+    const archived = await send(server, 'POST', `${prefix}/${id}/archive`);
+    expect(archived.status).toBe(200);
+    expect(archived.body).toMatchObject({ id, type: kind, status: 'archived' });
+    for (const [path, expectedKind] of [[prefix, kind], [other, otherKind]]) {
+      const listed = await send(server, 'GET', `${path}?include_archived=true`);
+      expect(listed.status).toBe(200);
+      expect(listed.body!.data).toContainEqual(expect.objectContaining({
+        id, type: expectedKind, status: 'archived',
+      }));
+    }
+    const deleted = await send(server, 'DELETE', `${other}/${id}`);
+    expect(deleted.status).toBe(200);
+    expect(deleted.body).toEqual({ id, type: 'vault_deleted' });
+    expect((await send(server, 'GET', `${prefix}/${id}`)).status).toBe(404);
   });
 
   it('answers the nested credential paths at both spellings', async () => {
@@ -139,6 +192,7 @@ describe('Vault paths, published and local', () => {
 
     const archived = await send(server, 'POST', `${PUBLISHED}/${id}/archive`);
     expect(archived.status).toBe(200);
+    expect(archived.body?.type).toBe('vault');
 
     // Archived means gone from the collection under either spelling, and a read
     // by id is a 404 under either spelling.

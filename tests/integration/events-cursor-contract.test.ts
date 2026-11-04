@@ -192,4 +192,82 @@ describe('Session event log cursors', () => {
     expect(answered.status).toBe(200);
     expect(answered.body.data).toHaveLength(3);
   });
+
+  it('filters events by the published types[] parameter', async () => {
+    const server = setUp();
+    const id = await sessionWithEvents(server, 3);
+
+    // The session's log holds user.interrupt entries plus whatever session
+    // lifecycle events the create+events path emitted; filtering to
+    // user.interrupt returns exactly the appended set, in order.
+    const filtered = await page(server, id, '?types[]=user.interrupt');
+
+    expect(filtered.status).toBe(200);
+    expect(filtered.body.data).toHaveLength(3);
+    expect(filtered.body.data.every((event: { type: string }) => event.type === 'user.interrupt')).toBe(true);
+  });
+
+  it('accepts the bare types spelling and dedupes across both spellings', async () => {
+    const server = setUp();
+    const id = await sessionWithEvents(server, 1);
+
+    const filtered = await page(server, id, '?types=user.interrupt&types[]=user.interrupt&types[]=session.status_running');
+
+    expect(filtered.status).toBe(200);
+    expect(filtered.body.data.every((event: { type: string }) =>
+      event.type === 'user.interrupt' || event.type === 'session.status_running')).toBe(true);
+    // One appended interrupt and at least one running event must appear; a
+    // caller that sent the same value through both spellings must not get two
+    // copies of it.
+    const types = filtered.body.data.map((event: { type: string }) => event.type);
+    expect(types.filter((type: string) => type === 'user.interrupt')).toHaveLength(1);
+  });
+
+  it('refuses a types value the runtime cannot emit instead of returning an empty page', async () => {
+    const server = setUp();
+    const id = await sessionWithEvents(server, 1);
+
+    const refused = await page(server, id, '?types[]=user.interrupt&types[]=not.a.type');
+
+    expect(refused.status).toBe(400);
+    expect(refused.body.error.type).toBe('invalid_request_error');
+    expect(refused.body.error.message).toContain('not.a.type');
+    expect(refused.body.data).toBeUndefined();
+  });
+
+  it('binds the types filter into the cursor, refusing a replay under a different filter', async () => {
+    const server = setUp();
+    const id = await sessionWithEvents(server, 3);
+
+    const filtered = await page(server, id, '?types[]=user.interrupt&limit=2');
+    expect(filtered.status).toBe(200);
+    const cursor = filtered.body.next_page;
+    expect(typeof cursor).toBe('string');
+
+    // Replaying the same filter resumes correctly.
+    const resumed = await page(server, id, `?types[]=user.interrupt&limit=2&page=${encodeURIComponent(cursor as string)}`);
+    expect(resumed.status).toBe(200);
+    expect(resumed.body.data).toHaveLength(1);
+
+    // Replaying it under a different filter is refused, not resumed mid-set.
+    const refused = await page(server, id, `?limit=2&page=${encodeURIComponent(cursor as string)}`);
+    expect(refused.status).toBe(400);
+    expect(refused.body.error.type).toBe('invalid_request_error');
+    expect(refused.body.error.message).toMatch(/different (filter|collection)/);
+  });
+
+  it('lets after_id name a position that the filter excludes', async () => {
+    const server = setUp();
+    const id = await sessionWithEvents(server, 3);
+    const all = await page(server, id, '');
+    const lastId = all.body.data[all.body.data.length - 1].id as string;
+
+    // after_id is a position, not a content match: the filter may exclude the
+    // event it names, and the page after that position is still the honest
+    // answer.
+    const filtered = await page(server, id, `?types[]=user.interrupt&after_id=${encodeURIComponent(lastId)}`);
+
+    expect(filtered.status).toBe(200);
+    expect(filtered.body.data).toHaveLength(0);
+  });
 });
