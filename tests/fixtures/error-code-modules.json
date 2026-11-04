@@ -10,6 +10,9 @@
     "already_exists": [
       "src/core/memory/mount-adapter.ts"
     ],
+    "credential_backend_unsupported": [
+      "src/core/credentials/injection.ts"
+    ],
     "cycle": [
       "src/core/orchestrator/agent-orchestrator.ts"
     ],
@@ -80,6 +83,9 @@
     ],
     "model_config_invalid": [
       "src/model/errors.ts"
+    ],
+    "model_does_not_support_mid_conversation_system": [
+      "src/api/routes/sessions.ts"
     ],
     "model_not_found": [
       "src/model/errors.ts"
@@ -168,6 +174,9 @@
       "src/core/memory/mount-adapter.ts",
       "src/core/memory/semantics.ts"
     ],
+    "request_too_large": [
+      "src/api/routes/sessions.ts"
+    ],
     "required": [
       "src/core/settings/schema.ts"
     ],
@@ -179,6 +188,9 @@
     ],
     "secret_not_configured": [
       "src/core/settings/schema.ts"
+    ],
+    "self_hosted_tool_result_not_supported": [
+      "src/core/session/tool-result-admission.ts"
     ],
     "session_archived": [
       "src/api/routes/sessions.ts"

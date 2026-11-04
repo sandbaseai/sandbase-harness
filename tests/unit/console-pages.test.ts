@@ -13,7 +13,8 @@ import { SettingsLogs } from '../../apps/console/src/components/pages/settings/S
 import { SettingsMonitoring } from '../../apps/console/src/components/pages/settings/SettingsMonitoring.js';
 import { SettingsView } from '../../apps/console/src/components/pages/settings/SettingsView.js';
 import type { SettingsSection } from '../../apps/console/src/components/pages/settings/navigation.js';
-import type { ConsoleData, RuntimeSettings, RuntimeSettingsConfig } from '../../apps/console/src/types.js';
+import type { Agent, ConsoleData, Environment, RuntimeSettings, RuntimeSettingsConfig, Session } from '../../apps/console/src/types.js';
+import { consoleDataFixture } from '../fixtures/console-data.js';
 
 const runtimeSettingsConfig: RuntimeSettingsConfig = {
   schema_version: 1,
@@ -39,6 +40,7 @@ const runtimeSettings: RuntimeSettings = {
   diagnostics: { metadata: { path: '/tmp/data.db', health: 'ok' } },
   secret_states: { model: { api_key: 'configured' } },
   adapters: {
+    web_search: [],
     model: [
       { id: 'openai', label: 'OpenAI', version: '1', status: 'available', restart_policy: 'runtime', options_schema: {} },
       { id: 'anthropic', label: 'Anthropic', version: '1', status: 'available', restart_policy: 'runtime', options_schema: {} },
@@ -64,25 +66,16 @@ const runtimeSettings: RuntimeSettings = {
 };
 
 function emptyConsoleData(overrides: Partial<ConsoleData> = {}): ConsoleData {
-  return {
-    agents: [],
-    sessions: [],
-    environments: [],
-    vaults: [],
-    memoryStores: [],
-    files: [],
-    apiKeys: [],
-    skills: [],
-    templates: [],
-    webhooks: [],
-    scheduledDeployments: [],
-    outcomes: [],
+  return consoleDataFixture({
     runtime: {
       status: 'running',
       agents_loaded: 0,
+      skills_loaded: 0,
       models: [],
       sandbox_providers: ['local'],
       memory: 'sqlite',
+      memory_providers: [],
+      storage_providers: [],
       auth_enabled: false,
     },
     settings: runtimeSettings,
@@ -92,13 +85,13 @@ function emptyConsoleData(overrides: Partial<ConsoleData> = {}): ConsoleData {
       target: 'local',
     },
     ...overrides,
-  };
+  });
 }
 
 const now = '2026-07-23T00:00:00.000Z';
 
 function populatedConsoleData(): ConsoleData {
-  const agent = {
+  const agent: Agent = {
     id: 'agent_review',
     type: 'agent' as const,
     name: 'Review Agent',
@@ -111,29 +104,26 @@ function populatedConsoleData(): ConsoleData {
     metadata: {},
     status: 'active',
     version: 3,
+    multiagent: null,
     created_at: now,
     updated_at: now,
     archived_at: null,
   };
-  const environment = {
+  const environment: Environment = {
     id: 'env_local',
     type: 'environment' as const,
     name: 'Local sandbox',
     description: 'Local execution template.',
-    hosting_type: 'local' as const,
-    sandbox_provider: 'local',
-    network: { type: 'limited', allow_mcp_server_network_access: false },
-    packages: [],
-    status: 'active',
-    config: {},
+    config: { type: 'local', network: { type: 'limited', allow_mcp_server_network_access: false }, packages: [] },
+    effective_sandbox_provider: 'local',
+    packages_enforced: true,
+    networking_enforced: false,
     metadata: {},
-    worker_keys: [],
-    work_queue: { queued: 0 },
     created_at: now,
     updated_at: now,
     archived_at: null,
   };
-  const session = {
+  const session: Session = {
     id: 'sess_review',
     type: 'session' as const,
     title: 'Dashboard pass',
@@ -142,8 +132,10 @@ function populatedConsoleData(): ConsoleData {
     status: 'idle' as const,
     resources: [],
     vault_ids: [],
+    budget: null,
     usage: { input_tokens: 1200, output_tokens: 450 },
-    stats: {},
+    stats: { active_seconds: 0, duration_seconds: 0 },
+    outcome_evaluations: [],
     metadata: {},
     created_at: now,
     updated_at: now,
@@ -157,9 +149,11 @@ function populatedConsoleData(): ConsoleData {
       id: 'vlt_ui',
       type: 'credential_vault',
       name: 'UI Vault',
+      display_name: 'UI Vault',
       description: 'Credentials used during UI review.',
       status: 'active',
       credential_count: 1,
+      metadata: {},
       credentials: [{
         id: 'vcrd_ui_token',
         type: 'credential',
@@ -187,6 +181,10 @@ function populatedConsoleData(): ConsoleData {
       type: 'memory_store',
       name: 'UI Memory',
       description: 'Persistent context for UI review.',
+      provider: 'sqlite',
+      memory_count: 1,
+      config: {},
+      metadata: {},
       status: 'active',
       memories: [{
         id: 'mem_ui_note',
@@ -210,9 +208,6 @@ function populatedConsoleData(): ConsoleData {
       name: 'notes.md',
       media_type: 'text/markdown',
       size_bytes: 512,
-      role: 'file',
-      session_id: null,
-      artifact_path: null,
       status: 'active',
       metadata: {},
       created_at: now,
@@ -731,6 +726,7 @@ describe('Console page static coverage', () => {
       onBack: () => {},
       onRefresh: () => {},
       onOpenAgent: () => {},
+      onNewSession: () => {},
     }))).toContain('sess_review');
     expect(renderToString(React.createElement(AgentDetail, {
       agent: data.agents[0],
@@ -767,6 +763,10 @@ describe('Console page static coverage', () => {
         type: 'memory_store',
         name: 'Empty store',
         description: '',
+        provider: 'sqlite',
+        memory_count: 0,
+        config: {},
+        metadata: {},
         status: 'active',
         memories: [],
         created_at: '2026-07-23T00:00:00.000Z',
@@ -783,6 +783,10 @@ describe('Console page static coverage', () => {
         type: 'memory_store',
         name: 'Empty store',
         description: '',
+        provider: 'sqlite',
+        memory_count: 0,
+        config: {},
+        metadata: {},
         status: 'active',
         memories: [],
         created_at: '2026-07-23T00:00:00.000Z',
@@ -817,7 +821,10 @@ describe('Console page static coverage', () => {
         id: 'vlt_empty',
         type: 'credential_vault',
         name: 'Empty vault',
+        display_name: 'Empty vault',
         description: '',
+        credential_count: 0,
+        metadata: {},
         status: 'active',
         credentials: [],
         created_at: '2026-07-23T00:00:00.000Z',

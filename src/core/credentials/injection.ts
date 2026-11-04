@@ -44,10 +44,10 @@ export type CredentialInjectionBundle = {
   request_headers: Record<string, string>;
   request_body: Record<string, unknown>;
   /**
-   * The placeholder→secret pairs `environment` (and any other channel that
-   * emits tokens) produced this resolution. Empty when the caller did not ask
-   * for placeholders — a boundary without egress substitution cannot resolve
-   * them, so plaintext keeps the existing behaviour.
+   * The placeholder→secret pairs `environment` produced this resolution.
+   * Empty when the caller did not ask for placeholders — a boundary without
+   * egress substitution cannot honour them, and such a caller has its
+   * environment credentials refused instead of receiving plaintext.
    */
   placeholders: CredentialPlaceholder[];
   credentials: Array<{
@@ -88,13 +88,16 @@ export type CredentialInjectionTarget = {
    *
    * Set only when the session's sandbox owns an egress boundary that can
    * substitute them (`SandboxInstance.configureEgressSubstitutions`): on a
-   * boundary-less backend a placeholder is a string that means nothing, so
-   * the caller asks for the materialization model it can actually honour.
+   * boundary-less backend a placeholder is a string that means nothing, and
+   * the published contract does not support `environment_variable` on a
+   * self-hosted sandbox at all, so such a caller does not get environment
+   * credentials — they are refused rather than materialized as plaintext a
+   * process could read.
    *
    * A `limited` environment credential with no declared target host is
    * admissible under placeholders: the secret can only materialize on the
    * wire toward a host its own `allowed_hosts` covers, which is exactly the
-   * guarantee the plaintext path could not offer and why it denied instead.
+   * guarantee a process-resident value could not offer.
    */
   placeholders?: boolean;
 };
@@ -155,16 +158,53 @@ export function resolveSessionCredentialInjections(
     // above the decrypt call, the secret is not even decrypted.
     if (row.mcp_server_url && !matchesDeclaredServer(row.mcp_server_url, opts.mcpServerUrl)) continue;
 
+    // An environment credential is only ever emitted as a placeholder: the
+    // published contract does not support `environment_variable` on a
+    // self-hosted sandbox, and the only honourable local reading of that rule
+    // is that a caller with no egress boundary — the field the official text
+    // leaves to "your own proxy" — has nothing that can substitute the value
+    // on the wire. Handing it plaintext would materialize the secret inside
+    // the process, which is exactly what the placeholder model exists to
+    // prevent, so the credential is refused rather than degraded. The check
+    // sits above the network decision and the decrypt call for the same
+    // reason the host denial does: a credential this backend cannot honour
+    // must not have its ciphertext touched.
+    if (row.auth_type === 'environment_variable' && row.variable_name && !opts.placeholders) {
+      bundle.denied.push({
+        credential_id: row.id,
+        vault_id: row.vault_id,
+        name: row.name,
+        auth_type: row.auth_type,
+        host: null,
+        reason: 'backend_unsupported',
+        code: 'credential_backend_unsupported',
+        message:
+          'Credential backend denied injection: environment_variable credentials require an egress ' +
+          'boundary that substitutes placeholders on the wire; this caller has none, so the secret ' +
+          'cannot be materialized without exposing it to the process',
+      });
+      recordCredentialAudit(db, row, {
+        action: 'runtime_denied',
+        actor: opts.actor,
+        metadata: {
+          ...(opts.metadata ?? {}),
+          reason: 'backend_unsupported',
+          code: 'credential_backend_unsupported',
+        },
+        updateLastUsed: false,
+      });
+      continue;
+    }
+
     const networkPolicy = parseCredentialNetworkPolicy(row.network);
     const authorization = authorizeCredentialNetwork(networkPolicy, opts.targetHost);
     // A `limited` environment credential with no declared target host is
-    // denied under plaintext because the secret would be readable by any code
-    // the process runs. Under the placeholder model the process only ever
-    // sees a token, and the egress boundary materializes the value solely on
-    // requests the credential's own `allowed_hosts` covers — which is the
-    // guarantee the plaintext path lacked, so the denial does not apply.
-    // `host_not_allowed` still denies: a named-but-uncovered host is a
-    // policy refusal, not a missing one.
+    // admissible under placeholders: the process only ever sees a token, and
+    // the egress boundary materializes the value solely on requests the
+    // credential's own `allowed_hosts` covers. `host_not_allowed` still
+    // denies: a named-but-uncovered host is a policy refusal, not a missing
+    // one. (A caller without a boundary never reaches this branch — the
+    // environment credential was already refused above.)
     const placeholderScopedEnv = opts.placeholders === true
       && row.auth_type === 'environment_variable'
       && row.variable_name !== null

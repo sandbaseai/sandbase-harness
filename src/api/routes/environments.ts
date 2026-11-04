@@ -28,6 +28,7 @@ import {
   sandboxProviderForEnvironmentConfig,
 } from '@/sandbox/provider-names.js';
 import {
+  environmentAllowedHostsError,
   environmentNetworkPolicyOf,
   normalizeEnvironmentNetwork,
   sameEnvironmentNetwork,
@@ -632,6 +633,14 @@ function translateIncomingNetwork(
       code: ENVIRONMENT_CONFIG_ERROR_CODES.invalidConfig,
     };
   }
+  const hostProblem = environmentAllowedHostsError(published.allowed_hosts);
+  if (hostProblem) {
+    return {
+      ok: false,
+      message: `config.networking.${hostProblem}`,
+      code: ENVIRONMENT_CONFIG_ERROR_CODES.invalidConfig,
+    };
+  }
   if (incoming.network !== undefined) {
     const local = normalizeEnvironmentNetwork(incoming.network);
     if (!local) {
@@ -683,6 +692,14 @@ function migrateStoredNetwork(
       return {
         ok: false,
         message: 'config.network must be an object',
+        code: ENVIRONMENT_CONFIG_ERROR_CODES.invalidConfig,
+      };
+    }
+    const hostProblem = environmentAllowedHostsError(normalized.allowed_hosts);
+    if (hostProblem) {
+      return {
+        ok: false,
+        message: `config.network.${hostProblem}`,
         code: ENVIRONMENT_CONFIG_ERROR_CODES.invalidConfig,
       };
     }

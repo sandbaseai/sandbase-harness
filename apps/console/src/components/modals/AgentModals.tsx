@@ -3,7 +3,7 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { Plus, Trash2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { postJson, putJson } from '../../api';
-import { sendsModelConfig } from '../../lib/agentModelConfig';
+import { sendsModelConfig, agentModelId, agentModelConfig } from '../../lib/agentModelConfig';
 import { validateAgentDraft } from '../../lib/agentVersionDiff';
 import { useRuntimeCapabilities } from '../../useRuntimeCapabilities';
 import { ConfigPreviewDrawer, DrawerToggle, type ConfigFormat } from '../ConfigDrawer';
@@ -808,8 +808,8 @@ function defaultAgentDraft(data: ConsoleData): AgentDraft {
 function agentDraftFromApi(agent: Agent): AgentDraft {
   return {
     name: agent.name,
-    model: agent.model,
-    model_config: agent.model_config,
+    model: agentModelId(agent.model),
+    model_config: agentModelConfig(agent),
     description: agent.description,
     system: agent.system,
     mcp_servers: agent.mcp_servers,

@@ -2,7 +2,92 @@
 
 ## Unreleased
 
+### Added
+
+- Settings > Setup can explicitly test a model connection using the saved
+  provider and the entered model reference. `POST /v1/x/settings/test-model`
+  checks the saved revision before one request with a 32-token output limit,
+  a 20-second deadline, no retries or tools, and five requests per caller per
+  minute. Results distinguish readiness,
+  authentication, missing models/endpoints, timeout, rate limit, transport,
+  and response failures without exposing upstream bodies or credentials.
+  The probe may incur provider charges; it neither saves the entered model nor
+  activates settings or creates a session. Existing configuration checks remain
+  available separately.
+
+### Compatibility scope
+
+- Official multiagent behavior returns to the CMA target under decision 0002.
+  `/v1/x/capabilities` now reports `multiagent-roster` and
+  `threads-and-coordinator` as `unavailable` instead of `not_applicable`.
+  Agent writes and thread routes still refuse the unsupported surface; their
+  explanations now identify an implementation gap. The roadmap records
+  remaining protocol, execution, and verification work and removes completed
+  package-installation, declarative-apply, session CLI, and snapshot tasks.
+
+### Fixed
+
+- Upgrade the MCP SDK to 1.32.1. URL MCP connections and credential validation
+  now refuse cross-origin redirects, HTTPS downgrades, and redirects that change
+  a message POST's method. Same-origin redirects and default-port HTTP-to-HTTPS
+  upgrades on the same hostname remain supported. Operators whose endpoints
+  redirect to another host or port must configure the final server URL, create a
+  credential keyed to it (the existing URL binding is immutable), update
+  applicable host allowlists, and reconnect.
+  Rejected validation probes report `unknown` with the redirect response; tokens
+  are not sent to the refused target.
+
+- `user.tool_result` now fails with `400 invalid_request_error` and code
+  `self_hosted_tool_result_not_supported` before persistence or execution,
+  including whole-batch preflight. Previously it could return `accepted: true`
+  and append an answer the runtime could not consume. Official self-hosted
+  built-in tool answers remain unimplemented; existing local worker completions
+  and `user.custom_tool_result` retain their separate protocols.
+
+- Agent responses now return `model` as `{id, speed, effort?: {type}}` across
+  CRUD, versions, session snapshots and update events. **Breaking wire change:**
+  string readers must use `agent.model.id`; Console, CLI and the local SDK are
+  migrated. Object-form effort can be saved back without rejection, and SDK
+  partial updates preserve omitted fields without reposting a read projection.
+  `model_config` remains a compatibility extension. Omitted effort still follows
+  runtime/provider defaults; official save-time default resolution remains open.
+
+- Vault objects at `/v1/vaults` now return the published `type: "vault"` on
+  create, retrieve, list, update, and archive. `/v1/credential-vaults` retains
+  `type: "credential_vault"` for local clients; both prefixes share records and
+  credential handling without a database migration. Clients using the published
+  prefix must accept `vault`, or use the local prefix for the legacy value.
+  Credential subresource types and `vault_deleted` are unchanged.
+
+- `POST /v1/deployments` now enforces the published per-organization cap of
+  1,000 live deployments (`official-docs/scheduled-deployments.md`). A create
+  at the cap is refused with 400 `invalid_request_error` /
+  `too_many_deployments` instead of succeeding past the documented bound; the
+  count is of non-archived rows, so archiving or deleting a deployment frees a
+  slot.
+
+- A manual `POST /v1/deployments/{id}/run` no longer consumes the deployment's
+  armed scheduled run. The run is additive — it fires outside the cadence and
+  leaves `next_run_at`, `due_at`, and `last_run_at` untouched — so a manual
+  trigger issued inside the execution-jitter window can no longer overwrite
+  `next_run_at` with `nextCronRun(startedAt)` and discard the instant the
+  scheduler was still owed. The jittered `due_at` for the instant a timed run
+  arms is now also drawn over the cadence it consumes (`nextRun −
+  scheduled_at`) instead of `nextRun − startedAt`, so the drawn delay spans the
+  published interval rather than the smaller residual the wall clock left.
+
 ### Changed
+
+- The AI SDK upgrade reports `stop_reason: "interrupted"` on model-derived
+  events when an OpenAI or Anthropic stream ends without its completion
+  signal. Partial text is retained; interruption alone does not emit a
+  `session.error`. Confirmation-required tool calls from an incomplete stream
+  remain ineligible for approval or execution.
+
+- Official TypeScript SDK conformance is pinned to `@anthropic-ai/sdk`
+  `0.132.1`. The route inventory remains 110 method/path pairs, with 90
+  resource mounts and 20 explicit refusals; the stream-first reconnect and
+  quickstart workflows are revalidated against this version.
 
 - `file` resources are now refused at session admission on `self_hosted`
   environments, matching the published contract ("自托管沙箱仅支持
