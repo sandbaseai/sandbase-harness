@@ -24,6 +24,7 @@ import {
   saveRuntimeSettings,
 } from '@/core/settings/store.js';
 import { searchProviderFromSettings } from '@/core/web/search/index.js';
+import { KEENABLE_DEFAULT_BASE_URL } from '@/core/web/search/keenable.js';
 import { TAVILY_DEFAULT_BASE_URL } from '@/core/web/search/tavily.js';
 
 describe('web_search settings', () => {
@@ -58,7 +59,7 @@ describe('web_search settings', () => {
     const adapters = describeSettingsAdapters(['local']);
     const availability = availabilityFromDescriptors(adapters);
 
-    expect(availability.webSearchProviders).toEqual(new Set(['tavily']));
+    expect(availability.webSearchProviders).toEqual(new Set(['tavily', 'keenable']));
     const validation = validateRuntimeSettings(
       withWebSearch({ provider: 'tavily', options: { api_key: '${TAVILY_TEST_KEY}' } }),
       availability,
@@ -70,9 +71,9 @@ describe('web_search settings', () => {
   it('lists the planned providers but refuses to validate them as available', () => {
     const adapters = describeSettingsAdapters(['local']);
     const ids = adapters.web_search.map((descriptor) => descriptor.id);
-    expect(ids).toEqual(['tavily', 'brave', 'exa', 'searxng']);
+    expect(ids).toEqual(['tavily', 'keenable', 'brave', 'exa', 'searxng']);
     expect(adapters.web_search.filter((descriptor) => descriptor.status === 'available')
-      .map((descriptor) => descriptor.id)).toEqual(['tavily']);
+      .map((descriptor) => descriptor.id)).toEqual(['tavily', 'keenable']);
 
     const validation = validateRuntimeSettings(
       withWebSearch({ provider: 'brave', options: { api_key: 'key' } }),
@@ -178,4 +179,53 @@ describe('web_search settings', () => {
       { db },
     )).toBeUndefined();
   });
+
+  it('validates and resolves a keyless Keenable provider', () => {
+    const availability = availabilityFromDescriptors(describeSettingsAdapters(['local']));
+    const settings = withWebSearch({ provider: 'keenable', options: {} });
+    const validation = validateRuntimeSettings(settings, availability);
+    expect(validation.errors).toEqual([]);
+    expect(validateRuntimeSettingsCredentials(settings, () => false)
+      .filter((issue) => issue.path.startsWith('web_search'))).toEqual([]);
+
+    const provider = searchProviderFromSettings(settings.web_search, { db });
+    expect(provider?.id).toBe('keenable');
+    expect(provider?.endpointUrl).toBe(KEENABLE_DEFAULT_BASE_URL);
+  });
+
+  it('fails a Keenable key that is spelled but unresolvable safe to no provider', () => {
+    expect(searchProviderFromSettings(
+      { provider: 'keenable', options: { api_key: '${KEENABLE_DEFINITELY_UNSET}' } },
+      { db },
+    )).toBeUndefined();
+    expect(searchProviderFromSettings(
+      { provider: 'keenable', options: { api_key: '__managed_secret__:web_search.options.api_key' } },
+      { db, dataDir: tmpDir },
+    )).toBeUndefined();
+    process.env.KEENABLE_TEST_KEY = 'keen-env-secret';
+    try {
+      const keyed = searchProviderFromSettings(
+        { provider: 'keenable', options: { api_key: '${KEENABLE_TEST_KEY}', base_url: 'https://relay.example.com/' } },
+        { db },
+      );
+      expect(keyed?.id).toBe('keenable');
+      expect(keyed?.endpointUrl).toBe('https://relay.example.com');
+    } finally {
+      delete process.env.KEENABLE_TEST_KEY;
+    }
+  });
+  it('does not downgrade a blank resolved key or unresolved relay to keyless vendor search', () => {
+    process.env.KEENABLE_BLANK_KEY = '   ';
+    try {
+      expect(searchProviderFromSettings(
+        { provider: 'keenable', options: { api_key: '${KEENABLE_BLANK_KEY}' } }, { db },
+      )).toBeUndefined();
+      expect(searchProviderFromSettings(
+        { provider: 'keenable', options: { base_url: '${KEENABLE_MISSING_RELAY}' } }, { db },
+      )).toBeUndefined();
+    } finally {
+      delete process.env.KEENABLE_BLANK_KEY;
+    }
+  });
+
 });

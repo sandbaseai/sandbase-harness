@@ -267,6 +267,15 @@ export function describeSettingsAdapters(installedSandboxes: string[] = ['local'
       }), {
         capabilities: ['web_search'],
       }),
+      // Keenable works keyless (public endpoint, rate limited per IP); an
+      // optional api_key switches to the keyed endpoint. No `${ENV}` default,
+      // so an unset variable never turns the keyless setup into an error.
+      descriptor('keenable', 'Keenable', true, 'runtime', objectSchema({
+        api_key: { type: 'string', format: 'password' },
+        base_url: { type: 'string', format: 'uri', default: 'https://api.keenable.ai' },
+      }), {
+        capabilities: ['web_search'],
+      }),
       // Listed so a client can discover why they are unavailable; each ships
       // as its own adapter PR (searxng is the self-hosted, keyless one).
       descriptor('brave', 'Brave Search', false, 'runtime', objectSchema(), { reason: ROADMAP_WEB_SEARCH_REASON }),

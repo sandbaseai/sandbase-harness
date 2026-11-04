@@ -96,7 +96,8 @@ an unsupported request never leaves state behind.
   keeps `web_search` `unavailable`, so admission and execution can never
   disagree about whether the tool exists.
 - The request leaves the runtime process for the provider endpoint; the
-  provider key rides in an `Authorization` header and never enters a URL, a
+  provider key rides in a header (`Authorization` for Tavily, `X-API-Key` for
+  Keenable) and never enters a URL, a
   log line, or the tool's result text. The Environment network policy governs
   the endpoint exactly as it governs a `web_fetch` target, so a `limited`
   Environment must allow it for the tool to run.
@@ -114,7 +115,16 @@ an unsupported request never leaves state behind.
   cost-profile field; both figures are derived from the event log.
 - Tavily is the shipped adapter (`POST /search`, bearer auth, `time_range` /
   `include_domains` / `exclude_domains` / `country` mapping, 30 s timeout, 1 MB
-  response cap). `brave`, `exa`, and `searxng` are recognized settings values
+  response cap). Keenable (`keenable.ts`) is the second shipped adapter: keyed
+  `POST /v1/search` with an `X-API-Key` header, or the keyless public
+  `POST /v1/search/public` with an `X-Keenable-Title` identifier when no key is
+  configured; `max_results`, `published_after` (from `recency`) and a single
+  include host as `site`, with the rest of the domain policy client-side.
+  Country preferences are unsupported and ignored. The adapter refuses HTTP
+  redirects, keeps the 30 s deadline armed through body consumption, cancels
+  unread bodies, caps responses at 1 MB, and returns coded failures for malformed
+  envelopes. It retains only HTTP(S) result URLs without userinfo and scrubs a
+  configured key if echoed in a result. `brave`, `exa`, and `searxng` are recognized settings values
   listed as unavailable adapters — each ships as its own PR against the same
   `SearchProvider` interface.
 
@@ -286,6 +296,9 @@ client loop reads — `evaluated_permission` and `evaluation` included.
 
 ## 6. Corresponding tests
 
+- `tests/unit/web-search-keenable.test.ts` — the Keenable adapter: keyless
+  public-endpoint selection, keyed header placement, request mapping,
+  normalization, and coded failures.
 - `tests/unit/web-search-tavily.test.ts` — the adapter contract: request-field
   mapping onto the Tavily body, bearer-only key placement, response
   normalization, and the coded outcomes for rate limiting, HTTP failure,
