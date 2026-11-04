@@ -68,6 +68,12 @@
 
 ### Changed
 
+- The AI SDK upgrade reports `stop_reason: "interrupted"` on model-derived
+  events when an OpenAI or Anthropic stream ends without its completion
+  signal. Partial text is retained; interruption alone does not emit a
+  `session.error`. Confirmation-required tool calls from an incomplete stream
+  remain ineligible for approval or execution.
+
 - `file` resources are now refused at session admission on `self_hosted`
   environments, matching the published contract ("自托管沙箱仅支持
   `memory_store` 资源；包含 `file` 或 `github_repository` 资源的会话会被
