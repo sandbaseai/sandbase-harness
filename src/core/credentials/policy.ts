@@ -24,12 +24,13 @@ export interface CredentialNetworkPolicy {
   allowed_hosts: string[];
 }
 
-export type CredentialPolicyDenyReason = 'host_not_allowed' | 'host_unverified';
+export type CredentialPolicyDenyReason = 'host_not_allowed' | 'host_unverified' | 'backend_unsupported';
 
 /** Stable machine-readable codes; callers must not depend on message text. */
 export const CREDENTIAL_POLICY_CODES: Record<CredentialPolicyDenyReason, string> = {
   host_not_allowed: 'credential_host_not_allowed',
   host_unverified: 'credential_host_unverified',
+  backend_unsupported: 'credential_backend_unsupported',
 };
 
 export interface CredentialNetworkAuthorization {

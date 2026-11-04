@@ -1,6 +1,9 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
 import type { ServerDeps } from '../server.js';
 import { join } from 'node:path';
+import { createInboundRateLimiter } from '@/api/rate-limit.js';
+import { testModelConnection } from '@/core/settings/model-connection.js';
 import { describeSettingsAdapters, availabilityFromDescriptors } from '@/core/settings/adapters.js';
 import { validateRuntimeSettings, validateRuntimeSettingsCredentials, type RuntimeSettings } from '@/core/settings/schema.js';
 import {
@@ -10,6 +13,7 @@ import {
 } from '@/core/settings/test.js';
 import {
   getOrSeedRuntimeSettings,
+  findRuntimeSettings,
   hasRuntimeSettingsSecret,
   maskRuntimeSettings,
   runtimeSettingsSecretStates,
@@ -26,8 +30,18 @@ const SETTINGS_TEST_AREAS = new Set<RuntimeSettingsTestArea>([
   'web_search',
 ]);
 
+const modelConnectionInput = z.object({
+  model: z.string().trim().min(1).max(256),
+  revision: z.number().int().positive(),
+}).strict();
+
 export function settingsRoutes(deps: ServerDeps) {
   const app = new Hono();
+  app.use('/test-model', createInboundRateLimiter({
+    enabled: true,
+    readPerMinute: 1200,
+    writePerMinute: 5,
+  }).middleware);
 
   app.get('/', (c) => {
     const settings = getOrSeedRuntimeSettings(deps.db, {}, deps.workspace?.dataDir);
@@ -122,6 +136,36 @@ export function settingsRoutes(deps: ServerDeps) {
       config: validation.normalized_config,
     });
     return c.json({ ...result, errors: [], warnings: validation.warnings });
+  });
+
+  app.post('/test-model', async (c) => {
+    let body: unknown;
+    try {
+      body = await c.req.json();
+    } catch {
+      return c.json({ error: { type: 'invalid_request_error', message: 'Request body must be valid JSON' } }, 400);
+    }
+    const input = modelConnectionInput.safeParse(body);
+    if (!input.success) {
+      return c.json({ error: {
+        type: 'invalid_request_error',
+        message: 'Provide only model (1–256 characters) and revision (a positive integer)',
+      } }, 400);
+    }
+    const settings = findRuntimeSettings(deps.db);
+    if (!settings) {
+      return c.json({ ok: false, outcome: 'configuration_invalid', model: input.data.model,
+        provider: 'unconfigured', config_source: 'saved', revision: 0, elapsed_ms: 0 });
+    }
+    if (settings.revision !== input.data.revision) {
+      return c.json({ error: {
+        type: 'revision_conflict', message: 'Settings changed. Refresh before testing the model.',
+      } }, 409);
+    }
+    return c.json(await testModelConnection({
+      db: deps.db, dataDir: deps.workspace?.dataDir, settings,
+      model: input.data.model, signal: c.req.raw.signal,
+    }));
   });
 
   app.put('/', async (c) => {

@@ -581,13 +581,19 @@ describe('contract document parsing', () => {
 // ---------------------------------------------------------------------------
 
 describe('documented capability decisions', () => {
-  it('reports the canonical multiagent roster as unavailable and refuses it by name', () => {
+  it('records multiagent as an open implementation gap without claiming delegation is parity', () => {
+    // Decision 0002 restores scope; neither the roster nor the thread
+    // executor has been implemented by the reporting change.
     expect(entry('multiagent-roster').status).toBe('unavailable');
     expect(entry('threads-and-coordinator').status).toBe('unavailable');
+    expect(entry('multiagent-roster').reason).toMatch(/decisions\/0002/);
+    expect(entry('threads-and-coordinator').reason).toMatch(/decisions\/0002/);
     expect(entry('local-delegation-subagent').status).toBe('supported');
 
     const threads = documentNamed('threads.md').text;
     expect(threads).toContain('multiagent-roster');
+    expect(threads).toContain('decisions/0002-cma-multiagent-parity.md');
+    expect(threads).toContain('decisions/0001-multiagent-out-of-scope.md');
     expect(parseDocumentedRoutes(threads)).toEqual([]);
   });
 

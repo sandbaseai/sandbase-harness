@@ -207,19 +207,18 @@ describe('capability matrix', () => {
     // and publishes vault_credential.refresh_failed.
     expect(capabilityEntry('oauth-refresh').status).toBe('supported');
     expect(capabilityEntry('oauth-refresh').reason.toLowerCase()).toContain('refresh_failed');
-    // Threads are a real gap, not a spelling difference: no thread resource, no
-    // coordinator or advisor role, and no thread route exist. The earlier
-    // `partial` reading described files that were never in the tree.
+    // The scope reversal does not provide an executor: threads are an open
+    // implementation gap under decision 0002, separate from local delegation.
     expect(capabilityEntry('threads-and-coordinator').status).toBe('unavailable');
     expect(capabilityEntry('threads-and-coordinator').contract).toBe('contracts/anthropic-cma/threads.md');
   });
 
-  it('names the surface that keeps the thread entry unavailable', () => {
-    // `unavailable` has to be readable as a real absence rather than as a
-    // placeholder, so the missing pieces are pinned rather than trusted.
+  it('names the unimplemented surface and its current scope decision', () => {
+    // A return to the roadmap must not be read as executable support.
     const reason = capabilityEntry('threads-and-coordinator').reason.toLowerCase();
-    expect(reason).toContain('not implemented');
-    expect(reason).toContain('no coordinator or advisor role');
+    expect(reason).toContain('in scope but not implemented');
+    expect(reason).toContain('decisions/0002');
+    expect(reason).toContain('no subagent, workflow-run, or advisor surface');
     expect(reason).toContain('enable_general_subagent');
   });
 
