@@ -1279,6 +1279,18 @@
   min-width: 0;
 }
 
+.modelConnectionTest {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.modelConnectionTest [role="status"] {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 
 /* Page-intro block, still used by the runtime settings editor. */
 .pageIntro {

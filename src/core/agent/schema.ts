@@ -21,13 +21,18 @@ import type { AgentDefinition, AgentModelConfig, AgentModelSpeed, AgentToolset }
 export const mcpServerConfigSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('url'),
-    name: z.string().min(1, 'MCP server name is required'),
-    url: z.string().url(),
+    // The published bound is a 1–255 character server name, unique within the
+    // agent. Both entries name the same field, so one bounded schema serves
+    // the url and stdio arms alike.
+    name: z.string().min(1, 'MCP server name is required').max(255, 'MCP server name must be at most 255 characters'),
+    // The published endpoint bound is 2,048 characters; an over-long url is a
+    // shape error, not a connectivity failure.
+    url: z.string().url().max(2048, 'MCP server url must be at most 2048 characters'),
     timeout: z.number().positive().optional(),
   }),
   z.object({
     type: z.literal('stdio'),
-    name: z.string().min(1, 'MCP server name is required'),
+    name: z.string().min(1, 'MCP server name is required').max(255, 'MCP server name must be at most 255 characters'),
     command: z.string().min(1, 'stdio MCP server command is required'),
     args: z.array(z.string()).optional(),
     env: z.record(z.string(), z.string()).optional(),
@@ -58,10 +63,19 @@ const mcpToolConfigSchema = agentToolConfigSchema.extend({
 });
 
 const jsonSchemaValue = z.record(z.string(), z.unknown());
+
+/**
+ * The published custom-tool name grammar: letters, digits, underscores, and
+ * hyphens, 1–128 characters — the character set an MCP server emits, not a
+ * narrower identifier. Leading digits and underscores are legal; the reserved
+ * `mcp__`/`ant__` prefixes and the built-in tool names are refused separately
+ * in `validateCustomToolDefinitions`, because a schema-level message cannot
+ * name which rule the name broke.
+ */
 const customToolNameSchema = z.string()
   .min(1, 'Custom tool name is required')
-  .max(128)
-  .regex(/^[a-zA-Z][a-zA-Z0-9_-]*$/, 'Custom tool name must start with a letter and contain only letters, numbers, underscores, or hyphens');
+  .max(128, 'Custom tool name must be at most 128 characters')
+  .regex(/^[a-zA-Z0-9_-]+$/, 'Custom tool name must contain only letters, numbers, underscores, or hyphens');
 
 const customToolConfigSchema = agentToolConfigSchema.extend({
   name: customToolNameSchema,
@@ -127,7 +141,7 @@ const modelSpeedSchema = z.enum(['fast', 'standard', 'extended']);
  *
  * Parsed and validated so an unsupported level fails loudly, then carried
  * through so the value survives a read-back instead of being dropped on the
- * way in. Nothing yet varies model behaviour by it.
+ * way in. Anthropic execution is gated by the selected model's capabilities.
  */
 export const modelEffortSchema = z.enum(['low', 'medium', 'high', 'xhigh', 'max']);
 
@@ -156,7 +170,9 @@ export const agentModelConfigSchema = z.object({
 export const agentModelObjectSchema = z.object({
   id: z.string().min(1, 'Model id is required'),
   speed: modelSpeedSchema.optional(),
-  effort: modelEffortSchema.optional(),
+  effort: z.union([modelEffortSchema, z.object({ type: modelEffortSchema })])
+    .transform((effort) => typeof effort === 'string' ? effort : effort.type)
+    .optional(),
 });
 
 // The canonical object form is tried before the bare string so a definition
@@ -190,9 +206,18 @@ export const agentDefinitionSchema = z.object({
   model_config: agentModelConfigSchema.optional(),
   system: z.string().nullish().transform((system) => system ?? ''),
   description: z.string().optional(),
-  skills: z.array(skillRefSchema).optional(),
-  mcp_servers: z.array(mcpServerConfigSchema).optional(),
-  tools: z.array(agentToolsetSchema).optional(),
+  // The published session bound is 500 skills, counted as the deduplicated set
+  // across every agent in the session. This runtime runs one agent per
+  // session, so the agent's own skills array is the whole set and the bound
+  // lands here.
+  skills: z.array(skillRefSchema).max(500, 'The skills array accepts at most 500 skills').optional(),
+  // The published bound is 20 declared servers per agent; an over-large
+  // roster is refused rather than partially connected.
+  mcp_servers: z.array(mcpServerConfigSchema).max(20, 'The mcp_servers array accepts at most 20 servers').optional(),
+  // The published bound is 256 entries: each wrapped tool is one entry and the
+  // built-in toolset is one more, so an over-large array is refused rather than
+  // truncated into a surface the model could not navigate.
+  tools: z.array(agentToolsetSchema).max(256, 'The tools array accepts at most 256 entries').optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
   max_turns: z.number().int().positive().max(1000).optional(),
   temperature: z.number().min(0).max(2).optional(),
@@ -244,7 +269,7 @@ export function multiagentRosterRefusal(): ValidationError {
   return {
     path: 'multiagent',
     message:
-      `The canonical multiagent roster is unavailable in this runtime (capability "${MULTIAGENT_ROSTER_CAPABILITY_ID}"): no thread, coordinator, or advisor surface is implemented, so the roster is refused rather than accepted and ignored. `
+      `The canonical multiagent roster is not implemented yet (capability "${MULTIAGENT_ROSTER_CAPABILITY_ID}", decision decisions/0002): no thread, coordinator, or advisor surface is implemented, so the roster is refused rather than accepted and ignored. `
       + 'Use the local delegation extension instead — "delegations" names agents to call, and "enable_general_subagent" allows a one-level temporary sub-agent. '
       + 'GET /v1/x/capabilities records the gap.',
   };
@@ -497,6 +522,16 @@ function validateCustomToolDefinitions(data: z.infer<typeof agentDefinitionSchem
   });
 
   for (const tool of declared) {
+    // The reserved prefixes and the built-in names are refused by name so the
+    // caller knows which rule broke: a name that shadows a built-in intercepts
+    // a call meant for the built-in, and the `mcp__`/`ant__` namespaces belong
+    // to server-emitted and Anthropic-reserved tools.
+    if (tool.name.startsWith('mcp__') || tool.name.startsWith('ant__')) {
+      errors.push({
+        path: tool.path,
+        message: `Custom tool name "${tool.name}" uses a reserved prefix (mcp__ or ant__)`,
+      });
+    }
     if (builtinNames.has(tool.name)) {
       errors.push({
         path: tool.path,
@@ -511,11 +546,48 @@ function validateCustomToolDefinitions(data: z.infer<typeof agentDefinitionSchem
     }
     names.add(tool.name);
 
-    const schemaError = validateJsonSchema(tool.schema);
+    const schemaError = validateJsonSchema(tool.schema) ?? validatePublishedInputSchema(tool.schema);
     if (schemaError) errors.push({ path: tool.schemaPath, message: schemaError });
   }
 
   return errors;
+}
+
+/** A `properties` key the published contract accepts: letters, digits,
+ * underscores, dots, hyphens, 1–64 characters. */
+const TOOL_PROPERTY_NAME = /^[a-zA-Z0-9_.-]{1,64}$/;
+
+/**
+ * The published `input_schema` rules layered on the local shape check: a `$ref`
+ * is rejected anywhere in the tree because the runtime does not resolve schema
+ * references, and a top-level `oneOf`/`anyOf`/`allOf` combinator is rejected
+ * because the model-facing surface admits a plain object schema. Property names
+ * are bounded to the published character set.
+ */
+function validatePublishedInputSchema(value: Record<string, unknown>): string | undefined {
+  if ('oneOf' in value || 'anyOf' in value || 'allOf' in value) {
+    return 'Tool input schema must not use top-level oneOf, anyOf, or allOf';
+  }
+  if (schemaContainsRef(value)) {
+    return 'Tool input schema must not contain $ref';
+  }
+  if (value.type === 'object' && value.properties && typeof value.properties === 'object' && !Array.isArray(value.properties)) {
+    for (const key of Object.keys(value.properties)) {
+      if (!TOOL_PROPERTY_NAME.test(key)) {
+        return `Tool input schema property name "${key}" must be 1–64 letters, digits, underscores, dots, or hyphens`;
+      }
+    }
+  }
+  return undefined;
+}
+
+/** Depth-first scan for a `$ref` key anywhere in the schema tree. */
+function schemaContainsRef(node: unknown): boolean {
+  if (!node || typeof node !== 'object') return false;
+  if (Array.isArray(node)) return node.some(schemaContainsRef);
+  const record = node as Record<string, unknown>;
+  if ('$ref' in record) return true;
+  return Object.values(record).some(schemaContainsRef);
 }
 
 function validateJsonSchema(value: Record<string, unknown> | undefined): string | undefined {

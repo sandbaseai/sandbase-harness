@@ -10,7 +10,7 @@
       {
         "name": "data",
         "type": "Agent[]",
-        "description": "Agent definitions visible in the workspace."
+        "description": "Agent definitions with model objects: {id, speed, effort?: {type}}. String readers must use model.id; omitted effort follows runtime/provider defaults."
       }
     ]
   },
@@ -37,7 +37,7 @@
         "name": "model",
         "type": "string | object",
         "required": true,
-        "description": "Model id string, or object with id, speed, and effort. `effort` is stored in the model profile and returned by every read (the agent, its versions, and a session snapshot); it does not change the provider request."
+        "description": "Model id string, or object with id, speed, and effort. `effort` accepts a level or {type: level}; reads return model as {id, speed, effort?: {type}}. Anthropic execution is capability-gated; other providers retain the profile."
       },
       {
         "name": "system",
@@ -130,7 +130,7 @@
       {
         "name": "model",
         "type": "string | object",
-        "description": "Model configuration: id, speed, and effort. `effort` is stored and returned on read, and does not change the provider request."
+        "description": "Model configuration: id, speed, and effort. Reads return an object with id, speed and object-form effort when set; Anthropic execution is capability-gated."
       },
       {
         "name": "system",
@@ -192,7 +192,7 @@
       {
         "name": "model",
         "type": "string | object",
-        "description": "Model configuration: id, speed, and effort. `effort` is stored and returned on read, and does not change the provider request."
+        "description": "Model configuration: id, speed, and effort. Reads return an object with id, speed and object-form effort when set; Anthropic execution is capability-gated."
       },
       {
         "name": "system",
