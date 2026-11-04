@@ -266,6 +266,9 @@ function verdictOf(probe: ProbeOutcome, refresh: ValidationRefreshReport | null)
   if (probe.ok) return 'valid';
   const status = probe.httpResponse?.status_code;
   if (status === undefined) return 'unknown'; // no response: DNS, TLS, timeout
+  // The transport refused a redirect before the target could authenticate the
+  // credential. That establishes an endpoint problem, not an invalid token.
+  if (status >= 300 && status < 400) return 'unknown';
   if (status === 429 || status >= 500) return 'unknown'; // transient
   if (refresh?.status === 'connect_error') return 'unknown';
   if (refresh?.status === 'failed' && refresh.http_response

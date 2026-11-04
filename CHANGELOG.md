@@ -27,6 +27,16 @@
 
 ### Fixed
 
+- Upgrade the MCP SDK to 1.32.1. URL MCP connections and credential validation
+  now refuse cross-origin redirects, HTTPS downgrades, and redirects that change
+  a message POST's method. Same-origin redirects and default-port HTTP-to-HTTPS
+  upgrades on the same hostname remain supported. Operators whose endpoints
+  redirect to another host or port must configure the final server URL, create a
+  credential keyed to it (the existing URL binding is immutable), update
+  applicable host allowlists, and reconnect.
+  Rejected validation probes report `unknown` with the redirect response; tokens
+  are not sent to the refused target.
+
 - `user.tool_result` now fails with `400 invalid_request_error` and code
   `self_hosted_tool_result_not_supported` before persistence or execution,
   including whole-batch preflight. Previously it could return `accepted: true`
