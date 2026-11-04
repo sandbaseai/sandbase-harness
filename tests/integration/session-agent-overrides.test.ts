@@ -114,7 +114,7 @@ describe('agent_with_overrides over the API', () => {
     expect(body.agent).toMatchObject({
       id: 'agent_echo-agent',
       version: 1,
-      model: 'gpt-4o-mini',
+      model: { id: 'gpt-4o-mini', speed: 'standard' },
       system: 'Override prompt.',
     });
 
@@ -128,7 +128,7 @@ describe('agent_with_overrides over the API', () => {
     // The durable agent and its version list are untouched: an override never
     // versions the agent.
     const durable = await get('/v1/agents/agent_echo-agent');
-    expect(durable.body).toMatchObject({ model: 'gpt-4o', system: 'You are a test agent.' });
+    expect(durable.body).toMatchObject({ model: { id: 'gpt-4o' }, system: 'You are a test agent.' });
     expect(count('agent_versions')).toBe(versionsBefore);
   });
 
@@ -136,7 +136,7 @@ describe('agent_with_overrides over the API', () => {
     setupApp();
     const { res, body } = await post('/v1/sessions', { agent: { id: 'agent_echo-agent' } });
     expect(res.status).toBe(201);
-    expect(body.agent).toMatchObject({ model: 'gpt-4o', system: 'You are a test agent.' });
+    expect(body.agent).toMatchObject({ model: { id: 'gpt-4o' }, system: 'You are a test agent.' });
 
     const row = db!.prepare('SELECT agent_definition FROM sessions WHERE id = ?').get(body.id) as { agent_definition: string | null };
     expect(row.agent_definition).toBeNull();

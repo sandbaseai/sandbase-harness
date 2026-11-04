@@ -14,10 +14,12 @@ agent-message-stream-preview: supported
 
 ## 1. Official definition
 
-- Session progress is observable as a resumable server-sent event stream.
-- A stream carries what happens next. A resuming client supplies the last event
-  it saw and receives everything after it, with no gaps and no duplicates; a
-  client that sends no cursor is not asking for the log.
+- Session progress is observable as a server-sent event stream carrying live
+  events. The pinned [reconnect workflow](official-docs/events-and-streaming.md#reconnect-without-missing-events)
+  opens the stream first, reads the full paginated history into a set of seen
+  event IDs, then consumes the stream and skips IDs already seen.
+- Identity for this workflow is the event payload's `id`. The documented
+  workflow does not send a `Last-Event-ID` or `last_event_id` cursor.
 - A long-lived connection is kept alive with a keepalive frame a client is
   expected to skip rather than treat as an event.
 - Streaming previews of a buffered message are opt-in. The default stream carries
@@ -54,6 +56,12 @@ Two subscription modes:
   persisted, never advancing the resume cursor, and exempt from dedup because
   they have no stable identity to dedup on.
 
+The cursor mode is a SandBase extension. For the official reconnect workflow,
+open the cursorless stream before reading history, consume all history pages,
+and deduplicate by payload `id`. History and stream payloads expose the same
+stored opaque ID; the numeric SSE frame `id` does not replace it in the official
+SDK. Opening the stream after reading history would leave a gap between them.
+
 Keepalive:
 
 - Every 15 seconds the connection receives `event: ping` with the JSON body
@@ -72,18 +80,23 @@ Delta previews:
 
 ## 3. Alignment
 
-Aligned for: a live-by-default stream with an opt-in replay from a cursor,
-resumable delivery with no gaps or duplicates under a concurrent write, the
-`event: ping` keepalive carrying JSON, opt-in previews, and the rule that the
+Aligned for: the stream-first, full-history, payload-ID reconnect workflow,
+a live-by-default stream, the `event: ping` keepalive carrying JSON, opt-in
+previews, and the rule that the
 default stream is buffered rather than token-by-token.
+
+Verified on 2026-11-02 with official TypeScript SDK `0.131.0` over real local
+HTTP: idle connection establishment, multi-page history, writes during history
+pagination, ordered live delivery, overlap deduplication, and a second connection
+recovering a write made during disconnection. This uses `session.updated`
+events without a model provider; it does not verify a live Anthropic deployment,
+model-generated events, or preview delivery.
 
 ## 4. Differences
 
 | Difference | Detail |
 | --- | --- |
-| Cursor type | The published event ids are opaque; this runtime's SSE `id` is the numeric per-session `seq`, and that is what a resume cursor must be. An id read from `GET /events` is refused with a 400 rather than guessed at. |
-| Malformed cursor | Refused with `400 invalid_request_error` before the stream opens, including a number too large to compare exactly. Treating it as absent would silently deliver live events only to a client that asked to resume, and treating it as `0` would replay a history it did not ask for. |
-| Cursor spellings | `Last-Event-ID` and `last_event_id` are both read, and a pair that names different positions is refused rather than resolved by precedence. The published contract names neither spelling in a way that fixes a precedence rule. |
+| Local cursor extension | This runtime's SSE frame `id` is the numeric per-session `seq`. `Last-Event-ID` and `last_event_id` accept that sequence, reject opaque history IDs and unsafe numbers with `400 invalid_request_error`, and reject conflicting spellings. These rules apply to the local cursor mode; they do not prevent the documented official reconnect workflow, which uses payload IDs without a cursor. |
 | Keepalive contents | The frame name is `ping`, which is the keepalive name the official SDK skips, so a published client needs no change. Its JSON payload (`{"type":"ping"}`) and the 15-second interval are local: the published payload shape was not verified against a live deployment, and the frame this runtime sent before carried an empty payload under the name `heartbeat`. |
 | Preview type names | SandBase names its preview frames locally. The published contract documents opt-in previews but not a fixed frame vocabulary. |
 | Query spellings | `event_deltas` and `event_deltas[]` are both accepted, so a client using either array-encoding convention works. `last_event_id` is accepted as the query spelling of the header. |
@@ -117,6 +130,11 @@ default stream is buffered rather than token-by-token.
 
 ## 6. Corresponding tests
 
+- `tests/conformance/official-stream-reconnect.test.ts` — pinned official SDK
+  over real HTTP, opening an idle stream before writes, full history with
+  `limit: 1` auto-pagination, writes before and during history and after it,
+  exact ordered stream/history overlap, payload-ID deduplication, reconnect
+  after a disconnected write, and unchanged persisted rows across reads.
 - `tests/integration/event-stream-subscription.test.ts` — both subscription
   modes at the route: a cursor-less connection replays nothing and receives live
   events, a cursor replays only later events in order, cursor `0` replays the
@@ -141,5 +159,6 @@ default stream is buffered rather than token-by-token.
 
 ## 7. Status
 
-`supported` — live-only and cursor-resumed delivery, dedup, the keepalive, and
-opt-in previews are implemented and covered by tests.
+`supported` — the official reconnect workflow is covered by a real-HTTP pinned
+SDK test. Local cursor-resumed delivery, the keepalive, and opt-in previews are
+covered separately by route and SDK tests.

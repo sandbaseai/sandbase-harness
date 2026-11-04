@@ -10,6 +10,9 @@
     "already_exists": [
       "src/core/memory/mount-adapter.ts"
     ],
+    "credential_backend_unsupported": [
+      "src/core/credentials/injection.ts"
+    ],
     "cycle": [
       "src/core/orchestrator/agent-orchestrator.ts"
     ],
@@ -81,6 +84,9 @@
     "model_config_invalid": [
       "src/model/errors.ts"
     ],
+    "model_does_not_support_mid_conversation_system": [
+      "src/api/routes/sessions.ts"
+    ],
     "model_not_found": [
       "src/model/errors.ts"
     ],
@@ -99,6 +105,12 @@
     ],
     "outcome_rubric_file_not_found": [
       "src/core/outcomes/contract.ts"
+    ],
+    "package_install_failed": [
+      "src/core/sandbox/package-installer.ts"
+    ],
+    "package_manager_access_required": [
+      "src/core/sandbox/package-installer.ts"
     ],
     "pi_always_ask_not_supported": [
       "src/core/session/pi-policy.ts"
@@ -162,6 +174,9 @@
       "src/core/memory/mount-adapter.ts",
       "src/core/memory/semantics.ts"
     ],
+    "request_too_large": [
+      "src/api/routes/sessions.ts"
+    ],
     "required": [
       "src/core/settings/schema.ts"
     ],
@@ -173,6 +188,9 @@
     ],
     "secret_not_configured": [
       "src/core/settings/schema.ts"
+    ],
+    "self_hosted_tool_result_not_supported": [
+      "src/core/session/tool-result-admission.ts"
     ],
     "session_archived": [
       "src/api/routes/sessions.ts"
@@ -206,14 +224,14 @@
       "src/api/routes/worker.ts",
       "src/sandbox/self-hosted-provider.ts"
     ],
+    "work_lease_precondition_failed": [
+      "src/api/routes/environment-work.ts"
+    ],
     "work_outcome_unknown": [
       "src/sandbox/self-hosted-provider.ts"
     ],
     "work_queue_timeout": [
       "src/sandbox/self-hosted-provider.ts"
-    ],
-    "work_lease_precondition_failed": [
-      "src/api/routes/environment-work.ts"
     ]
   }
 }

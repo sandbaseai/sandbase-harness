@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { AgentDetail, CapabilityStatus } from '../../apps/console/src/components/pages/AgentPages.js';
 import { selectEnabledCapabilities, type RuntimeCapability } from '../../apps/console/src/useRuntimeCapabilities.js';
 import type { Agent, ConsoleData } from '../../apps/console/src/types.js';
+import { consoleDataFixture } from '../fixtures/console-data.js';
 
 function agentFixture(): Agent {
   return {
@@ -27,6 +28,7 @@ function agentFixture(): Agent {
     metadata: {},
     status: 'active',
     version: 2,
+    multiagent: null,
     created_at: '2026-09-01T00:00:00Z',
     updated_at: '2026-09-01T00:00:00Z',
     archived_at: null,
@@ -34,16 +36,13 @@ function agentFixture(): Agent {
 }
 
 function consoleData(agent: Agent): ConsoleData {
-  return {
+  return consoleDataFixture({
     agents: [agent],
-    sessions: [],
-    environments: [],
-    skills: [],
-    files: [],
-    vaults: [],
-    memoryStores: [],
-    runtime: { models: [], auth_enabled: false },
-  } as unknown as ConsoleData;
+    runtime: {
+      status: 'running', agents_loaded: 1, skills_loaded: 0, models: [],
+      sandbox_providers: ['local'], memory: 'sqlite', memory_providers: [], storage_providers: [], auth_enabled: false,
+    },
+  });
 }
 
 describe('agent capability rows', () => {

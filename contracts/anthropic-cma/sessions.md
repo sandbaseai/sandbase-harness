@@ -25,7 +25,11 @@ session-update: supported
 - A session runs one agent against one environment. It is created, may be
   resumed, interrupted, and terminated.
 - `POST /v1/sessions` accepts optional `initial_events` processed at creation,
-  so a session can start with work already queued.
+  so a session can start with work already queued. The published bounds are:
+  at most 50 events; `user.message` and `user.define_outcome` only; at most one
+  `user.define_outcome` and a `rubric` on each; at most 100 file-sourced
+  `document` content blocks across the list; and a `413` when the create body
+  exceeds 32 MB.
 - The `agent` field accepts three forms: an id string (the agent's current
   version), an object with an optional `version` (a pinned version), and
   `agent_with_overrides`, which runs a pinned or current version with part of
@@ -44,7 +48,7 @@ session-update: supported
 - The session object carries `budget` in every state — the ceiling or `null` —
   a `stats` object with `active_seconds` and `duration_seconds`, and a
   materialized `agent` whose `version` pins the snapshot the session runs and
-  whose `multiagent` resolves the roster or is `null`.
+  whose `multiagent` resolves the declared block or is `null`.
 - The session-scoped event stream is the canonical way to observe progress.
 
 ## 2. Current SandBase shape
@@ -110,13 +114,22 @@ definition and its tool admission rule.
 
 The session object itself always carries `budget` — the ceiling, or `null` in
 both the never-set and removed states, which the published shape does not
-distinguish — and a `stats` object: `active_seconds` sums the session's
-`running` intervals from the event log (the list route derives it from one
-bulk status-transition query rather than a full event read per row), and
+distinguish — and a `stats` object: `active_seconds` and `duration_seconds`.
+The published `stats.active_seconds` sums **each thread's** own active time —
+overlapping activity from concurrent threads is counted per thread, so the
+sum can exceed wall-clock — while `usage.active_seconds` counts that activity
+once ([`official-docs/session-observability.md`](./official-docs/session-observability.md)
+"The session's `stats` object has its own `active_seconds`, which sums each
+thread's own active time instead of counting overlapping activity once").
+This runtime runs one thread per session — the multiagent surface is refused —
+so the two figures coincide, and the field is computed as the sum of the
+session's `running` intervals from the event log (the list route derives it
+from one bulk status-transition query rather than a full event read per row).
 `duration_seconds` counts from creation to the last update for a terminated
 or archived session and to the read for a live one. The materialized `agent`
 pins `version` to the session snapshot and reports `multiagent: null` — a
-declared roster is refused by name, so a populated value can never appear.
+declared `multiagent` block is refused by name, so a populated value can never
+appear.
 `outcome_evaluations` is derived from the event log on every read path: one
 entry per `user.define_outcome`, in declaration order, reporting `pending`,
 `running`, or `evaluating` while in progress and the terminal end-span verdict
@@ -258,11 +271,29 @@ The session-level `stop_reason` (`toApiEvent`):
   lives in `src/core/auth/session-work-scope.ts` and the type fence in the
   route itself.
 
+  Permission to post an answer type does not imply implementation:
+  `user.tool_result` is refused with `400 invalid_request_error` /
+  `self_hosted_tool_result_not_supported` before any event in the batch is
+  appended or executed. Only the custom-tool answer lifecycle is implemented
+  here; local worker completions use `/v1/x/worker/complete`.
+
 `initial_events`:
 
 - At most 50 events (`MAX_INITIAL_EVENTS`).
 - Only `user.message` and `user.define_outcome` are accepted; any other type is
   rejected with `invalid_initial_event_type` and names the offending index.
+- At most one `user.define_outcome` event per batch (`MAX_INITIAL_DEFINE_OUTCOME`):
+  a second outcome would race the first for the session's `outcome_id` join, so it
+  is refused with `invalid_initial_events` naming the offending index rather than
+  normalized. The bound fires in `normalizeInitialEvents`, upstream of the
+  grader-availability refusal, so a second outcome reports the list rule.
+- At most 100 file-sourced `document` content blocks across the whole list
+  (`MAX_INITIAL_FILE_DOCUMENT_BLOCKS`): `{type:"document", source:{type:"file"}}`
+  and a bare `file_id` source are counted as the same source by different
+  spelling, totalled across every `user.message` in the batch rather than per
+  event. A base64 or text document does not draw down the file budget. The
+  bound is refused with `invalid_initial_events` naming the event that pushed
+  the total past the limit.
 - `user.message` requires a string or content-block array; a malformed payload
   is rejected rather than coerced. A `redacted` block — the runtime's
   placeholder for content withheld by model policy — is refused with
@@ -287,6 +318,14 @@ The session-level `stop_reason` (`toApiEvent`):
   half-created session with no durable record of which events were accepted, and
   a caller retrying would have no way to tell whether the first attempt partly
   took effect.
+- The whole create request is bounded at 32 MB
+  (`MAX_SESSION_CREATE_BODY_BYTES`): a body over the bound is refused with
+  `413` and `request_too_large`. `Content-Length` is the cheap check; when the
+  header is absent or unreliable the parsed body's own serialized size is the
+  backstop, so a chunked or header-less request over the bound is refused
+  either way — before any session row, event, or sandbox exists. The bound is
+  a request-size rule on the create call, not an `initial_events` rule, so it
+  applies to every field of the body.
 
 Session resources:
 
@@ -436,10 +475,13 @@ materialized `agent` with a pinned `version` and `multiagent: null`.
   gateway that does not understand `cache_control` from seeing it — an
   Anthropic-compatible endpoint reached through the `openai` or
   `openai_compatible` provider receives an unmarked request.
-- Delete is logical because the event log is append-only by project rule: a
-  physical delete would remove events a resumable stream or an audit may still
-  read. Stopping a running session instead of refusing it keeps delete usable
-  as the single cleanup call a local operator makes.
+- Delete is permanent — the session row, event history, session-owned
+  resources, snapshots, and generated files are physically removed, matching
+  the published contract. The append-only rule still applies *while the session
+  exists*: the log is never mutated in place, so a resumable stream's cursor
+  stays valid for as long as the session is readable. Refusing a `running`
+  session (rather than auto-stopping it) keeps delete a deliberate, two-step
+  operation — interrupt to `idle` first, then delete.
 - An override that cannot be honoured is refused rather than repaired: a session
   that quietly ran the base agent after a caller asked for a different one is the
   failure the override exists to prevent, and the same reasoning makes a
@@ -526,7 +568,12 @@ materialized `agent` with a pinned `version` and `multiagent: null`.
 - `tests/integration/initial-events-transaction.test.ts` — the transaction
   boundary: a rejected initial event leaves no session row and no attached
   resource behind, a successful batch creates the session and delivers every
-  event, and the events' order and `processed_at` reflect admission.
+  event, and the events' order and `processed_at` reflect admission. The
+  published bounds are covered: a second `user.define_outcome` is refused
+  with `invalid_initial_events` (upstream of the grader refusal), more than
+  100 file-sourced `document` blocks across the list is refused while a
+  base64 document does not count, and a create body over 32 MB answers `413`
+  with `request_too_large`.
 - `tests/integration/session-stop-reason.test.ts` — the projected session-level
   `stop_reason`: `stop_reason.type` readable at the top level of a real
   `requires_action` pause and of a paused session reporting `end_turn`, the
