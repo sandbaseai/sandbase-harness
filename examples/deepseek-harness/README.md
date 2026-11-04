@@ -178,11 +178,15 @@ npm run typecheck
 npm test
 npm run build:runtime
 npm run package:check
+npm run smoke:dsh-profile
 ```
 
-The unit suite validates the MCP schemas and handler behavior. A stdio MCP
-client can additionally connect to `dist/mcp/index.js` and call `tools/list`
-without starting the managed-agents HTTP runtime.
+The unit suite validates the MCP schemas and handler behavior. The profile
+smoke command packs the current build, installs that artifact with lifecycle
+scripts disabled, and checks MCP startup and `tools/list` for Web, Desktop
+and custom profile paths containing spaces. It runs on Windows in the scoped
+CI workflow. It does not launch the DSH application or call runtime-backed
+tools, and needs registry access to install the packaged dependencies.
 
 ## License and security
 

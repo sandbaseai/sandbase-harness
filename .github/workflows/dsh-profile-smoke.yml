@@ -1,0 +1,29 @@
+name: DSH profile smoke
+
+on:
+  push:
+    branches: [main]
+    paths: ['examples/deepseek-harness/**', 'scripts/smoke-dsh-profile.mjs', 'scripts/prepare-install.mjs', 'src/mcp/**', 'package*.json', 'tests/unit/dsh-profile-entry.test.ts', 'tests/unit/mcp-distribution.test.ts', '.github/workflows/dsh-profile-smoke.yml']
+  pull_request:
+    branches: [main]
+    paths: ['examples/deepseek-harness/**', 'scripts/smoke-dsh-profile.mjs', 'scripts/prepare-install.mjs', 'src/mcp/**', 'package*.json', 'tests/unit/dsh-profile-entry.test.ts', 'tests/unit/mcp-distribution.test.ts', '.github/workflows/dsh-profile-smoke.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  windows-profile:
+    name: Windows DSH package and profile smoke
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+      - name: Install and build from source
+        run: npm ci
+      - name: Verify profile expressions
+        run: npx vitest run tests/unit/dsh-profile-entry.test.ts tests/unit/mcp-distribution.test.ts
+      - name: Install packaged artifact and start MCP in each profile
+        run: npm run smoke:dsh-profile

@@ -29,9 +29,9 @@ jobs:
       - name: Type check
         run: npm run typecheck
 
-  # Tests run on Ubuntu only. For changes that can behave differently on
-  # Windows, compatibility is checked locally with `npm run release:check`;
-  # see CONTRIBUTING.md#required-checks.
+  # The full suite runs on Ubuntu. dsh-profile-smoke.yml covers only Windows
+  # package/profile startup; broader Windows checks still need the local
+  # release gate. See CONTRIBUTING.md#required-checks.
   test:
     name: Test
     runs-on: ubuntu-latest

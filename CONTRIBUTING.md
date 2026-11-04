@@ -171,8 +171,10 @@ gated `bash` call, read the reply, archive the session; and create → message �
 reload → log replay → a turn failed through the real retry loop. CI runs it as
 a separate `E2E` job so `release:check` never needs a browser download.
 
-CI runs the test suite on Ubuntu only. Windows compatibility is not checked in
-CI; for changes that can behave differently on Windows it is checked by
+CI runs the full test suite on Ubuntu only. The separate DSH profile smoke
+workflow checks source preparation, packaged installation and MCP startup in
+Web, Desktop and custom profile directories on Windows. It does not run the
+full suite or the DSH application. Broader Windows compatibility is checked by
 running `npm run release:check` locally on Windows, as described above. The
 rules in [Cross-platform expectations](#cross-platform-expectations) still
 apply.

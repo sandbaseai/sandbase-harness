@@ -80,6 +80,7 @@
     "typecheck:console": "tsc --noEmit -p apps/console/tsconfig.json",
     "package:check": "npm pack --dry-run",
     "smoke:release": "node scripts/smoke-release.mjs",
+    "smoke:dsh-profile": "node scripts/smoke-dsh-profile.mjs",
     "release:check": "npm run typecheck && npm test && npm run build && npm run package:check && npm run smoke:release",
     "format": "node -e \"console.log('No formatter configured yet.')\"",
     "format:check": "node -e \"console.log('No formatter configured yet.')\""
