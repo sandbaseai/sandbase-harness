@@ -25,6 +25,7 @@ import {
 } from '@/core/settings/store.js';
 import { searchProviderFromSettings } from '@/core/web/search/index.js';
 import { KEENABLE_DEFAULT_BASE_URL } from '@/core/web/search/keenable.js';
+import { OUTCRAWL_DEFAULT_BASE_URL } from '@/core/web/search/outcrawl.js';
 import { TAVILY_DEFAULT_BASE_URL } from '@/core/web/search/tavily.js';
 
 describe('web_search settings', () => {
@@ -59,7 +60,7 @@ describe('web_search settings', () => {
     const adapters = describeSettingsAdapters(['local']);
     const availability = availabilityFromDescriptors(adapters);
 
-    expect(availability.webSearchProviders).toEqual(new Set(['tavily', 'keenable']));
+    expect(availability.webSearchProviders).toEqual(new Set(['tavily', 'keenable', 'outcrawl']));
     const validation = validateRuntimeSettings(
       withWebSearch({ provider: 'tavily', options: { api_key: '${TAVILY_TEST_KEY}' } }),
       availability,
@@ -71,9 +72,9 @@ describe('web_search settings', () => {
   it('lists the planned providers but refuses to validate them as available', () => {
     const adapters = describeSettingsAdapters(['local']);
     const ids = adapters.web_search.map((descriptor) => descriptor.id);
-    expect(ids).toEqual(['tavily', 'keenable', 'brave', 'exa', 'searxng']);
+    expect(ids).toEqual(['tavily', 'keenable', 'outcrawl', 'brave', 'exa', 'searxng']);
     expect(adapters.web_search.filter((descriptor) => descriptor.status === 'available')
-      .map((descriptor) => descriptor.id)).toEqual(['tavily', 'keenable']);
+      .map((descriptor) => descriptor.id)).toEqual(['tavily', 'keenable', 'outcrawl']);
 
     const validation = validateRuntimeSettings(
       withWebSearch({ provider: 'brave', options: { api_key: 'key' } }),
@@ -212,6 +213,41 @@ describe('web_search settings', () => {
       expect(keyed?.endpointUrl).toBe('https://relay.example.com');
     } finally {
       delete process.env.KEENABLE_TEST_KEY;
+    }
+  });
+
+  it('validates and resolves an Outcrawl provider from an env key and returns none without one', () => {
+    const availability = availabilityFromDescriptors(describeSettingsAdapters(['local']));
+    expect(validateRuntimeSettings(
+      withWebSearch({ provider: 'outcrawl', options: { api_key: '${OUTCRAWL_TEST_KEY}' } }),
+      availability,
+    ).errors).toEqual([]);
+
+    expect(searchProviderFromSettings({ provider: 'outcrawl', options: {} }, { db })).toBeUndefined();
+    expect(searchProviderFromSettings(
+      { provider: 'outcrawl', options: { api_key: '${OUTCRAWL_DEFINITELY_UNSET}' } },
+      { db },
+    )).toBeUndefined();
+    expect(searchProviderFromSettings(
+      { provider: 'outcrawl', options: { api_key: '__managed_secret__:web_search.options.api_key' } },
+      { db, dataDir: tmpDir },
+    )).toBeUndefined();
+
+    process.env.OUTCRAWL_TEST_KEY = 'oc-env-secret';
+    try {
+      const fromEnv = searchProviderFromSettings(
+        { provider: 'outcrawl', options: { api_key: '${OUTCRAWL_TEST_KEY}' } },
+        { db },
+      );
+      expect(fromEnv?.id).toBe('outcrawl');
+      expect(fromEnv?.endpointUrl).toBe(OUTCRAWL_DEFAULT_BASE_URL);
+      const relayed = searchProviderFromSettings(
+        { provider: 'outcrawl', options: { api_key: '${OUTCRAWL_TEST_KEY}', base_url: 'https://relay.example.com/' } },
+        { db },
+      );
+      expect(relayed?.endpointUrl).toBe('https://relay.example.com');
+    } finally {
+      delete process.env.OUTCRAWL_TEST_KEY;
     }
   });
   it('does not downgrade a blank resolved key or unresolved relay to keyless vendor search', () => {

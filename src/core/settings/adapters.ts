@@ -276,6 +276,12 @@ export function describeSettingsAdapters(installedSandboxes: string[] = ['local'
       }), {
         capabilities: ['web_search'],
       }),
+      descriptor('outcrawl', 'Outcrawl', true, 'runtime', objectSchema({
+        api_key: { type: 'string', format: 'password', default: '${OUTCRAWL_API_KEY}' },
+        base_url: { type: 'string', format: 'uri', default: 'https://api.outcrawl.ai' },
+      }), {
+        capabilities: ['web_search'],
+      }),
       // Listed so a client can discover why they are unavailable; each ships
       // as its own adapter PR (searxng is the self-hosted, keyless one).
       descriptor('brave', 'Brave Search', false, 'runtime', objectSchema(), { reason: ROADMAP_WEB_SEARCH_REASON }),

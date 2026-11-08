@@ -474,7 +474,7 @@ Including `{ "type": "agent_toolset_20260401" }` enables every built-in tool;
 `configs` entries disable (`enabled: false`, `never_allow`) or reconfigure
 specific tools, and `default_config.enabled: false` empties the implicit set.
 `web_search` is configuration-gated: it executes only when Runtime Settings
-name a usable search provider (`web_search.provider`, Tavily and Keenable ship). With no
+name a usable search provider (`web_search.provider`, Tavily, Keenable, and Outcrawl ship). With no
 provider configured, naming it in `configs` is refused at admission, while the
 implicit enable from a bare toolset is accepted and simply never offered to the
 model.
@@ -3442,9 +3442,9 @@ safe implementation and a missing provider are different facts.
 ### Executing web_search
 
 `web_search` is a provider-backed tool: it executes only when Runtime Settings
-carry a usable `web_search.provider` configuration. `tavily` and `keenable` ship
-today (Keenable also runs keyless: with no `api_key` it uses its public,
-per-IP rate-limited endpoint); `brave`,
+carry a usable `web_search.provider` configuration. `tavily`, `keenable` and
+`outcrawl` ship today (Keenable also runs keyless: with no `api_key` it uses
+its public, per-IP rate-limited endpoint; Tavily and Outcrawl need a key); `brave`,
 `exa`, and `searxng` are recognized provider names but have no adapter yet, so
 selecting one leaves the capability unavailable. `web_search.options.api_key`
 is a managed secret — a `${VAR}` reference or encrypted storage, masked on
@@ -3478,6 +3478,20 @@ that preference is ignored, not applied by domain filtering. Results can be
 fewer than requested after policy filtering. The upstream request/response
 contract was checked on November 4, 2026 against the
 [Keenable Search API reference](https://docs.keenable.ai/api-reference/search).
+
+Outcrawl posts once to `/v1/search` with `Authorization: Bearer <api_key>`;
+`options.api_key` accepts a literal, a `${OUTCRAWL_API_KEY}` reference or a
+managed secret, and a key that does not resolve leaves the provider
+unavailable. It sends `query` and `limit` (`num_results`, default 5) and reads
+the `hits` array (`title`, `url`, `snippet`). `recency` and
+`user_location.country` are not sent and are ignored; domain include, exclude
+and path policy is enforced on the returned URLs by the tool, so results can be
+fewer than requested. Like Keenable it refuses redirects, covers headers and
+body with the 30-second deadline, caps responses at 1 MB, cancels unread
+bodies, returns `web_search_provider_failed` for malformed envelopes, keeps only
+HTTP(S) result URLs without embedded credentials, and scrubs a configured key if
+echoed in a result. The request/response shape was checked against the live
+API on November 8, 2026.
 
 When no usable provider exists, `web_search` stays unavailable in exactly one
 way: `GET /v1/x/capabilities` reports it unavailable, an enabled `configs`

@@ -374,6 +374,7 @@ async function testRemoteSandbox(config: RuntimeSettings, fetchImpl: typeof fetc
 const SHIPPED_WEB_SEARCH_ADAPTERS: Partial<Record<string, { label: string; keyless: boolean }>> = {
   tavily: { label: 'Tavily', keyless: false },
   keenable: { label: 'Keenable', keyless: true },
+  outcrawl: { label: 'Outcrawl', keyless: false },
 };
 
 /**

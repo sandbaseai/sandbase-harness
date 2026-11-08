@@ -4,6 +4,15 @@
 
 ### Added
 
+- `web_search` gains an Outcrawl adapter (`web_search.provider: "outcrawl"`).
+  It needs an `api_key` (managed secret or `${OUTCRAWL_API_KEY}` reference;
+  `options.base_url` defaults to `https://api.outcrawl.ai`) and posts to
+  `POST /v1/search` with a bearer header, sending `query` and `limit`
+  (`num_results`) and reading the `hits` array. Recency and country
+  preferences are ignored; the domain policy is enforced on returned URLs.
+  Redirects are refused, the 30 s timeout covers the full body, responses are
+  capped at 1 MB, and malformed envelopes return coded failures.
+
 - `web_search` gains a second shipped adapter, Keenable
   (`web_search.provider: "keenable"`). It works without a key: with no
   `api_key` it posts to Keenable's public `POST /v1/search/public` endpoint

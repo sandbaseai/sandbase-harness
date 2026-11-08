@@ -306,12 +306,14 @@
     "web_search_provider_failed": [
       "tests/integration/tavily-response-lifecycle.test.ts",
       "tests/unit/web-search-keenable.test.ts",
+      "tests/unit/web-search-outcrawl.test.ts",
       "tests/unit/web-search-tavily.test.ts",
       "tests/unit/web-search-tool.test.ts"
     ],
     "web_search_rate_limited": [
       "tests/integration/tavily-response-lifecycle.test.ts",
       "tests/unit/web-search-keenable.test.ts",
+      "tests/unit/web-search-outcrawl.test.ts",
       "tests/unit/web-search-tavily.test.ts",
       "tests/unit/web-search-tool.test.ts"
     ],
