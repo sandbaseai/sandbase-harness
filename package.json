@@ -131,7 +131,7 @@
     "ai": "^7.0.156",
     "commander": "^15.0.0",
     "escape-html": "1.0.3",
-    "hono": "^4.13.13",
+    "hono": "^4.13.16",
     "nanoid": "^6.0.2",
     "prefix-safe-json": "0.6.1",
     "react-markdown": "^10.1.0",
