@@ -1440,6 +1440,77 @@ const M062_DEPLOYMENT_RUN_DUE_AT = `
 ALTER TABLE scheduled_deployments ADD COLUMN due_at TEXT;
 `;
 
+/**
+ * Session threads (multiagent surface foundation).
+ *
+ * Each agent runs in its own session thread with isolated context. The primary
+ * thread is the session-level event stream; child threads are spawned by
+ * subagent delegation, workflow runs, or advisor consultations.
+ *
+ * - `session_threads`: durable thread identity and lifecycle state
+ * - `workflow_runs`: background workflow runs with phases
+ * - `workflow_phases`: phases within a workflow run
+ * - `thread_id` column added to events for isolation
+ */
+const M063_SESSION_THREADS = `
+CREATE TABLE session_threads (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  parent_thread_id TEXT,
+  agent_id TEXT NOT NULL,
+  agent_version INTEGER,
+  status TEXT NOT NULL DEFAULT 'queued',
+  workflow_run_id TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  archived_at TEXT,
+  FOREIGN KEY (session_id) REFERENCES sessions(id),
+  FOREIGN KEY (parent_thread_id) REFERENCES session_threads(id),
+  FOREIGN KEY (agent_id) REFERENCES agents(id),
+  FOREIGN KEY (workflow_run_id) REFERENCES workflow_runs(id)
+);
+
+CREATE INDEX idx_session_threads_session ON session_threads(session_id);
+CREATE INDEX idx_session_threads_parent ON session_threads(parent_thread_id);
+CREATE INDEX idx_session_threads_status ON session_threads(session_id, status);
+CREATE INDEX idx_session_threads_archived ON session_threads(session_id, archived_at);
+
+-- Thread event isolation: NULL thread_id = primary thread
+ALTER TABLE events ADD COLUMN thread_id TEXT REFERENCES session_threads(id);
+CREATE INDEX idx_events_thread ON events(session_id, thread_id);
+
+-- Workflow runs (background workflow executor)
+CREATE TABLE workflow_runs (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  status TEXT NOT NULL DEFAULT 'queued',
+  result_type TEXT,
+  result_description TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  ended_at TEXT,
+  FOREIGN KEY (session_id) REFERENCES sessions(id)
+);
+
+CREATE INDEX idx_workflow_runs_session ON workflow_runs(session_id);
+CREATE INDEX idx_workflow_runs_status ON workflow_runs(session_id, status);
+
+-- Workflow phases (ordered phases within a run)
+CREATE TABLE workflow_phases (
+  id TEXT PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  sequence_order INTEGER NOT NULL,
+  started_at TEXT,
+  ended_at TEXT,
+  FOREIGN KEY (run_id) REFERENCES workflow_runs(id)
+);
+
+CREATE INDEX idx_workflow_phases_run ON workflow_phases(run_id);
+CREATE INDEX idx_workflow_phases_run_order ON workflow_phases(run_id, sequence_order);
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: '001_initial', sql: M001_INITIAL },
   { version: 2, name: '002_memory', sql: M002_MEMORY },
@@ -1503,4 +1574,5 @@ export const MIGRATIONS: Migration[] = [
   { version: 60, name: '060_dreams', sql: M060_DREAMS },
   { version: 61, name: '061_work_api_surface', sql: M061_WORK_API_SURFACE },
   { version: 62, name: '062_deployment_run_due_at', sql: M062_DEPLOYMENT_RUN_DUE_AT },
+  { version: 63, name: '063_session_threads', sql: M063_SESSION_THREADS },
 ];
