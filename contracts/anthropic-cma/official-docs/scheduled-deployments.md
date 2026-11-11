@@ -452,9 +452,7 @@ List all deployment runs for a deployment as follows:
   );
   await foreach (var run in runs.Paginate())
   {
-      // The Error union exposes .Message directly; the discriminator is read
-      // from .Json until a common .Type accessor is added.
-      var outcome = run.SessionID ?? run.Error!.Json.GetProperty("type").GetString();
+      var outcome = run.SessionID ?? run.Error!.Type.Raw();
       Console.WriteLine($"{run.CreatedAt} {outcome}");
   }
   ```
@@ -481,10 +479,8 @@ List all deployment runs for a deployment as follows:
           DeploymentRunListParams.builder()
               .deploymentId(deployment.id())
               .build()).autoPager()) {
-      // The Error union does not yet expose common .type()/.message()
-      // accessors; .toString() includes both.
       IO.println(run.createdAt() + " "
-          + run.sessionId().orElseGet(() -> run.error().orElseThrow().toString()));
+          + run.sessionId().orElseGet(() -> run.error().orElseThrow().type().asString()));
   }
   ```
 
@@ -544,7 +540,7 @@ You can additionally filter on deployment runs with errors:
   await foreach (var failedRun in failedRuns.Paginate())
   {
       var error = failedRun.Error!;
-      var errorType = error.Json.GetProperty("type").GetString();
+      var errorType = error.Type.Raw();
       Console.WriteLine($"{failedRun.CreatedAt} {errorType} {error.Message}");
   }
   ```
@@ -569,7 +565,8 @@ You can additionally filter on deployment runs with errors:
               .deploymentId(deployment.id())
               .hasError(true)
               .build()).autoPager()) {
-      IO.println(run.createdAt() + " " + run.error().orElseThrow());
+      var error = run.error().orElseThrow();
+      IO.println(run.createdAt() + " " + error.type().asString() + " " + error.message());
   }
   ```
 

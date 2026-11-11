@@ -223,12 +223,7 @@ Stream events from the session to receive real-time updates as the agent works. 
                   break events;
               }
               case SESSION_ERROR -> {
-                  // The `message` field spans all error variants; read it from the raw JSON.
-                  var errorMessage =
-                      event.asSessionError().error()._json().orElse(null) instanceof JsonObject json
-                          ? json.values().get("message").asStringOrThrow()
-                          : "unknown";
-                  IO.println("\n[Error: " + errorMessage + "]");
+                  IO.println("\n[Error: " + event.asSessionError().error().message() + "]");
                   break events;
               }
           }
@@ -449,18 +444,14 @@ To reconnect to an existing session without missing events, combine a new stream
   ```java Java
   try (var stream = client.beta().sessions().events().streamStreaming(session.id())) {
       // Stream is open and buffering. List history before tailing live.
-      // Every event variant carries `id`; read it from the raw JSON to dedup across variants.
       var seenEventIds = new HashSet<String>();
       for (var pastEvent : client.beta().sessions().events().list(session.id()).autoPager()) {
-          if (pastEvent._json().orElseThrow() instanceof JsonObject json) {
-              seenEventIds.add(json.values().get("id").asStringOrThrow());
-          }
+          seenEventIds.add(pastEvent.id());
       }
 
       // Tail live events; Set.add returns false for already-seen IDs, skipping the replay.
       stream.stream()
-          .filter(event -> event._json().orElseThrow() instanceof JsonObject json
-              && seenEventIds.add(json.values().get("id").asStringOrThrow()))
+          .filter(event -> event.id().map(seenEventIds::add).orElse(true))
           .takeWhile(event -> !event.isSessionStatusIdle())
           .filter(BetaManagedAgentsStreamSessionEvents::isAgentMessage)
           .forEach(event -> event.asAgentMessage().content()
@@ -1481,7 +1472,7 @@ Retrieve the full event history for a session:
   var events = await client.Beta.Sessions.Events.List(session.ID);
   foreach (var sessionEvent in events.Items)
   {
-      Console.WriteLine($"[{sessionEvent.Json.GetProperty("type").GetString()}] {sessionEvent.ProcessedAt}");
+      Console.WriteLine($"[{sessionEvent.Type.Raw()}] {sessionEvent.ProcessedAt}");
   }
   ```
 
@@ -1498,10 +1489,7 @@ Retrieve the full event history for a session:
   ```java Java
   var events = client.beta().sessions().events().list(session.id());
   for (var event : events.data()) {
-      var eventJson = event._json().orElseThrow().convert(JsonNode.class);
-      var processedAt = eventJson.path("processed_at");
-      IO.println("[" + eventJson.get("type").asText() + "] "
-          + (processedAt.isTextual() ? processedAt.asText() : "null"));
+      IO.println("[" + event.type().asString() + "] " + event.processedAt().orElse(null));
   }
   ```
 
@@ -1560,7 +1548,7 @@ Pass a `types` (curl: `types[]`; cli: `--type`; csharp, go: `Types`) filter to r
   });
   foreach (var sessionEvent in events.Items)
   {
-      Console.WriteLine($"[{sessionEvent.Json.GetProperty("type").GetString()}] {sessionEvent.ProcessedAt}");
+      Console.WriteLine($"[{sessionEvent.Type.Raw()}] {sessionEvent.ProcessedAt}");
   }
   ```
 
