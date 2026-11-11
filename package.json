@@ -169,7 +169,7 @@
     "shadow-plugin": "^2.1.1",
     "tailwind-merge": "^3.7.0",
     "tailwindcss": "^4.3.3",
-    "tsdown": "^0.23.0",
+    "tsdown": "^0.23.5",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vite": "^8.3.4",
