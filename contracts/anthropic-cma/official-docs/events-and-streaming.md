@@ -12,6 +12,8 @@ featureMetadata:
     eligibility: not-eligible
     note: Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes.
   supportedModels:
+    - claude-fable-5-2
+    - claude-mythos-5-2
     - claude-fable-5-1
     - claude-mythos-5-1
     - claude-fable-5
@@ -58,7 +60,7 @@ Stream events from the session to receive real-time updates as the agent works. 
   curl --fail-with-body -sS -N \
     "https://api.anthropic.com/v1/sessions/$SESSION_ID/events/stream?beta=true" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
     -H "accept: text/event-stream"
   ```
@@ -214,21 +216,15 @@ Stream events from the session to receive real-time updates as the agent works. 
               .build()
       );
 
-      Iterable<BetaManagedAgentsStreamSessionEvents> events = stream.stream()::iterator;
       events:
-      for (var event : events) {
+      for (var event : stream) {
           switch (event.type().value()) {
               case AGENT_MESSAGE -> event.asAgentMessage().content().forEach(block -> block.text().ifPresent(textBlock -> IO.print(textBlock.text())));
               case SESSION_STATUS_IDLE -> {
                   break events;
               }
               case SESSION_ERROR -> {
-                  // The `message` field spans all error variants; read it from the raw JSON.
-                  var errorMessage =
-                      event.asSessionError().error()._json().orElse(null) instanceof JsonObject json
-                          ? json.values().get("message").asStringOrThrow()
-                          : "unknown";
-                  IO.println("\n[Error: " + errorMessage + "]");
+                  IO.println("\n[Error: " + event.asSessionError().error().message() + "]");
                   break events;
               }
           }
@@ -449,18 +445,14 @@ To reconnect to an existing session without missing events, combine a new stream
   ```java Java
   try (var stream = client.beta().sessions().events().streamStreaming(session.id())) {
       // Stream is open and buffering. List history before tailing live.
-      // Every event variant carries `id`; read it from the raw JSON to dedup across variants.
       var seenEventIds = new HashSet<String>();
       for (var pastEvent : client.beta().sessions().events().list(session.id()).autoPager()) {
-          if (pastEvent._json().orElseThrow() instanceof JsonObject json) {
-              seenEventIds.add(json.values().get("id").asStringOrThrow());
-          }
+          seenEventIds.add(pastEvent.id());
       }
 
       // Tail live events; Set.add returns false for already-seen IDs, skipping the replay.
       stream.stream()
-          .filter(event -> event._json().orElseThrow() instanceof JsonObject json
-              && seenEventIds.add(json.values().get("id").asStringOrThrow()))
+          .filter(event -> event.id().map(seenEventIds::add).orElse(true))
           .takeWhile(event -> !event.isSessionStatusIdle())
           .filter(BetaManagedAgentsStreamSessionEvents::isAgentMessage)
           .forEach(event -> event.asAgentMessage().content()
@@ -530,7 +522,7 @@ Send a `user.message` event to start or continue the agent’s work:
   ```bash cURL
   curl --fail-with-body -sS "https://api.anthropic.com/v1/sessions/$SESSION_ID/events?beta=true" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
     -H "content-type: application/json" \
     -d '{
@@ -826,7 +818,7 @@ The following example answers each call as it arrives:
   ```java Java
   try (var stream = client.beta().sessions().events().streamStreaming(session.id())) {
       loop:
-      for (var event : (Iterable<BetaManagedAgentsStreamSessionEvents>) stream.stream()::iterator) {
+      for (var event : stream) {
           switch (event.type().value()) {
               case AGENT_CUSTOM_TOOL_USE -> {
                   var toolUse = event.asAgentCustomToolUse();
@@ -1109,7 +1101,7 @@ Sessions persist between interactions. To resume a session, send a `user.message
   # In production, pass the stored ID of the session you want to resume.
   curl --fail-with-body -sS "https://api.anthropic.com/v1/sessions/$SESSION_ID/events?beta=true" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
     -H "content-type: application/json" \
     -d '{
@@ -1275,7 +1267,7 @@ Send a `user.interrupt` event to stop the agent while it runs, then follow up wi
   # Interrupt with a new direction:
   curl --fail-with-body -sS "https://api.anthropic.com/v1/sessions/$SESSION_ID/events?beta=true" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
     -H "content-type: application/json" \
     -d '{
@@ -1455,7 +1447,7 @@ Retrieve the full event history for a session:
   ```bash cURL
   curl --fail-with-body -sS "https://api.anthropic.com/v1/sessions/$SESSION_ID/events?beta=true" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
     -H "content-type: application/json"
   ```
@@ -1481,7 +1473,7 @@ Retrieve the full event history for a session:
   var events = await client.Beta.Sessions.Events.List(session.ID);
   foreach (var sessionEvent in events.Items)
   {
-      Console.WriteLine($"[{sessionEvent.Json.GetProperty("type").GetString()}] {sessionEvent.ProcessedAt}");
+      Console.WriteLine($"[{sessionEvent.Type.Raw()}] {sessionEvent.ProcessedAt}");
   }
   ```
 
@@ -1498,10 +1490,7 @@ Retrieve the full event history for a session:
   ```java Java
   var events = client.beta().sessions().events().list(session.id());
   for (var event : events.data()) {
-      var eventJson = event._json().orElseThrow().convert(JsonNode.class);
-      var processedAt = eventJson.path("processed_at");
-      IO.println("[" + eventJson.get("type").asText() + "] "
-          + (processedAt.isTextual() ? processedAt.asText() : "null"));
+      IO.println("[" + event.type().asString() + "] " + event.processedAt().orElse(null));
   }
   ```
 
@@ -1525,7 +1514,7 @@ Pass a `types` (curl: `types[]`; cli: `--type`; csharp, go: `Types`) filter to r
   ```bash cURL
   curl --fail-with-body -sS "https://api.anthropic.com/v1/sessions/$SESSION_ID/events?beta=true&types[]=agent.tool_use&types[]=agent.tool_result" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01"
   ```
 
@@ -1560,7 +1549,7 @@ Pass a `types` (curl: `types[]`; cli: `--type`; csharp, go: `Types`) filter to r
   });
   foreach (var sessionEvent in events.Items)
   {
-      Console.WriteLine($"[{sessionEvent.Json.GetProperty("type").GetString()}] {sessionEvent.ProcessedAt}");
+      Console.WriteLine($"[{sessionEvent.Type.Raw()}] {sessionEvent.ProcessedAt}");
   }
   ```
 
@@ -1624,7 +1613,7 @@ The event’s `content` (csharp, go: `Content`) accepts 1–1,000 text items. Th
   ```bash cURL
   curl --fail-with-body -sS "https://api.anthropic.com/v1/sessions/$SESSION_ID/events?beta=true" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
     -H "content-type: application/json" \
     -d '{
@@ -1761,6 +1750,8 @@ The event’s `content` (csharp, go: `Content`) accepts 1–1,000 text items. Th
 
 `system.message` is supported by these models:
 
+* Claude Fable 5.2
+* Claude Mythos 5.2
 * Claude Fable 5.1
 * Claude Mythos 5.1
 * Claude Fable 5

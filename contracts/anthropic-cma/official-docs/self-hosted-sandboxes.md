@@ -6,11 +6,14 @@ featureMetadata:
   topic:
     title: Managed Agents
     url: https://platform.claude.com/docs/en/managed-agents/overview
+  status: beta
   betaHeader: managed-agents-2026-04-01
   zdr:
     eligibility: not-eligible
     note: Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes.
   supportedModels:
+    - claude-fable-5-2
+    - claude-mythos-5-2
     - claude-fable-5-1
     - claude-mythos-5-1
     - claude-fable-5
@@ -28,6 +31,10 @@ featureMetadata:
     - claude-sonnet-4-6
     - claude-opus-4-5-20251101
     - claude-sonnet-4-5-20250929
+  supportedPlatforms:
+    Claude API: beta
+    Claude Platform on AWS: beta
+    Claude Models on Google Cloud (Anthropic managed): beta
 ---
 
 Self-hosted sandboxes move the agent’s tool execution from Anthropic-managed cloud sandboxes into infrastructure you control, while Anthropic keeps running the agent. To learn what that means and decide whether it fits your agent, see [Choosing an agent environment](https://platform.claude.com/docs/en/managed-agents/choosing-an-environment).
@@ -40,7 +47,7 @@ A `self_hosted` environment acts as a work queue. You run an **environment worke
 2. Your worker claims the work item and downloads the agent’s [skills](https://platform.claude.com/docs/en/managed-agents/skills) and the session’s [memory stores](https://platform.claude.com/docs/en/managed-agents/memory).
 3. Claude runs on Anthropic’s side and requests tool calls. Your worker runs each call locally and posts the result back.
 
-Tool inputs and outputs still flow to Anthropic’s control plane, so the model can receive results and determine what to do next. Anthropic stores skills and memory stores. Your sandbox holds a copy for the session. See [Security model](https://platform.claude.com/docs/en/managed-agents/self-hosted-sandboxes-security) for the full data-flow boundary.
+Tool inputs and outputs still flow to Managed Agents on Anthropic’s side, so the model can receive results and determine what to do next. Anthropic stores skills and memory stores. Your sandbox holds a copy for the session. To learn where each part of a session runs, see [What the sandbox can and cannot do](https://platform.claude.com/docs/en/managed-agents/secure-deployment-risks#what-the-sandbox-can-and-cannot-do).
 
 Self-hosted sandboxes support every Claude model available in Managed Agents. The model is configured on the agent, not the environment.
 
@@ -79,7 +86,7 @@ This quickstart runs one always-on worker with the `ant` CLI, sends it a session
       ```bash cURL
       curl -sS --fail-with-body https://api.anthropic.com/v1/environments \
         -H "x-api-key: $ANTHROPIC_API_KEY" \
-        -H "anthropic-version: 2023-06-01" \
+        -H "anthropic-version: 2026-10-21" \
         -H "anthropic-beta: managed-agents-2026-04-01" \
         -H "content-type: application/json" \
         -d '{
@@ -205,7 +212,7 @@ This quickstart runs one always-on worker with the `ant` CLI, sends it a session
   <Step title="Install the ant CLI">
     Run this on the worker host.
 
-    <Tabs>
+    <Tabs noDeepLinks>
       <Tab title="Homebrew (macOS)">
         ```bash
         brew install anthropics/tap/ant
@@ -216,7 +223,7 @@ This quickstart runs one always-on worker with the `ant` CLI, sends it a session
         For Linux environments, download the release binary directly.
 
         ```bash
-        VERSION=2.4.0
+        VERSION=2.9.0
         OS=$(uname -s | tr '[:upper:]' '[:lower:]')
         case $(uname -m) in
           x86_64) ARCH=amd64 ;;
@@ -229,14 +236,14 @@ This quickstart runs one always-on worker with the `ant` CLI, sends it a session
         You can find all releases on the [GitHub releases page](https://github.com/anthropics/anthropic-cli/releases).
       </Tab>
 
-      <Tab title="Go">
-        You can also install the CLI from source using `go install`. Requires Go 1.25 or later.
+      <Tab title="go install">
+        You can also install the CLI from source with `go install`, which requires Go 1.26.10 or later.
 
         ```bash
         go install github.com/anthropics/anthropic-cli/v2/cmd/ant@latest
         ```
 
-        The binary is placed in `$(go env GOPATH)/bin`. Add it to your `PATH` if it isn’t already:
+        `go install` places the binary in `$(go env GOPATH)/bin`. Add that directory to your `PATH` if it isn’t already there:
 
         ```bash
         export PATH="$PATH:$(go env GOPATH)/bin"
@@ -284,7 +291,7 @@ This quickstart runs one always-on worker with the `ant` CLI, sends it a session
       ```bash cURL
       curl -sS --fail-with-body "https://api.anthropic.com/v1/environments/$ANTHROPIC_ENVIRONMENT_ID/work/stats" \
         -H "x-api-key: $ANTHROPIC_API_KEY" \
-        -H "anthropic-version: 2023-06-01" \
+        -H "anthropic-version: 2026-10-21" \
         -H "anthropic-beta: managed-agents-2026-04-01"
       ```
 
@@ -366,7 +373,7 @@ This quickstart runs one always-on worker with the `ant` CLI, sends it a session
       # Create a session
       curl -sS --fail-with-body https://api.anthropic.com/v1/sessions \
         -H "x-api-key: $ANTHROPIC_API_KEY" \
-        -H "anthropic-version: 2023-06-01" \
+        -H "anthropic-version: 2026-10-21" \
         -H "anthropic-beta: managed-agents-2026-04-01" \
         -H "content-type: application/json" \
         -d '{
@@ -377,7 +384,7 @@ This quickstart runs one always-on worker with the `ant` CLI, sends it a session
       # Send it a task: SESSION_ID is the ID from the create response
       curl -sS --fail-with-body "https://api.anthropic.com/v1/sessions/$SESSION_ID/events" \
         -H "x-api-key: $ANTHROPIC_API_KEY" \
-        -H "anthropic-version: 2023-06-01" \
+        -H "anthropic-version: 2026-10-21" \
         -H "anthropic-beta: managed-agents-2026-04-01" \
         -H "content-type: application/json" \
         -d '{
@@ -643,7 +650,7 @@ These pages describe how to build a worker on any sandboxing platform. Platform-
 
 ## Availability
 
-Self-hosted sandboxes are available on every model.
+Self-hosted sandboxes are in beta on every model.
 
 ### API support
 
@@ -651,9 +658,9 @@ Self-hosted sandboxes are available on every model.
 
 * Availability: Available
 
-| Status    | Cloud platforms                                                                                                                                                                                                                                                                | Models                                                            |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| Available | Claude API, [Claude Platform on AWS](https://platform.claude.com/docs/en/build-with-claude/claude-platform-on-aws), [Claude Models on Google Cloud (Anthropic managed)](https://platform.claude.com/docs/en/build-with-claude/claude-models-on-google-cloud/anthropic-managed) | [All models](https://platform.claude.com/docs/en/models/overview) |
+| Status | Cloud platforms                                                                                                                                                                                                                                                                | Models                                                            |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| Beta   | Claude API, [Claude Platform on AWS](https://platform.claude.com/docs/en/build-with-claude/claude-platform-on-aws), [Claude Models on Google Cloud (Anthropic managed)](https://platform.claude.com/docs/en/build-with-claude/claude-models-on-google-cloud/anthropic-managed) | [All models](https://platform.claude.com/docs/en/models/overview) |
 
 ### Required beta headers
 

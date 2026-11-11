@@ -6,11 +6,14 @@ featureMetadata:
   topic:
     title: Managed Agents
     url: https://platform.claude.com/docs/en/managed-agents/overview
+  status: beta
   betaHeader: managed-agents-2026-04-01
   zdr:
     eligibility: not-eligible
     note: Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes.
   supportedModels:
+    - claude-fable-5-2
+    - claude-mythos-5-2
     - claude-fable-5-1
     - claude-mythos-5-1
     - claude-fable-5
@@ -28,9 +31,13 @@ featureMetadata:
     - claude-sonnet-4-6
     - claude-opus-4-5-20251101
     - claude-sonnet-4-5-20250929
+  supportedPlatforms:
+    Claude API: beta
+    Claude Platform on AWS: beta
+    Claude Models on Google Cloud (Anthropic managed): beta
 ---
 
-Anthropic secures the control plane across all environments: session and work queue integrity, multitenant isolation, and agent-context minimization. When you self-host, the following responsibilities fall to you.
+In every environment, Anthropic secures the parts it runs: session and work queue integrity, multitenant isolation, and agent-context minimization. When you self-host sandboxes, the following responsibilities fall to you.
 
 ## What you own
 
@@ -47,6 +54,6 @@ Anthropic secures the control plane across all environments: session and work qu
 ## What Anthropic cannot do for you
 
 * **Know that your key leaked.** Anthropic can detect anomalous usage patterns, but cannot know your key was compromised. If you suspect `ANTHROPIC_ENVIRONMENT_KEY` leaked, revoke it and generate a replacement immediately. Revocation is validated on every request, so it takes effect on the worker’s next call.
-* **Verify your worker build.** Anthropic does not inspect your sandbox image or runtime. A supply-chain compromise in your image is not detectable from the control plane.
+* **Verify your worker build.** Anthropic does not inspect your sandbox image or runtime. A supply-chain compromise in your image is not detectable from Anthropic’s side.
 * **Isolate tools inside your sandbox.** Anthropic’s security boundary stops at the sandbox. How you isolate individual tool executions from each other inside that boundary is entirely your responsibility.
 * **Enforce data retention in your environment.** Once session content reaches your worker, it is outside Anthropic’s data lifecycle controls.

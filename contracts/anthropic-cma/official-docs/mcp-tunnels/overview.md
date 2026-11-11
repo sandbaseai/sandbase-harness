@@ -9,6 +9,8 @@ featureMetadata:
     eligibility: not-eligible
     note: Research preview. The MCP tunnels security page describes the data-flow boundary and subprocessor details.
   supportedModels:
+    - claude-fable-5-2
+    - claude-mythos-5-2
     - claude-fable-5-1
     - claude-mythos-5-1
     - claude-fable-5
@@ -174,7 +176,7 @@ The URL’s host is `<subdomain>.<your-tunnel-domain>`. The path depends on your
   curl https://api.anthropic.com/v1/messages \
     -H "Content-Type: application/json" \
     -H "X-API-Key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: mcp-client-2025-11-20" \
     -d '{
       "model": "claude-opus-5-5",

@@ -6,11 +6,14 @@ featureMetadata:
   topic:
     title: Managed Agents
     url: https://platform.claude.com/docs/en/managed-agents/overview
+  status: beta
   betaHeader: managed-agents-2026-04-01
   zdr:
     eligibility: not-eligible
     note: Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes.
   supportedModels:
+    - claude-fable-5-2
+    - claude-mythos-5-2
     - claude-fable-5-1
     - claude-mythos-5-1
     - claude-fable-5
@@ -28,6 +31,10 @@ featureMetadata:
     - claude-sonnet-4-6
     - claude-opus-4-5-20251101
     - claude-sonnet-4-5-20250929
+  supportedPlatforms:
+    Claude API: beta
+    Claude Platform on AWS: beta
+    Claude Models on Google Cloud (Anthropic managed): beta
 ---
 
 In a [multiagent session](https://platform.claude.com/docs/en/managed-agents/multiagent-orchestration), each agent works in its own **session thread**. This page covers how to list, interrupt, and archive threads, the events they send, and how tool permissions work across them. A [workflow run](https://platform.claude.com/docs/en/managed-agents/workflow-runs) creates session threads too.
@@ -54,7 +61,7 @@ List all threads associated with a session as follows:
   ```bash cURL
   curl -fsS "https://api.anthropic.com/v1/sessions/$SESSION_ID/threads" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01"
   ```
 
@@ -79,7 +86,7 @@ List all threads associated with a session as follows:
   ```csharp C#
   await foreach (var sessionThread in (await client.Beta.Sessions.Threads.List(session.ID)).Paginate())
   {
-      var label = sessionThread.Agent.Name ?? sessionThread.Agent.Json.GetProperty("type").GetString();
+      var label = sessionThread.Agent.Name ?? sessionThread.Agent.Type.Raw();
       Console.WriteLine($"[{label}] {sessionThread.Status.Raw()}");
   }
   ```
@@ -134,7 +141,7 @@ Send `user.interrupt` with `session_thread_id` (java: `sessionThreadId`; php: `s
   ```bash cURL
   curl -fsS "https://api.anthropic.com/v1/sessions/$SESSION_ID/events?beta=true" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
     -H "content-type: application/json" \
     -d '{
@@ -219,7 +226,7 @@ Optionally archive a session thread when it has completed its work. Archiving a 
   ```bash cURL
   curl -fsS -X POST "https://api.anthropic.com/v1/sessions/$SESSION_ID/threads/$THREAD_ID/archive" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01"
   ```
 
@@ -283,7 +290,7 @@ Archive only succeeds if the thread is `idle`. A thread parked on `requires_acti
   # Interrupt the thread, then archive it
   curl -fsS "https://api.anthropic.com/v1/sessions/$SESSION_ID/events?beta=true" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
     -H "content-type: application/json" \
     -d '{
@@ -294,7 +301,7 @@ Archive only succeeds if the thread is `idle`. A thread parked on `requires_acti
 
   curl -fsS -X POST "https://api.anthropic.com/v1/sessions/$SESSION_ID/threads/$THREAD_ID/archive" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01"
   ```
 
@@ -430,7 +437,7 @@ A thread’s stream doesn’t replay earlier events. Right after `session.thread
       ```bash cURL
       curl -fsSN "https://api.anthropic.com/v1/sessions/$SESSION_ID/threads/$THREAD_ID/stream?beta=true" \
         -H "x-api-key: $ANTHROPIC_API_KEY" \
-        -H "anthropic-version: 2023-06-01" \
+        -H "anthropic-version: 2026-10-21" \
         -H "anthropic-beta: managed-agents-2026-04-01"
       ```
 
@@ -528,7 +535,7 @@ A thread’s stream doesn’t replay earlier events. Right after `session.thread
               .build()
       )) {
           loop:
-          for (var event : (Iterable<BetaManagedAgentsStreamSessionThreadEvents>) streamResponse.stream()::iterator) {
+          for (var event : streamResponse) {
               switch (event.type().value()) {
                   case AGENT_MESSAGE -> {
                       for (var block : event.asAgentMessage().content()) {
@@ -586,7 +593,7 @@ A thread’s stream doesn’t replay earlier events. Right after `session.thread
       ```bash cURL
       curl -fsS "https://api.anthropic.com/v1/sessions/$SESSION_ID/threads/$THREAD_ID/events" \
         -H "x-api-key: $ANTHROPIC_API_KEY" \
-        -H "anthropic-version: 2023-06-01" \
+        -H "anthropic-version: 2026-10-21" \
         -H "anthropic-beta: managed-agents-2026-04-01"
       ```
 
@@ -616,7 +623,7 @@ A thread’s stream doesn’t replay earlier events. Right after `session.thread
       var page = await client.Beta.Sessions.Threads.Events.List(thread.ID, new() { SessionID = session.ID });
       await foreach (var evt in page.Paginate())
       {
-          Console.WriteLine($"[{evt.Json.GetProperty("type").GetString()}] {evt.ProcessedAt}");
+          Console.WriteLine($"[{evt.Type.Raw()}] {evt.ProcessedAt}");
       }
       ```
 
@@ -640,11 +647,8 @@ A thread’s stream doesn’t replay earlier events. Right after `session.thread
                   .sessionId(session.id())
                   .build()
       ).autoPager()) {
-          var type = event._json().orElseThrow() instanceof JsonObject json
-              ? json.values().get("type").asStringOrThrow()
-              : "unknown";
           var processedAt = event.processedAt().map(OffsetDateTime::toString).orElse("pending");
-          IO.println("[" + type + "] " + processedAt);
+          IO.println("[" + event.type().asString() + "] " + processedAt);
       }
       ```
 
@@ -803,7 +807,7 @@ The previous pattern answers the calls that an idle event lists. On the primary 
 
 ## Availability
 
-Session threads are available on every model.
+Session threads are in beta on every model.
 
 ### API support
 
@@ -811,9 +815,9 @@ Session threads are available on every model.
 
 * Availability: Always on
 
-| Status    | Cloud platforms         |
-| --------- | ----------------------- |
-| Available | All supported platforms |
+| Status | Cloud platforms         |
+| ------ | ----------------------- |
+| Beta   | All supported platforms |
 
 ### Required beta headers
 
