@@ -12,6 +12,8 @@ featureMetadata:
     eligibility: not-eligible
     note: Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes.
   supportedModels:
+    - claude-fable-5-2
+    - claude-mythos-5-2
     - claude-fable-5-1
     - claude-mythos-5-1
     - claude-fable-5
@@ -122,7 +124,7 @@ To enforce a spend limit, set a session budget rather than polling usage and sto
 
 Session usage counts toward your organization’s totals on the [Usage](https://platform.claude.com/usage) page (`platform.claude.com/usage`) and the [Cost](https://platform.claude.com/cost) page (`platform.claude.com/cost`) in the Claude Console. To see token usage by agent, set **Group by** to **Agent** on the **Usage** page.
 
-Session usage also appears in the [usage report](https://platform.claude.com/docs/en/api/beta/organization/usage_report/retrieve_messages) from the [Usage and Cost API](https://platform.claude.com/docs/en/manage-claude/usage-cost-api). To see which account it’s reported under, group the report by one of these fields:
+To see session usage by agent or by session, use the [Usage and Cost Analytics API](https://platform.claude.com/docs/en/manage-claude/usage-cost-analytics-api) and group by `agent_id` or `session_id`. Session usage also appears in the [usage report](https://platform.claude.com/docs/en/api/beta/organization/usage_report/retrieve_messages) from the legacy [Usage and Cost API](https://platform.claude.com/docs/en/manage-claude/usage-cost-api). To see which account it’s reported under, group that report by one of these fields:
 
 * **`account_id`:** The member who started the session. This covers sessions started in the Console or with a [personal key](https://platform.claude.com/docs/en/manage-claude/authentication#key-types) scoped to a single workspace.
 * **`service_account_id`:** An Anthropic-managed service account (`svac_...`). This covers sessions started with a workspace key or by a [deployment](https://platform.claude.com/docs/en/managed-agents/scheduled-deployments). For this usage, `api_key_id` and `account_id` are `null`.

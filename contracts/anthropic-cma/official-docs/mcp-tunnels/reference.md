@@ -51,7 +51,7 @@ Required headers on every request:
 | Header              | Value                                      |
 | ------------------- | ------------------------------------------ |
 | `Authorization`     | `Bearer <token>` (the WIF-exchanged token) |
-| `anthropic-version` | `2023-06-01`                               |
+| `anthropic-version` | `2026-10-21`                               |
 | `anthropic-beta`    | `mcp-tunnels-2026-06-22`                   |
 
 ## Certificate requirements

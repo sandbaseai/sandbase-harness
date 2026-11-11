@@ -12,6 +12,8 @@ featureMetadata:
     eligibility: not-eligible
     note: Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes.
   supportedModels:
+    - claude-fable-5-2
+    - claude-mythos-5-2
     - claude-fable-5-1
     - claude-mythos-5-1
     - claude-fable-5
@@ -82,7 +84,7 @@ You also give up these cloud environment features:
 * [`file` and `github_repository` session resources](https://platform.claude.com/docs/en/managed-agents/self-hosted-sandboxes#session-resources). You [stage input files yourself](https://platform.claude.com/docs/en/managed-agents/self-hosted-sandboxes-workers#stage-files-for-a-session), and you are responsible for mounting your own GitHub repository too.
 * [Repository skill discovery](https://platform.claude.com/docs/en/managed-agents/skills#load-skills-from-a-github-repository).
 * [Environment variable credentials](https://platform.claude.com/docs/en/managed-agents/vaults#add-a-credential) in vaults.
-* The [pre-installed runtimes and packages](https://platform.claude.com/docs/en/managed-agents/cloud-sandboxes-reference) of a cloud sandbox. A self-hosted sandbox has whatever your worker provides.
+* The [preinstalled runtimes and packages](https://platform.claude.com/docs/en/managed-agents/cloud-sandboxes-reference) of a cloud sandbox. A self-hosted sandbox has whatever your worker provides.
 
 ## Differences on Claude Platform on AWS
 
@@ -90,7 +92,7 @@ If you use Claude Managed Agents through Claude Platform on AWS, Anthropic still
 
 ## Differences on Claude Models on Google Cloud (Anthropic managed)
 
-If you use Claude Managed Agents through Claude Models on Google Cloud (Anthropic managed), Anthropic still operates the service. There, memory stores aren’t supported in a self-hosted sandbox, and MCP tunnels aren’t available. Workers authenticate with Google Cloud credentials, not an environment key, and you write your own, because the pre-built workers in the `ant` CLI and the Python, TypeScript, and Go SDKs don’t work there. See [Feature support](https://platform.claude.com/docs/en/build-with-claude/claude-models-on-google-cloud/anthropic-managed#feature-support) in the Claude Models on Google Cloud (Anthropic managed) guide.
+If you use Claude Managed Agents through Claude Models on Google Cloud (Anthropic managed), Anthropic still operates the service. There, memory stores aren’t available in a self-hosted sandbox, and MCP tunnels aren’t available. Workers authenticate with Google Cloud credentials, not an environment key. You write your own worker, because the prebuilt workers in the `ant` CLI and the Python, TypeScript, and Go SDKs don’t work there. See [Feature support](https://platform.claude.com/docs/en/build-with-claude/claude-models-on-google-cloud/anthropic-managed#feature-support) in the Claude Models on Google Cloud (Anthropic managed) guide.
 
 ## Switch from a cloud environment to a self-hosted sandbox
 
@@ -102,4 +104,4 @@ To switch to a self-hosted sandbox, you keep the agent, create a `self_hosted` e
 
 On Claude Platform on AWS, memory stores don’t carry over to a self-hosted sandbox, and the worker doesn’t use an environment key. See [Differences on Claude Platform on AWS](https://platform.claude.com/docs/en/managed-agents/choosing-an-environment#differences-on-claude-platform-on-aws).
 
-On Claude Models on Google Cloud (Anthropic managed), memory stores aren’t supported in a self-hosted sandbox, and you write your own worker, which doesn’t use an environment key. See [Differences on Claude Models on Google Cloud (Anthropic managed)](https://platform.claude.com/docs/en/managed-agents/choosing-an-environment#differences-on-claude-models-on-google-cloud-anthropic-managed).
+On Claude Models on Google Cloud (Anthropic managed), memory stores aren’t available in a self-hosted sandbox, and you write your own worker, which doesn’t use an environment key. See [Differences on Claude Models on Google Cloud (Anthropic managed)](https://platform.claude.com/docs/en/managed-agents/choosing-an-environment#differences-on-claude-models-on-google-cloud-anthropic-managed).

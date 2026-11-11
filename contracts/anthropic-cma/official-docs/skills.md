@@ -12,6 +12,8 @@ featureMetadata:
     eligibility: not-eligible
     note: Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes.
   supportedModels:
+    - claude-fable-5-2
+    - claude-mythos-5-2
     - claude-fable-5-1
     - claude-mythos-5-1
     - claude-fable-5
@@ -54,7 +56,7 @@ These examples omit the optional `display_name` (java, php: `displayName`; cshar
   ```bash cURL
   curl -X POST "https://api.anthropic.com/v1/skills" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -F "files[]=@example_skill.zip"
   ```
 
@@ -245,7 +247,7 @@ Each entry in the `skills` (csharp, go: `Skills`) array uses the following field
   ```bash cURL
   curl -sS https://api.anthropic.com/v1/agents \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
     --json '{
       "name": "Financial Analyst",
@@ -446,13 +448,13 @@ A `.claude/skills` directory elsewhere in the repository, such as inside a packa
 
 Repository skills use the same `SKILL.md` format as the custom skills you upload. For the format and authoring guidance, see [Agent Skills](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview) and [Skill authoring best practices](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/best-practices).
 
-To load skills from a repository, create a session that mounts it. This is the same request shown in [Accessing GitHub](https://platform.claude.com/docs/en/managed-agents/github#token-permissions); `mount_path` (java, php: `mountPath`; csharp, go: `MountPath`) is optional and defaults to `/workspace/<repo-name>`:
+To load skills from a repository, create a session that mounts it. This is the same request shown in [Accessing GitHub](https://platform.claude.com/docs/en/managed-agents/github); `mount_path` (java, php: `mountPath`; csharp, go: `MountPath`) is optional and defaults to `/workspace/<repo-name>`:
 
 <CodeGroup>
   ```bash cURL
   curl -fsS https://api.anthropic.com/v1/sessions \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
     -H "content-type: application/json" \
     -d @- <<JSON
@@ -592,7 +594,7 @@ To load skills from a repository, create a session that mounts it. This is the s
   ```
 </CodeGroup>
 
-For private repositories, the resource’s `authorization_token` (java, php: `authorizationToken`; csharp, go: `AuthorizationToken`) must have access to the repository. This is the same personal access token flow used for any repository mount; see [Accessing GitHub](https://platform.claude.com/docs/en/managed-agents/github#token-permissions).
+For private repositories, the resource’s `authorization_token` (java, php: `authorizationToken`; csharp, go: `AuthorizationToken`) must have access to the repository. This is the same personal access token flow used for any repository mount; see [Token permissions](https://platform.claude.com/docs/en/managed-agents/github#token-permissions).
 
 Discovered skills follow the checked-out state of the repository: the `checkout` (csharp, go: `Checkout`) branch or commit when the resource sets one, otherwise the repository’s default branch. The scan runs once, when the session starts. Commits pushed mid-session are not picked up; to load updated skills, start a new session.
 

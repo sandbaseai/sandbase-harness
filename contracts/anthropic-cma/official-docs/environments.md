@@ -6,11 +6,14 @@ featureMetadata:
   topic:
     title: Managed Agents
     url: https://platform.claude.com/docs/en/managed-agents/overview
+  status: beta
   betaHeader: managed-agents-2026-04-01
   zdr:
     eligibility: not-eligible
     note: Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes.
   supportedModels:
+    - claude-fable-5-2
+    - claude-mythos-5-2
     - claude-fable-5-1
     - claude-mythos-5-1
     - claude-fable-5
@@ -28,6 +31,10 @@ featureMetadata:
     - claude-sonnet-4-6
     - claude-opus-4-5-20251101
     - claude-sonnet-4-5-20250929
+  supportedPlatforms:
+    Claude API: beta
+    Claude Platform on AWS: beta
+    Claude Models on Google Cloud (Anthropic managed): beta
 ---
 
 Environments define the sandbox configuration where your agent runs. You create an environment once, then reference its ID each time you start a session. Multiple sessions can share the same environment, but each session gets its own isolated sandbox (a fresh Linux container).
@@ -40,7 +47,7 @@ This page covers `type: cloud` environments. To run sandboxes on your own infras
   ```bash cURL
   curl -fsS https://api.anthropic.com/v1/environments \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
     -H "content-type: application/json" \
     -d '{
@@ -178,7 +185,7 @@ Pass the environment ID as a string when [creating a session](https://platform.c
   ```bash cURL
   curl -fsS https://api.anthropic.com/v1/sessions \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
     -H "content-type: application/json" \
     -d '{
@@ -257,7 +264,7 @@ The `packages` (csharp, go: `Packages`) field pre-installs packages into the san
   ```bash cURL
   curl -fsS https://api.anthropic.com/v1/environments \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
     -H "content-type: application/json" \
     -d '{
@@ -448,7 +455,7 @@ The following example creates an environment with `limited` networking:
   ```bash cURL
   curl -fsS https://api.anthropic.com/v1/environments \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
     -H "content-type: application/json" \
     -d '{
@@ -673,25 +680,25 @@ Use `unrestricted` only when the agent must reach sites you cannot list in advan
   # List environments
   curl -fsS https://api.anthropic.com/v1/environments \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01"
 
   # Retrieve a specific environment
   curl -fsS "https://api.anthropic.com/v1/environments/$ENVIRONMENT_ID" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01"
 
-  # Archive an environment (read-only, existing sessions continue)
+  # Archive an environment (read-only, no new sessions)
   curl -fsS -X POST "https://api.anthropic.com/v1/environments/$ENVIRONMENT_ID/archive" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01"
 
-  # Delete an environment (only if no sessions reference it)
+  # Delete an environment
   curl -fsS -X DELETE "https://api.anthropic.com/v1/environments/$ENVIRONMENT_ID" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01"
   ```
 
@@ -702,10 +709,10 @@ Use `unrestricted` only when the agent must reach sites you cannot list in advan
   # Retrieve a specific environment
   ant beta:environments retrieve --environment-id "$ENVIRONMENT_ID"
 
-  # Archive an environment (read-only, existing sessions continue)
+  # Archive an environment (read-only, no new sessions)
   ant beta:environments archive --environment-id "$ENVIRONMENT_ID"
 
-  # Delete an environment (only if no sessions reference it)
+  # Delete an environment
   ant beta:environments delete --environment-id "$ENVIRONMENT_ID"
   ```
 
@@ -716,10 +723,10 @@ Use `unrestricted` only when the agent must reach sites you cannot list in advan
   # Retrieve a specific environment
   env = client.beta.environments.retrieve(environment.id)
 
-  # Archive an environment (read-only, existing sessions continue)
+  # Archive an environment (read-only, no new sessions)
   client.beta.environments.archive(environment.id)
 
-  # Delete an environment (only if no sessions reference it)
+  # Delete an environment
   client.beta.environments.delete(environment.id)
   ```
 
@@ -730,10 +737,10 @@ Use `unrestricted` only when the agent must reach sites you cannot list in advan
   // Retrieve a specific environment
   const env = await client.beta.environments.retrieve(environment.id);
 
-  // Archive an environment (read-only, existing sessions continue)
+  // Archive an environment (read-only, no new sessions)
   await client.beta.environments.archive(environment.id);
 
-  // Delete an environment (only if no sessions reference it)
+  // Delete an environment
   await client.beta.environments.delete(environment.id);
   ```
 
@@ -744,10 +751,10 @@ Use `unrestricted` only when the agent must reach sites you cannot list in advan
   // Retrieve a specific environment
   var env = await client.Beta.Environments.Retrieve(environment.ID);
 
-  // Archive an environment (read-only, existing sessions continue)
+  // Archive an environment (read-only, no new sessions)
   await client.Beta.Environments.Archive(environment.ID);
 
-  // Delete an environment (only if no sessions reference it)
+  // Delete an environment
   await client.Beta.Environments.Delete(environment.ID);
   ```
 
@@ -760,11 +767,11 @@ Use `unrestricted` only when the agent must reach sites you cannot list in advan
   env, err := client.Beta.Environments.Get(ctx, environment.ID, anthropic.BetaEnvironmentGetParams{})
   // ...
 
-  // Archive an environment (read-only, existing sessions continue)
+  // Archive an environment (read-only, no new sessions)
   _, err = client.Beta.Environments.Archive(ctx, environment.ID, anthropic.BetaEnvironmentArchiveParams{})
   // ...
 
-  // Delete an environment (only if no sessions reference it)
+  // Delete an environment
   _, err = client.Beta.Environments.Delete(ctx, environment.ID, anthropic.BetaEnvironmentDeleteParams{})
   ```
 
@@ -773,9 +780,9 @@ Use `unrestricted` only when the agent must reach sites you cannot list in advan
   var environments = client.beta().environments().list();
   // Retrieve a specific environment
   var env = client.beta().environments().retrieve(environment.id());
-  // Archive an environment (read-only, existing sessions continue)
+  // Archive an environment (read-only, no new sessions)
   client.beta().environments().archive(environment.id());
-  // Delete an environment (only if no sessions reference it)
+  // Delete an environment
   client.beta().environments().delete(environment.id());
   ```
 
@@ -784,9 +791,9 @@ Use `unrestricted` only when the agent must reach sites you cannot list in advan
   $environments = $client->beta->environments->list();
   // Retrieve a specific environment
   $env = $client->beta->environments->retrieve($environment->id);
-  // Archive an environment (read-only, existing sessions continue)
+  // Archive an environment (read-only, no new sessions)
   $client->beta->environments->archive($environment->id);
-  // Delete an environment (only if no sessions reference it)
+  // Delete an environment
   $client->beta->environments->delete($environment->id);
   ```
 
@@ -797,10 +804,10 @@ Use `unrestricted` only when the agent must reach sites you cannot list in advan
   # Retrieve a specific environment
   env = client.beta.environments.retrieve(environment.id)
 
-  # Archive an environment (read-only, existing sessions continue)
+  # Archive an environment (read-only, no new sessions)
   client.beta.environments.archive(environment.id)
 
-  # Delete an environment (only if no sessions reference it)
+  # Delete an environment
   client.beta.environments.delete(environment.id)
   ```
 </CodeGroup>
@@ -823,7 +830,7 @@ Cloud sandboxes include common language runtimes, databases, and command-line to
 
 ## Availability
 
-Cloud sandboxes are available on every model.
+Cloud sandboxes are in beta on every model.
 
 ### API support
 
@@ -831,9 +838,9 @@ Cloud sandboxes are available on every model.
 
 * Availability: Available
 
-| Status    | Cloud platforms                                                                                                                                                                                                                                                                | Models                                                            |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| Available | Claude API, [Claude Platform on AWS](https://platform.claude.com/docs/en/build-with-claude/claude-platform-on-aws), [Claude Models on Google Cloud (Anthropic managed)](https://platform.claude.com/docs/en/build-with-claude/claude-models-on-google-cloud/anthropic-managed) | [All models](https://platform.claude.com/docs/en/models/overview) |
+| Status | Cloud platforms                                                                                                                                                                                                                                                                | Models                                                            |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| Beta   | Claude API, [Claude Platform on AWS](https://platform.claude.com/docs/en/build-with-claude/claude-platform-on-aws), [Claude Models on Google Cloud (Anthropic managed)](https://platform.claude.com/docs/en/build-with-claude/claude-models-on-google-cloud/anthropic-managed) | [All models](https://platform.claude.com/docs/en/models/overview) |
 
 ### Required beta headers
 
