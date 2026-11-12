@@ -96,8 +96,8 @@ an unsupported request never leaves state behind.
   keeps `web_search` `unavailable`, so admission and execution can never
   disagree about whether the tool exists.
 - The request leaves the runtime process for the provider endpoint; the
-  provider key rides in a header (`Authorization` for Tavily, `X-API-Key` for
-  Keenable) and never enters a URL, a
+  provider key rides in a header (`Authorization` for Tavily and Outcrawl,
+  `X-API-Key` for Keenable) and never enters a URL, a
   log line, or the tool's result text. The Environment network policy governs
   the endpoint exactly as it governs a `web_fetch` target, so a `limited`
   Environment must allow it for the tool to run.
@@ -129,6 +129,12 @@ an unsupported request never leaves state behind.
   configured key if echoed in a result. `brave`, `exa`, and `searxng` are recognized settings values
   listed as unavailable adapters — each ships as its own PR against the same
   `SearchProvider` interface.
+- Outcrawl (`outcrawl.ts`) is a keyed adapter like Tavily: `POST /v1/search`
+  with bearer auth, a body of `query` and `limit` (from `num_results`), and
+  results read from the `hits` array (`title`, `url`, `snippet`). Recency and
+  country preferences are not sent and are ignored; the domain policy is
+  enforced client-side on the returned URLs. It shares Keenable's redirect
+  refusal, deadline-through-body, 1 MB cap, URL filtering, and key scrubbing.
 
 Domain policy (`web-tool-policy.ts`):
 
@@ -298,6 +304,9 @@ client loop reads — `evaluated_permission` and `evaluation` included.
 
 ## 6. Corresponding tests
 
+- `tests/unit/web-search-outcrawl.test.ts`: the Outcrawl adapter, request
+  mapping, bearer-only key placement, redirect refusal, normalization, key
+  scrubbing, and coded failures.
 - `tests/unit/web-search-keenable.test.ts` — the Keenable adapter: keyless
   public-endpoint selection, keyed header placement, request mapping,
   normalization, and coded failures.

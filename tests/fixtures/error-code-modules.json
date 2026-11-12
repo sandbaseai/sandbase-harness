@@ -216,10 +216,12 @@
     ],
     "web_search_provider_failed": [
       "src/core/web/search/keenable.ts",
+      "src/core/web/search/outcrawl.ts",
       "src/core/web/search/tavily.ts"
     ],
     "web_search_rate_limited": [
       "src/core/web/search/keenable.ts",
+      "src/core/web/search/outcrawl.ts",
       "src/core/web/search/tavily.ts"
     ],
     "work_lease_lost": [
