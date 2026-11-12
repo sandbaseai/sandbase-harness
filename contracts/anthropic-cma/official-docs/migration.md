@@ -12,6 +12,8 @@ featureMetadata:
     eligibility: not-eligible
     note: Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes.
   supportedModels:
+    - claude-fable-5-2
+    - claude-mythos-5-2
     - claude-fable-5-1
     - claude-mythos-5-1
     - claude-fable-5
@@ -990,7 +992,6 @@ If you built with the [Claude Agent SDK](https://code.claude.com/docs/en/agent-s
   import com.anthropic.models.beta.environments.EnvironmentCreateParams;
   import com.anthropic.models.beta.sessions.BetaManagedAgentsAgentParams;
   import com.anthropic.models.beta.sessions.SessionCreateParams;
-  import com.anthropic.models.beta.sessions.events.BetaManagedAgentsStreamSessionEvents;
   import com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserCustomToolResultEventParams;
   import com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserMessageEventParams;
   import com.anthropic.models.beta.sessions.events.EventSendParams;
@@ -1041,7 +1042,7 @@ If you built with the [Claude Agent SDK](https://code.claude.com/docs/en/agent-s
               .build());
 
       loop:
-      for (var event : (Iterable<BetaManagedAgentsStreamSessionEvents>) stream.stream()::iterator) {
+      for (var event : stream) {
           switch (event.type().value()) {
               case AGENT_MESSAGE -> {
                   for (var block : event.asAgentMessage().content()) {
@@ -1261,7 +1262,7 @@ When a new Claude model is released, migrating a Claude Managed Agents integrati
   ```bash cURL
   curl -sS --fail-with-body "https://api.anthropic.com/v1/agents/$AGENT_ID?beta=true" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
     -H "content-type: application/json" \
     -d '{
@@ -1314,7 +1315,7 @@ When a new Claude model is released, migrating a Claude Managed Agents integrati
 
   ```go Go
   _, err = client.Beta.Agents.Update(ctx, agent.ID, anthropic.BetaAgentUpdateParams{
-  	Version: agent.Version,
+  	Version: anthropic.Int(agent.Version),
   	Model: anthropic.BetaManagedAgentsModelConfigParams{
   		ID: anthropic.BetaManagedAgentsModelClaudeOpus5_5,
   	},

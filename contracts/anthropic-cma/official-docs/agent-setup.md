@@ -6,11 +6,14 @@ featureMetadata:
   topic:
     title: Managed Agents
     url: https://platform.claude.com/docs/en/managed-agents/overview
+  status: beta
   betaHeader: managed-agents-2026-04-01
   zdr:
     eligibility: not-eligible
     note: Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes.
   supportedModels:
+    - claude-fable-5-2
+    - claude-mythos-5-2
     - claude-fable-5-1
     - claude-mythos-5-1
     - claude-fable-5
@@ -28,6 +31,10 @@ featureMetadata:
     - claude-sonnet-4-6
     - claude-opus-4-5-20251101
     - claude-sonnet-4-5-20250929
+  supportedPlatforms:
+    Claude API: beta
+    Claude Platform on AWS: beta
+    Claude Models on Google Cloud (Anthropic managed): beta
 ---
 
 An agent is a reusable, versioned configuration that defines persona and capabilities. It bundles the model, system prompt, tools, MCP servers, and skills that shape how Claude behaves during a session.
@@ -54,13 +61,13 @@ You can also override `model` (csharp, go: `Model`), `system` (csharp, go: `Syst
 
 The following example defines a coding agent that uses the newest Claude Opus model with access to the pre-built agent toolset. The toolset lets the agent write code, read files, search the web, and more. See the [agent tools reference](https://platform.claude.com/docs/en/managed-agents/tools) for the full list of supported tools.
 
-The examples use curl, the `ant` CLI, or the SDK. If you haven’t set one up, the [quickstart](https://platform.claude.com/docs/en/managed-agents/quickstart#install-the-cli) covers installation and client setup.
+The examples use curl, the `ant` CLI, or the SDK. If you haven’t set one up, the [quickstart](https://platform.claude.com/docs/en/managed-agents/quickstart#before-you-begin) covers installation and client setup.
 
 <CodeGroup defaultLanguage="CLI">
   ```bash cURL
   curl -fsSL https://api.anthropic.com/v1/agents \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
     -H "content-type: application/json" \
     -d '{
@@ -223,7 +230,7 @@ The following example pins an agent to US inference. The response carries the `i
   ```bash cURL
   curl -fsSL https://api.anthropic.com/v1/agents \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
     -H "content-type: application/json" \
     -d '{
@@ -361,7 +368,7 @@ With the CLI, edit the agent’s file and run `ant apply` again; apply supplies 
   ```bash cURL
   curl -fsSL "https://api.anthropic.com/v1/agents/$AGENT_ID" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
     -H "content-type: application/json" \
     -d '{
@@ -469,7 +476,7 @@ The preceding example supplies `version` (csharp, go: `Version`) from the create
   ```bash cURL
   curl -fsSL "https://api.anthropic.com/v1/agents/$AGENT_ID" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
     -H "content-type: application/json" \
     -d '{
@@ -574,7 +581,7 @@ The following update clears the description, deletes the `team` key from `metada
   ```bash cURL
   curl -fsSL "https://api.anthropic.com/v1/agents/$AGENT_ID" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
     -H "content-type: application/json" \
     -d '{
@@ -724,7 +731,7 @@ Fetch the full version history to track how an agent has changed over time. Resu
   ```bash cURL
   curl -fsSL "https://api.anthropic.com/v1/agents/$AGENT_ID/versions" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01"
   ```
 
@@ -789,7 +796,7 @@ Archiving makes the agent read-only and cannot be undone. Existing sessions cont
   ```bash cURL
   curl -fsSL -X POST "https://api.anthropic.com/v1/agents/$AGENT_ID/archive" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01"
   ```
 
@@ -860,7 +867,7 @@ Archiving makes the agent read-only and cannot be undone. Existing sessions cont
 
 ## Availability
 
-Agent configurations are available on every model.
+Agent configurations are in beta on every model.
 
 ### API support
 
@@ -868,9 +875,9 @@ Agent configurations are available on every model.
 
 * Availability: Available
 
-| Status    | Cloud platforms                                                                                                                                                                                                                                                                | Models                                                            |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| Available | Claude API, [Claude Platform on AWS](https://platform.claude.com/docs/en/build-with-claude/claude-platform-on-aws), [Claude Models on Google Cloud (Anthropic managed)](https://platform.claude.com/docs/en/build-with-claude/claude-models-on-google-cloud/anthropic-managed) | [All models](https://platform.claude.com/docs/en/models/overview) |
+| Status | Cloud platforms                                                                                                                                                                                                                                                                | Models                                                            |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| Beta   | Claude API, [Claude Platform on AWS](https://platform.claude.com/docs/en/build-with-claude/claude-platform-on-aws), [Claude Models on Google Cloud (Anthropic managed)](https://platform.claude.com/docs/en/build-with-claude/claude-models-on-google-cloud/anthropic-managed) | [All models](https://platform.claude.com/docs/en/models/overview) |
 
 ### Required beta headers
 

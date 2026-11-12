@@ -6,11 +6,14 @@ featureMetadata:
   topic:
     title: Managed Agents
     url: https://platform.claude.com/docs/en/managed-agents/overview
+  status: beta
   betaHeader: managed-agents-2026-04-01
   zdr:
     eligibility: not-eligible
     note: Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes.
   supportedModels:
+    - claude-fable-5-2
+    - claude-mythos-5-2
     - claude-fable-5-1
     - claude-mythos-5-1
     - claude-fable-5
@@ -28,6 +31,10 @@ featureMetadata:
     - claude-sonnet-4-6
     - claude-opus-4-5-20251101
     - claude-sonnet-4-5-20250929
+  supportedPlatforms:
+    Claude API: beta
+    Claude Platform on AWS: beta
+    Claude Models on Google Cloud (Anthropic managed): beta
 ---
 
 A **scheduled deployment** allows an [agent](https://platform.claude.com/docs/en/managed-agents/agent-setup) to start [sessions](https://platform.claude.com/docs/en/managed-agents/sessions) autonomously, so the agent can complete tasks on a predictable cadence. You create and manage deployments with the Deployments API, part of the Claude API.
@@ -54,7 +61,7 @@ When creating a deployment, you pass the [session configurations](https://platfo
   ```bash cURL
   curl --fail-with-body -sS "https://api.anthropic.com/v1/deployments?beta=true" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
     -H "content-type: application/json" \
     -d '{
@@ -288,7 +295,7 @@ The following example sets a budget on an existing deployment:
   ```bash cURL
   curl --fail-with-body -sS "https://api.anthropic.com/v1/deployments/$DEPLOYMENT_ID?beta=true" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
     -H "content-type: application/json" \
     -d '{
@@ -423,7 +430,7 @@ List all deployment runs for a deployment as follows:
   ```bash cURL
   curl --fail-with-body -sS "https://api.anthropic.com/v1/deployment_runs?beta=true&deployment_id=$DEPLOYMENT_ID" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01"
   ```
 
@@ -452,9 +459,7 @@ List all deployment runs for a deployment as follows:
   );
   await foreach (var run in runs.Paginate())
   {
-      // The Error union exposes .Message directly; the discriminator is read
-      // from .Json until a common .Type accessor is added.
-      var outcome = run.SessionID ?? run.Error!.Json.GetProperty("type").GetString();
+      var outcome = run.SessionID ?? run.Error!.Type.Raw();
       Console.WriteLine($"{run.CreatedAt} {outcome}");
   }
   ```
@@ -481,10 +486,8 @@ List all deployment runs for a deployment as follows:
           DeploymentRunListParams.builder()
               .deploymentId(deployment.id())
               .build()).autoPager()) {
-      // The Error union does not yet expose common .type()/.message()
-      // accessors; .toString() includes both.
       IO.println(run.createdAt() + " "
-          + run.sessionId().orElseGet(() -> run.error().orElseThrow().toString()));
+          + run.sessionId().orElseGet(() -> run.error().orElseThrow().type().asString()));
   }
   ```
 
@@ -512,7 +515,7 @@ You can additionally filter on deployment runs with errors:
   ```bash cURL
   curl --fail-with-body -sS "https://api.anthropic.com/v1/deployment_runs?beta=true&deployment_id=$DEPLOYMENT_ID&has_error=true" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01"
   ```
 
@@ -544,7 +547,7 @@ You can additionally filter on deployment runs with errors:
   await foreach (var failedRun in failedRuns.Paginate())
   {
       var error = failedRun.Error!;
-      var errorType = error.Json.GetProperty("type").GetString();
+      var errorType = error.Type.Raw();
       Console.WriteLine($"{failedRun.CreatedAt} {errorType} {error.Message}");
   }
   ```
@@ -569,7 +572,8 @@ You can additionally filter on deployment runs with errors:
               .deploymentId(deployment.id())
               .hasError(true)
               .build()).autoPager()) {
-      IO.println(run.createdAt() + " " + run.error().orElseThrow());
+      var error = run.error().orElseThrow();
+      IO.println(run.createdAt() + " " + error.type().asString() + " " + error.message());
   }
   ```
 
@@ -622,7 +626,7 @@ Each lifecycle change emits a [webhook event](https://platform.claude.com/docs/e
   ```bash cURL
   curl --fail-with-body -sS -X POST "https://api.anthropic.com/v1/deployments/$DEPLOYMENT_ID/pause?beta=true" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01"
   ```
 
@@ -667,7 +671,7 @@ Each lifecycle change emits a [webhook event](https://platform.claude.com/docs/e
   ```bash cURL
   curl --fail-with-body -sS -X POST "https://api.anthropic.com/v1/deployments/$DEPLOYMENT_ID/unpause?beta=true" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01"
   ```
 
@@ -712,7 +716,7 @@ Each lifecycle change emits a [webhook event](https://platform.claude.com/docs/e
   ```bash cURL
   curl --fail-with-body -sS -X POST "https://api.anthropic.com/v1/deployments/$DEPLOYMENT_ID/archive?beta=true" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01"
   ```
 
@@ -765,7 +769,7 @@ To run a deployment outside its schedule, call the [`run` endpoint](https://plat
   ```bash cURL
   curl --fail-with-body -sS -X POST "https://api.anthropic.com/v1/deployments/$DEPLOYMENT_ID/run?beta=true" \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -H "anthropic-version: 2023-06-01" \
+    -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01"
   ```
 
@@ -807,7 +811,7 @@ To run a deployment outside its schedule, call the [`run` endpoint](https://plat
 
 ## Availability
 
-Scheduled deployments are available on every model.
+Scheduled deployments are in beta on every model.
 
 ### API support
 
@@ -815,9 +819,9 @@ Scheduled deployments are available on every model.
 
 * Availability: Available
 
-| Status    | Cloud platforms                                                                                                                                                                                                                                                                | Models                                                            |
-| --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
-| Available | Claude API, [Claude Platform on AWS](https://platform.claude.com/docs/en/build-with-claude/claude-platform-on-aws), [Claude Models on Google Cloud (Anthropic managed)](https://platform.claude.com/docs/en/build-with-claude/claude-models-on-google-cloud/anthropic-managed) | [All models](https://platform.claude.com/docs/en/models/overview) |
+| Status | Cloud platforms                                                                                                                                                                                                                                                                | Models                                                            |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------- |
+| Beta   | Claude API, [Claude Platform on AWS](https://platform.claude.com/docs/en/build-with-claude/claude-platform-on-aws), [Claude Models on Google Cloud (Anthropic managed)](https://platform.claude.com/docs/en/build-with-claude/claude-models-on-google-cloud/anthropic-managed) | [All models](https://platform.claude.com/docs/en/models/overview) |
 
 ### Required beta headers
 
