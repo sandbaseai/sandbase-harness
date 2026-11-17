@@ -215,26 +215,30 @@ The session-level `stop_reason` (`toApiEvent`):
   contract states there is no dedicated interrupt reason, so no separate value is
   invented here.
 - `event_ids` names the parked calls by their own **event** id — the `id` the
-  event listing reports for that event. Both parked-work families are included,
-  because the published contract parks them the same way: an approval-gated
-  `agent.tool_use` / `agent.mcp_tool_use`, and an `agent.custom_tool_use` the
-  caller has not answered. That is the address the published client sends back,
-  so the two halves of the exchange agree. Resolution is still tracked by the
-  `tool_use` **block** id, because a tool result pairs to its call by tool-call
-  id, so a call that already has a result is excluded even though the array
-  reports event ids.
+  event listing reports for that event. All three parked-work families are
+  included, because the published contract parks them the same way: an
+  approval-gated `agent.tool_use` / `agent.mcp_tool_use`, a builtin
+  `agent.tool_use` on a self-hosted environment the runtime handed to the
+  environment's workers (`metadata.awaiting_tool_result`), and an
+  `agent.custom_tool_use` the caller has not answered. That is the address the
+  published client sends back, so the two halves of the exchange agree.
+  Resolution is still tracked by the `tool_use` **block** id, because a tool
+  result pairs to its call by tool-call id, so a call that already has a
+  result is excluded even though the array reports event ids.
 - The object carries exactly the published shape, `{ type, event_ids }`. It
   previously also carried `action_type`, a local field absent from the published
   contract and read by nothing; with both families able to be parked at once no
   single value of it was true, so it is no longer written.
 - A `user.tool_confirmation` may address an approval-gated call by that event id
-  **or** by the `tool_use` block id, and a `user.custom_tool_result` may address
-  a custom tool call the same two ways. The block id is in both cases a
+  **or** by the `tool_use` block id, a `user.tool_result` may address a parked
+  worker call the same two ways, and a `user.custom_tool_result` may address
+  a custom tool call the same two ways. The block id is in each case a
   documented local fallback, kept because this runtime's own callers and tests
   answer with one; widening which identifier *selects* the call does not widen
   authority, since the pending check and the one-shot resolution still decide
   whether anything runs. Whichever arrives, the confirmation event's
-  `metadata.tool_use_id`, the `agent.tool_result` appended for a decision, and the
+  `metadata.tool_use_id`, the `agent.tool_result` appended for a decision, the
+  tool result's `metadata.tool_use_id`, and the
   result's `metadata.custom_tool_use_id` all carry the **block** id, and a second
   answer for one call is refused whichever spelling it uses.
 - **The resume turn starts only once nothing is parked.** Each answer is recorded
@@ -271,11 +275,15 @@ The session-level `stop_reason` (`toApiEvent`):
   lives in `src/core/auth/session-work-scope.ts` and the type fence in the
   route itself.
 
-  Permission to post an answer type does not imply implementation:
-  `user.tool_result` is refused with `400 invalid_request_error` /
-  `self_hosted_tool_result_not_supported` before any event in the batch is
-  appended or executed. Only the custom-tool answer lifecycle is implemented
-  here; local worker completions use `/v1/x/worker/complete`.
+  Both lifecycles are implemented. `user.custom_tool_result` answers a parked
+  `agent.custom_tool_use` as published; `user.tool_result` answers a builtin
+  `agent.tool_use` the runtime parked for the environment's workers
+  (`metadata.awaiting_tool_result` — see [`work.md`](./work.md)), by the
+  published event id or the block-id spelling. A `user.tool_result` naming no
+  parked worker call is refused `400` with `tool_result_not_pending`, and a
+  malformed one with `tool_result_invalid`, before any event in the batch is
+  appended or executed. Local worker completions use `/v1/x/worker/complete`
+  and are injected back as this same event.
 
 `initial_events`:
 

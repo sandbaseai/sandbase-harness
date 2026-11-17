@@ -112,13 +112,17 @@ and `session_work_tokens`, the per-claim bearer table.
   store, the store-level memory routes, or anything else — answers `401`,
   and the token stops authenticating the moment its session reaches a
   terminal state.
-- The queue also carries a fifth kind beside `exec`/`read`/`write`/`list`:
-  `custom_tool`. When a session on a self-hosted environment persists
-  `agent.custom_tool_use`, the session's sandbox enqueues the call as work —
-  payload `{tool_name, tool_use_id, input}` — and a worker runs it through
-  the tools it was started with; the recorded completion is injected back
-  into the session as the call's `user.custom_tool_result`. See
-  [`custom-tools.md`](./custom-tools.md).
+- The queue also carries two tool-answer kinds beside
+  `exec`/`read`/`write`/`list`. `custom_tool`: when a session on a self-hosted
+  environment persists `agent.custom_tool_use`, the session's sandbox enqueues
+  the call as work — payload `{tool_name, tool_use_id, input}` — and a worker
+  runs it through the tools it was started with; the recorded completion is
+  injected back into the session as the call's `user.custom_tool_result`. See
+  [`custom-tools.md`](./custom-tools.md). `tool_call`: when a session on a
+  self-hosted environment persists a builtin `agent.tool_use` that is not
+  confirmation-gated, the session's sandbox enqueues it the same way — the
+  published "your integration provides `agent_toolset` results" semantic — and
+  the recorded completion is injected back as the call's `user.tool_result`.
 
 Aligned for: all eight published routes and their wire shapes, the published
 state enum, `204` on an empty poll, per-claim `secret` in the `BetaWorkSecret`
@@ -138,7 +142,7 @@ memory stores with `read_only` enforced).
 | `started_at` | Equals `accepted_at`: the queue has no separate "execution began" signal, so the commit timestamp stands in for both fields. |
 | `desired_ttl_seconds` | Read but not honored per item: the lease is a queue-level constant and the heartbeat response reports the effective `ttl_seconds`. |
 | `force` on stop | No distinct forced mode exists locally; the stop marker is already immediate. The field is validated, not ignored. |
-| Result channel | Work update is metadata-only. The official SDK answers built-in calls through session `user.tool_result`, which this runtime refuses with `400 self_hosted_tool_result_not_supported` before persistence. Local completions and failures travel on `POST /v1/x/worker/complete`, which keeps its own worker identity and lease fences. A permission allowlist entry is not an implemented answer lifecycle. |
+| Result channel | Work update is metadata-only. The official SDK answers built-in calls through session `user.tool_result`, which this runtime now accepts for a builtin call it parked for the worker (`tool_result_not_pending` / `tool_result_invalid` name the refusals: an unissued id, a call the runtime ran, a confirmation-gated call, a duplicate, or a malformed body). Local completions and failures travel on `POST /v1/x/worker/complete`, which keeps its own worker identity and lease fences. |
 | `latest_heartbeat_at` | The official heartbeat anchor only (`heartbeat_at`). The local claim timestamp is not reported as a heartbeat. |
 | Stats backing | The published counters are Redis stream metrics; here they read the lease columns: `pending` is a claim inside its lease, `depth` is everything claimable (including a claim whose lease ran out), and dead population — stopped rows and ended sessions — counts in neither. `workers_polling` is an in-memory 30-second window, empty after a restart, which matches the metric's own definition. |
 | List ordering | Newest first (`created_at, rowid` descending); the published contract does not state an order. The `page` cursor is an opaque base64url keyset issued by this route — stable under concurrent enqueues, not a generic cursor for other surfaces. |

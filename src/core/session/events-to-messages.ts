@@ -264,6 +264,28 @@ export function eventsToMessages(
         break;
       }
 
+      case 'user.tool_result': {
+        // Same inbound-answer shape as `user.custom_tool_result`, for a builtin
+        // call a self-hosted worker executed. It pairs by `metadata.tool_use_id`
+        // (the block id, resolved at admission) and projects as the tool result
+        // the parked `agent.tool_use` is waiting on.
+        flushAssistant();
+        const toolCallId = typeof event.metadata?.tool_use_id === 'string'
+          ? event.metadata.tool_use_id
+          : undefined;
+        if (toolCallId) {
+          const toolName = toolNameById.get(toolCallId) ?? 'unknown';
+          pendingTools.push({
+            type: 'tool-result',
+            toolCallId,
+            toolName,
+            output: contentBlocksToToolOutput(event.content),
+            ...(event.metadata?.is_error === true ? { isError: true } : {}),
+          });
+        }
+        break;
+      }
+
       // Skip non-context events
       case 'agent.message_stream_start':
       case 'agent.message_chunk':

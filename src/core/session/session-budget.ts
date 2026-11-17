@@ -74,15 +74,14 @@ export type BudgetErrorCode = typeof BUDGET_ERROR_CODES[keyof typeof BUDGET_ERRO
  * externally executed tool result, or an interrupt. Everything else would start
  * new model work, which is exactly what the cap forbids.
  *
- * This list is this runtime's own vocabulary, not the published one verbatim.
- * The contract also names `user.tool_result`, which no client can send here —
- * externally executed tool results arrive as `user.custom_tool_result` — and
- * this list is quoted back to the client in the refusal, so naming an event the
- * API would reject as unknown would be worse than not naming it.
+ * `user.tool_result` settles a builtin call a self-hosted worker executed, the
+ * same way `user.custom_tool_result` settles a caller-declared one — both are
+ * admitted because they resolve work already parked rather than starting any.
  */
 export const BUDGET_SETTLEMENT_EVENT_TYPES: ReadonlySet<string> = new Set([
   'user.tool_confirmation',
   'user.custom_tool_result',
+  'user.tool_result',
   'user.interrupt',
 ]);
 

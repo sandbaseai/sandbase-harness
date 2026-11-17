@@ -955,11 +955,19 @@ through the same endpoint:
 
 The runtime supports the whole loop rather than only the event protocol. A declared custom tool is exposed to the model with its description and input schema, a call to it is persisted as an `agent.custom_tool_use` event which parks the session in `requires_action`, and the caller answers with `user.custom_tool_result` naming the `custom_tool_use_id`, after which the turn resumes with that result as the model-facing tool result. The runtime never executes a custom tool itself and never fabricates a result for one, so the caller is the only thing that can answer a call — which is why a result naming a call that is not pending, and a second result for a call that already has one, are each refused with `400 invalid_request_error` instead of being appended.
 
-`user.tool_result`, the official self-hosted built-in tool-answer event, is not
-implemented. It returns `400 invalid_request_error` with code
-`self_hosted_tool_result_not_supported` before any event in the batch is
-appended or executed. This includes requests authenticated with a session work
-token. Use `/v1/x/worker/complete` for existing local sandbox work items;
+`user.tool_result` is the self-hosted built-in tool-answer channel, and it is
+implemented. On a `self_hosted` environment a non-confirmation-gated builtin
+call parks `requires_action` with `metadata.awaiting_tool_result` on its
+`agent.tool_use` event and is enqueued for the environment's workers as a
+`tool_call` work item; a worker's completion through `/v1/x/worker/complete`
+is injected back as this event, and a caller or session work token may post
+it directly with `tool_use_id` naming the parked call's event id (the
+block-id spelling is also accepted). A result naming a call that is not
+parked for a worker — an unissued id, a call the runtime executed, a
+confirmation-gated call, or a duplicate — returns `400 invalid_request_error`
+with `tool_result_not_pending`; a malformed payload returns
+`tool_result_invalid`. On non-self-hosted providers nothing parks for a
+worker, so every `user.tool_result` meets the same refusals.
 `user.custom_tool_result` remains the separate answer for custom tools.
 
 Send and stream a message:
@@ -1150,7 +1158,9 @@ published `{type, event_ids}`. An idle event with no reason omits the field
 rather than sending `null`.
 
 Each entry in `event_ids` is the `id` of the parked event — an approval-gated
-`agent.tool_use` / `agent.mcp_tool_use`, or an `agent.custom_tool_use` the caller
+`agent.tool_use` / `agent.mcp_tool_use`, a builtin `agent.tool_use` on a
+self-hosted environment that is waiting on the environment's workers
+(`metadata.awaiting_tool_result`), or an `agent.custom_tool_use` the caller
 has not answered — and that is the value to answer with:
 
 ```json
@@ -1161,9 +1171,20 @@ has not answered — and that is the value to answer with:
 { "type": "user.custom_tool_result", "custom_tool_use_id": "<event id from event_ids>", "content": [{ "type": "text", "text": "{\"name\":\"Ada\"}" }] }
 ```
 
-The `tool_use` block id is also accepted in both fields, as a local convenience.
+```json
+{ "type": "user.tool_result", "tool_use_id": "<event id from event_ids>", "content": [{ "type": "text", "text": "worker-produced output" }] }
+```
+
+A `user.tool_result` answers only a call parked for the workers — a builtin
+call on a `self_hosted` environment carrying `awaiting_tool_result`; a result
+naming anything else is `400 tool_result_not_pending`. Worker completions
+through `/v1/x/worker/complete` arrive as this same event.
+
+The `tool_use` block id is also accepted in all three fields, as a local
+convenience.
 Whichever you send, the confirmation event's `metadata.tool_use_id`, the
-`agent.tool_result` written for a decision, and a custom tool result's
+`agent.tool_result` written for a decision, a tool result's
+`metadata.tool_use_id`, and a custom tool result's
 `metadata.custom_tool_use_id` all carry the block id, which is what a
 `tool_result` pairs against, and a second answer for the same call is refused
 either way.
@@ -2252,6 +2273,17 @@ managed-agents worker poll \
 Worker polling is scoped by the environment key when supplied. The worker can
 execute `exec`, `read`, `write`, and `list` work items inside `--workdir`.
 
+A sixth kind, `tool_call`, is how a session's persisted builtin `agent.tool_use`
+reaches a worker on a `self_hosted` environment: a non-confirmation-gated call
+carries `metadata.awaiting_tool_result` and the same `{tool_name, tool_use_id,
+input}` payload, the bundled worker dispatches `bash` to shell execution and
+the file/search names to the file operations it already had, and a builtin
+name it does not cover is answered `is_error` rather than left parked. The
+recorded completion is injected back as a `user.tool_result` — the published
+self-hosted built-in answer channel — so a confirmation-gated call keeps its
+own `user.tool_confirmation` path and MCP/delegation calls keep runtime
+execution.
+
 A fifth kind, `custom_tool`, is how a session's persisted `agent.custom_tool_use`
 reaches a worker: the item's payload carries `{tool_name, tool_use_id, input}`
 from the recorded call — never a session id or an answer destination, because
@@ -2532,8 +2564,9 @@ sub-resources of every store that session attached. A store attached
 `access: "read_only"` admits reads and refuses writes and deletes with `403
 permission_error`; a different session, an unattached store, or any other
 route answers `401`. Authorization of an event name does not bypass admission:
-`user.tool_result` still returns `400 self_hosted_tool_result_not_supported`;
-the official built-in tool-answer lifecycle is not implemented.
+`user.tool_result` is accepted only against a builtin call the runtime parked
+for the environment's workers (`metadata.awaiting_tool_result`), and anything
+else is `400 tool_result_not_pending` / `tool_result_invalid` like a caller's.
 
 The projection's honest edges: `data` is always the session variant because
 every queue item belongs to a session and the per-call payload stays on the

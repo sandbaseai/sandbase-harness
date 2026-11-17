@@ -11,7 +11,7 @@
  */
 
 import { nanoid } from 'nanoid';
-import { assertToolResultSupported } from './tool-result-admission.js';
+import { validateToolResult } from './tool-result-admission.js';
 import type { Database } from '@/core/db/database.js';
 import type { ArtifactStore } from '@/core/storage/artifact-store.js';
 import { parseSessionVaultIds } from '@/core/credentials/injection.js';
@@ -1140,10 +1140,11 @@ export class SessionManager {
     if (isTerminal(session.status)) {
       throw new Error(`Session ${sessionId} is in terminal state: ${session.status}`);
     }
-    // TypeScript's UserEvent union is not an ingress guard. Refuse the official
-    // worker result before a raw HTTP/direct caller can persist an answer that
-    // no executor consumes. This also runs during whole-batch preflight.
-    assertToolResultSupported(event);
+    // A `user.tool_result` is validated against the log where it is consumed
+    // (`getToolResultMetadata` in `sendEvent` / `appendUserEventInTransaction`)
+    // rather than refused here: the answer is only meaningful against a parked
+    // worker call, and that check needs the session's event history, which this
+    // admission gate intentionally does not read.
     // Existing Pi rows can predate the creation guard. Reject them before
     // repair/persistence or queuing so a resumed turn cannot bypass policy.
     this.assertPiSessionCanExecute(session, event);
@@ -1203,6 +1204,13 @@ export class SessionManager {
     const customToolResultMetadata = event.type === 'user.custom_tool_result'
       ? getCustomToolResultMetadata(event, this.eventLogger.getEvents(sessionId))
       : undefined;
+    // A `user.tool_result` answers a builtin call a self-hosted worker executed.
+    // It is validated against the log before it is appended — an id naming no
+    // parked worker call, a call the runtime ran, or a second result for a call
+    // already answered is refused, same as a custom tool result is.
+    const toolResultMetadata = event.type === 'user.tool_result'
+      ? getToolResultMetadata(event, this.eventLogger.getEvents(sessionId))
+      : undefined;
     // A declared outcome's `outc_` id is assigned at admission so the
     // declaration itself carries it: the metadata carrier persists it for the
     // event projection and `outcome_evaluations`, and the loop's spans
@@ -1228,7 +1236,7 @@ export class SessionManager {
     const logged = this.eventLogger.append(sessionId, {
       type: event.type,
       content: 'content' in event ? (event as any).content : undefined,
-      metadata: confirmationMetadata ?? customToolResultMetadata ?? defineOutcomeMetadata,
+      metadata: confirmationMetadata ?? customToolResultMetadata ?? toolResultMetadata ?? defineOutcomeMetadata,
     });
     this.broadcast(sessionId, logged);
 
@@ -1420,13 +1428,16 @@ export class SessionManager {
     const customToolResultMetadata = event.type === 'user.custom_tool_result'
       ? getCustomToolResultMetadata(event, this.eventLogger.getEvents(sessionId))
       : undefined;
+    const toolResultMetadata = event.type === 'user.tool_result'
+      ? getToolResultMetadata(event, this.eventLogger.getEvents(sessionId))
+      : undefined;
     const defineOutcomeMetadata = event.type === 'user.define_outcome'
       ? defineOutcomeMetadataFor(event)
       : undefined;
     const logged = this.eventLogger.append(sessionId, {
       type: event.type,
       content: 'content' in event ? (event as { content?: ContentBlock[] }).content : undefined,
-      metadata: customToolResultMetadata ?? defineOutcomeMetadata,
+      metadata: customToolResultMetadata ?? toolResultMetadata ?? defineOutcomeMetadata,
     });
     this.broadcast(sessionId, logged);
   }
@@ -2645,6 +2656,30 @@ function getCustomToolResultMetadata(
 
   return {
     custom_tool_use_id: target.blockId,
+    ...(event.is_error !== undefined ? { is_error: event.is_error } : {}),
+  };
+}
+
+/**
+ * Validate and project a worker's answer to a parked builtin tool call.
+ *
+ * `user.tool_result` is the self-hosted answer channel: it resolves a builtin
+ * `agent.tool_use` the runtime handed to the environment's worker, and nothing
+ * else — a call the runtime ran, a call that needs confirmation, an MCP call, a
+ * custom call, a foreign session's call, or a second answer is each refused.
+ * Validation and resolution both live in `tool-result-admission.ts`, which reads
+ * the same parked set `stop_reason.event_ids` publishes. The resolved block id
+ * rides in `metadata.tool_use_id` — the same carrier `custom_tool_use_id`
+ * already uses — so the model-facing projection pairs the result to the call
+ * the worker answered.
+ */
+function getToolResultMetadata(
+  event: Extract<UserEvent, { type: 'user.tool_result' }>,
+  events: SessionEvent[],
+): Record<string, unknown> {
+  const target = validateToolResult(event, events);
+  return {
+    tool_use_id: target.blockId,
     ...(event.is_error !== undefined ? { is_error: event.is_error } : {}),
   };
 }

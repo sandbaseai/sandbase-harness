@@ -10,21 +10,27 @@
  * with "Tool result is missing for tool call <id>" and the session is terminated
  * for what was a documented, well-formed answer.
  *
- * Two families park a session, and the published contract parks them the same
+ * Three families park a session, and the published contract parks them the same
  * way — the session pauses with `stop_reason.type: "requires_action"` and the
  * blocking events' ids in `stop_reason.event_ids`, and the client answers each
  * one:
  *
  * - an approval-gated `agent.tool_use` / `agent.mcp_tool_use` carrying
  *   `requires_confirmation`, answered by `user.tool_confirmation`;
+ * - a builtin `agent.tool_use` on a self-hosted environment, marked
+ *   `metadata.awaiting_tool_result`, which the environment's worker executes
+ *   and answers with `user.tool_result`. It carries no `requires_confirmation`:
+ *   approval is not the reason it is parked — execution lives on the worker —
+ *   and the confirmation channel would route the answer to the wrong executor;
  * - an `agent.custom_tool_use` the caller has not answered, answered by
  *   `user.custom_tool_result`. It carries no `requires_confirmation`: the
  *   runtime has no executor for a custom tool, which is why it is parked at all.
  *
  * A call is resolved when something in the log answers it, and each answer is
  * recorded under the `tool_use` **block** id — the built-in and MCP result
- * blocks, the deny result `ToolResolver` writes, and a custom result's
- * `metadata.custom_tool_use_id`. So resolution is tracked by block id while the
+ * blocks, the deny result `ToolResolver` writes, a custom result's
+ * `metadata.custom_tool_use_id`, and a worker result's
+ * `metadata.tool_use_id`. So resolution is tracked by block id while the
  * event id is what gets reported, and the two are carried side by side rather
  * than conflated: a call whose block id is resolved is excluded even though its
  * event id is what the array names.
@@ -67,6 +73,11 @@ export function parkedCalls(events: SessionEvent[]): ParkedCall[] {
       if (typeof id === 'string') resolved.add(id);
       continue;
     }
+    if (event.type === 'user.tool_result') {
+      const id = event.metadata?.tool_use_id;
+      if (typeof id === 'string') resolved.add(id);
+      continue;
+    }
     if (event.type === 'agent.custom_tool_use') {
       const block = event.content?.find((item) => item.type === 'tool_use') as
         | { type: 'tool_use'; id: string }
@@ -78,7 +89,7 @@ export function parkedCalls(events: SessionEvent[]): ParkedCall[] {
     const block = event.content?.find((item) => item.type === 'tool_use') as
       | { type: 'tool_use'; id: string; requires_confirmation?: boolean }
       | undefined;
-    if (block?.requires_confirmation) {
+    if (block && (block.requires_confirmation || event.metadata?.awaiting_tool_result === true)) {
       parked.push({ eventId: event.id, blockId: block.id, parkedAt: event.createdAt });
     }
   }

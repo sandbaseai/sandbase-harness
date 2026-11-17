@@ -24,7 +24,7 @@ import {
   type ExecResult,
 } from '@/types/sandbox.js';
 
-export type WorkItemKind = 'exec' | 'write' | 'read' | 'list' | 'custom_tool';
+export type WorkItemKind = 'exec' | 'write' | 'read' | 'list' | 'custom_tool' | 'tool_call';
 
 /**
  * A `custom_tool` work item carries the persisted call, not a recipe for
@@ -50,6 +50,30 @@ export interface CustomToolWorkPayload {
  */
 export interface CustomToolCallSubmitter {
   enqueueCustomToolCall(call: { name: string; toolUseId: string; input: unknown }): string;
+}
+
+/**
+ * A `tool_call` work item carries a persisted **builtin** `agent.tool_use` call
+ * for the environment's workers — the self-hosted semantic the published
+ * `user.tool_result` answers. The payload is the same shape `custom_tool`
+ * carries (`tool_name`, `tool_use_id`, `input`); the kind differs because the
+ * completion resolves through a different channel: a builtin call's answer is
+ * a `user.tool_result`, not a `user.custom_tool_result`. The worker answers the
+ * item with the tool's outcome and the completion is injected for that block
+ * id, the same binding `custom_tool` already uses.
+ */
+export type ToolCallWorkPayload = CustomToolWorkPayload;
+
+/**
+ * The sandbox capability a self-hosted instance exposes for builtin
+ * `agent.tool_use` calls: on a `self_hosted` environment the published
+ * contract parks the call `requires_action` and the environment's worker runs
+ * it — the runtime does not execute it in-process the way a local or isolated
+ * backend does. A provider that does not implement it leaves the builtin call
+ * to the runtime's own executor, unchanged.
+ */
+export interface ToolCallSubmitter {
+  enqueueToolCall(call: { name: string; toolUseId: string; input: unknown }): string;
 }
 
 export interface WorkItem {
@@ -1104,6 +1128,23 @@ class SelfHostedSandboxInstance implements SandboxInstance {
       tool_use_id: call.toolUseId,
       input: call.input ?? {},
     } satisfies CustomToolWorkPayload);
+  }
+
+  /**
+   * Surface a persisted `agent.tool_use` (a builtin agent-toolset call) to the
+   * environment's workers — the self-hosted execution path `user.tool_result`
+   * answers. Like `enqueueCustomToolCall` this does not await: the call stays
+   * parked in the session until the worker's completion is injected back as a
+   * `user.tool_result` by the queue's completion hook. There is deliberately
+   * no `awaitToolCall` — the session resumes through the parked-call
+   * mechanism, not through a promise this object resolves.
+   */
+  enqueueToolCall(call: { name: string; toolUseId: string; input: unknown }): string {
+    return this.queue.enqueue(this.sessionId, 'tool_call', {
+      tool_name: call.name,
+      tool_use_id: call.toolUseId,
+      input: call.input ?? {},
+    } satisfies ToolCallWorkPayload);
   }
 
   async cleanup(): Promise<void> {
