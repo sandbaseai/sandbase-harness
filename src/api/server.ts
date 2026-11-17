@@ -21,7 +21,7 @@ import { extendedRoutes } from './routes/extended.js';
 import { sessionResourceRoutes } from './routes/session-resources.js';
 import { unsupportedOfficialRoutes } from './routes/unsupported-official.js';
 import { environmentWorkRoutes } from './routes/environment-work.js';
-import { deliverCustomToolWorkResult } from '@/core/session/custom-tool-work.js';
+import { deliverCustomToolWorkResult, deliverToolCallWorkResult } from '@/core/session/custom-tool-work.js';
 import { streamRoutes } from './routes/stream.js';
 import { createAuthMiddleware } from './auth.js';
 import { authorizeSessionWorkCall } from '@/core/auth/session-work-scope.js';
@@ -230,6 +230,19 @@ app.route('/v1/runs', runsRoutes(deps));
     // retried into a different outcome.
     const sessionManager = deps.sessionManager;
     deps.workQueue.onItemCompleted = (item) => {
+      if (item.kind === 'tool_call') {
+        // A `tool_call` item's completion is the builtin call's answer: the
+        // queue records it, then this hook hands it to the session as a
+        // `user.tool_result` through the same `sendEvent` a caller's takes.
+        void deliverToolCallWorkResult(
+          {
+            sendEvent: (sessionId, event) => sessionManager.sendEvent(sessionId, event),
+            warn: (message, fields) => deps.logger?.warn(message, fields),
+          },
+          item,
+        );
+        return;
+      }
       if (item.kind !== 'custom_tool') return;
       void deliverCustomToolWorkResult(
         {

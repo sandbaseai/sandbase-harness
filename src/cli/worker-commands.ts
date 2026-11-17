@@ -312,7 +312,7 @@ type WorkerItem = {
   id: string;
   sessionId?: string;
   session_id?: string;
-  kind: 'exec' | 'read' | 'write' | 'list' | 'custom_tool';
+  kind: 'exec' | 'read' | 'write' | 'list' | 'custom_tool' | 'tool_call';
   payload: Record<string, unknown>;
   /**
    * The per-claim session credential, minted by the claim route in the
@@ -846,6 +846,9 @@ export async function executeWorkItem(
   if (item.kind === 'custom_tool') {
     return executeCustomToolWorkItem(item, customTools ?? {}, signal);
   }
+  if (item.kind === 'tool_call') {
+    return executeToolCallWorkItem(item, root, signal);
+  }
   if (item.kind === 'read') {
     return readFile(safePath(root, stringPayload(item.payload.path, 'path')), 'utf8');
   }
@@ -900,6 +903,92 @@ async function executeCustomToolWorkItem(
   try {
     const value = await handler(item.payload.input, { toolUseId, signal });
     return toToolResultPayload(value);
+  } catch (error) {
+    return {
+      is_error: true,
+      content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }],
+    };
+  }
+}
+
+/**
+ * Run a `tool_call` item — a builtin `agent_toolset` call the session parked
+ * for the worker.
+ *
+ * The builtin names dispatch onto the same primitives the worker already runs:
+ * `bash` is `exec`, `read`/`write`/`edit`/`glob`/`grep` are the file kinds, and
+ * `list` is accepted as a spelling of the file kind. A call the local worker
+ * cannot honour — `web_fetch`/`web_search`, which need the runtime's own
+ * transport, or an unrecognized name — answers `is_error` rather than failing
+ * the item: the parked call still needs *an* answer, and "this worker cannot
+ * run that tool" is the honest one. The result is always the tool's answer,
+ * which is why a thrown error lands as `is_error` content recorded `applied`
+ * rather than `failed`: `failed` is for work the worker could not perform.
+ */
+async function executeToolCallWorkItem(
+  item: WorkerItem,
+  root: string,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  const name = stringPayload(item.payload.tool_name, 'tool_name');
+  const input = isRecord(item.payload.input) ? item.payload.input : {};
+  try {
+    switch (name) {
+      case 'bash':
+        return execShell(String(input.command ?? ''), {
+          cwd: input.cwd ? safePath(root, String(input.cwd)) : root,
+          timeoutMs: typeof input.timeout === 'number' ? input.timeout : 300_000,
+          env: objectOfStrings(input.env),
+          signal,
+        }).then((r) => r.exitCode === 0 ? r.stdout : { is_error: true, content: [{ type: 'text', text: `Error (exit ${r.exitCode}): ${r.stderr}` }] });
+      case 'read':
+        return { content: [{ type: 'text', text: await readFile(safePath(root, stringPayload(input.path, 'path')), 'utf8') }] };
+      case 'write': {
+        const target = safePath(root, stringPayload(input.path, 'path'));
+        await mkdir(dirname(target), { recursive: true });
+        await writeFile(target, String(input.content ?? ''), 'utf8');
+        return { content: [{ type: 'text', text: `Written ${String(input.content ?? '').length} bytes to ${String(input.path)}` }] };
+      }
+      case 'edit': {
+        const target = safePath(root, stringPayload(input.path, 'path'));
+        const current = await readFile(target, 'utf8');
+        const oldString = String(input.old_string ?? '');
+        const newString = String(input.new_string ?? '');
+        const idx = current.indexOf(oldString);
+        if (idx === -1) return { is_error: true, content: [{ type: 'text', text: `old_string not found in ${String(input.path)}` }] };
+        if (current.indexOf(oldString, idx + 1) !== -1) return { is_error: true, content: [{ type: 'text', text: `old_string is not unique in ${String(input.path)}` }] };
+        await writeFile(target, current.slice(0, idx) + newString + current.slice(idx + oldString.length), 'utf8');
+        return { content: [{ type: 'text', text: `Edited ${String(input.path)}` }] };
+      }
+      case 'glob':
+      case 'list': {
+        const files = await readdir(safePath(root, stringPayload(input.path ?? '.', 'path')));
+        const pattern = typeof input.pattern === 'string' ? input.pattern : undefined;
+        const matched = pattern ? files.filter((f) => f.includes(pattern)) : files;
+        return { content: [{ type: 'text', text: matched.join('\n') }] };
+      }
+      case 'grep': {
+        const files = await readdir(safePath(root, stringPayload(input.path ?? '.', 'path')));
+        const query = String(input.query ?? '');
+        const hits: string[] = [];
+        for (const file of files) {
+          try {
+            const body = await readFile(safePath(root, file), 'utf8');
+            for (const line of body.split('\n')) {
+              if (line.includes(query)) hits.push(`${file}:${line}`);
+              if (hits.length >= 200) break;
+            }
+          } catch { /* skip unreadable files */ }
+          if (hits.length >= 200) break;
+        }
+        return { content: [{ type: 'text', text: hits.length > 0 ? hits.join('\n') : `No matches for "${query}"` }] };
+      }
+      default:
+        return {
+          is_error: true,
+          content: [{ type: 'text', text: `Builtin tool "${name}" is not executable by this worker.` }],
+        };
+    }
   } catch (error) {
     return {
       is_error: true,
@@ -1008,7 +1097,15 @@ async function completeWorkItem(
   if (!res.ok) throw new WorkCompletionUndeliveredError(item.id, res.status, await res.text());
 }
 
-async function execShell(command: string, opts: { cwd: string; timeoutMs: number; env: Record<string, string>; signal?: AbortSignal }) {
+interface ExecShellResult {
+  exitCode: number;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+  aborted: boolean;
+}
+
+async function execShell(command: string, opts: { cwd: string; timeoutMs: number; env: Record<string, string>; signal?: AbortSignal }): Promise<ExecShellResult> {
   if (!command.trim()) throw new Error('exec work item requires command');
   return new Promise((resolve) => {
     execFile('/bin/sh', ['-lc', command], {

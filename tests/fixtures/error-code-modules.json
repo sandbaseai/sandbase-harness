@@ -189,9 +189,6 @@
     "secret_not_configured": [
       "src/core/settings/schema.ts"
     ],
-    "self_hosted_tool_result_not_supported": [
-      "src/core/session/tool-result-admission.ts"
-    ],
     "session_archived": [
       "src/api/routes/sessions.ts"
     ],
@@ -204,6 +201,12 @@
     ],
     "target_store_held": [
       "src/api/routes/dreams.ts"
+    ],
+    "tool_result_invalid": [
+      "src/core/session/tool-result-admission.ts"
+    ],
+    "tool_result_not_pending": [
+      "src/core/session/tool-result-admission.ts"
     ],
     "too_many_initial_events": [
       "src/api/routes/initial-events.ts"

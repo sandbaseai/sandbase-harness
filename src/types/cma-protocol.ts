@@ -17,15 +17,16 @@
 
 /**
  * All possible CMA event types.
- * 7 user (incl. `user.define_outcome` and `user.steer`) + 8 agent + 5 streaming + 8 session + 5 span + 1 terminal = 34 total
+ * 8 user (incl. `user.define_outcome`, `user.steer`, and `user.tool_result`) + 8 agent + 5 streaming + 8 session + 5 span + 1 terminal = 35 total
  */
 export type CMAEventType =
-  // User events (7)
+  // User events (8)
   | 'system.message'
   | 'user.message'
   | 'user.interrupt'
   | 'user.tool_confirmation'
   | 'user.custom_tool_result'
+  | 'user.tool_result'
   | 'user.define_outcome'
   | 'user.steer'
   // Agent events (8)
@@ -76,6 +77,7 @@ export const CMA_EVENT_TYPES: ReadonlySet<string> = new Set<CMAEventType>([
   'user.interrupt',
   'user.tool_confirmation',
   'user.custom_tool_result',
+  'user.tool_result',
   'user.define_outcome',
   'user.steer',
   'agent.message',
@@ -230,6 +232,25 @@ export interface UserCustomToolResultEvent extends EventBase {
 }
 
 /**
+ * `user.tool_result` — the caller's answer to a builtin `agent.tool_use` call
+ * that a self-hosted environment's worker executed.
+ *
+ * Published scope is `agent_toolset` only (`reference.md`): the builtin sandbox
+ * tools a session parks for its environment's workers. `tool_use_id` may name
+ * the `agent.tool_use` **event** id (what `stop_reason.event_ids` reports) or
+ * the `tool_use` **block** id — both resolve to the parked call, the same
+ * two-spelling rule `user.tool_confirmation` and `user.custom_tool_result`
+ * already honour. `content` is optional in the published shape; an absent or
+ * empty array projects as an empty result rather than a refusal.
+ */
+export interface UserToolResultEvent extends EventBase {
+  type: 'user.tool_result';
+  tool_use_id: string;
+  content?: ContentBlock[];
+  is_error?: boolean;
+}
+
+/**
  * The document an outcome is graded against.
  *
  * A union rather than two optional fields: a text rubric and a file reference are
@@ -288,6 +309,7 @@ export type UserEvent =
   | UserInterruptEvent
   | UserToolConfirmationEvent
   | UserCustomToolResultEvent
+  | UserToolResultEvent
   | UserDefineOutcomeEvent
   | UserSteerEvent;
 

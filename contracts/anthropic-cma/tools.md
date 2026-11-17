@@ -250,6 +250,37 @@ Tool event fields (`src/api/standard.ts`):
   which reads as `evaluated_permission: "deny"`; a `never_allow` tool
   produces no event because it is withheld upstream.
 
+Worker execution of built-in calls (`default-strategy.ts`,
+`self-hosted-provider.ts`, `tool-result-admission.ts`):
+
+- On a `self_hosted` environment a builtin call is executed by the
+  environment's workers, not the runtime — the published "your integration
+  provides `agent_toolset` results" split. A `requires_confirmation`-gated
+  call keeps its own channel (`user.tool_confirmation` then runtime
+  execution); every other builtin call the governed set covers — the
+  `agent_toolset` names minus custom tools and minus the confirmation-gated —
+  is emitted as `agent.tool_use` carrying `metadata.awaiting_tool_result`,
+  parked `requires_action` beside the other parked families, and enqueued on
+  the environment's work queue as a `tool_call` item with payload
+  `{tool_name, tool_use_id, input}`.
+- A worker claims and completes the item through the same `/v1/x/worker`
+  routes as every other kind; the recorded completion is injected back as a
+  `user.tool_result` through `SessionManager.sendEvent`, so the parked-call
+  rules apply unchanged — a duplicate answer is refused, a result for an
+  ended session is refused, and the last parked answer resumes the turn. The
+  bundled worker's builtin executor maps `bash` to shell execution and the
+  file/search names to the file operations it already had; a name it does
+  not know answers `is_error` rather than leaving the call parked.
+- A caller may also post `user.tool_result` directly — the same channel the
+  official SDK's own worker helpers use — against a parked worker call, by
+  the published event id or the block-id spelling. Admission
+  (`validateToolResult`) accepts only that target: an unissued id, a call
+  the runtime executed itself, a confirmation-gated call, or a second answer
+  is `400 tool_result_not_pending`; a malformed payload is `400
+  tool_result_invalid`. On every other provider nothing parks for a worker,
+  so every `user.tool_result` meets the same refusals — a result can never
+  name a call that is not waiting for one.
+
 ## 3. Alignment
 
 Aligned for: the domain grammar and exclusivity rules, the empty-list rejection,
@@ -260,7 +291,9 @@ unified overflow path rather than per-tool truncation at the published
 100,000-character threshold, the
 `always_allow` / `always_ask` split by toolset kind including dynamically
 discovered tools, the `auto` per-call evaluation with its three verdicts and
-fail-closed degradation, and the projected tool-event field names the published
+fail-closed degradation, the self-hosted split that hands `agent_toolset`
+execution to the environment's workers and accepts `user.tool_result` for the
+calls it parked, and the projected tool-event field names the published
 client loop reads — `evaluated_permission` and `evaluation` included.
 
 ## 4. Differences
@@ -273,6 +306,7 @@ client loop reads — `evaluated_permission` and `evaluation` included.
 | Overflow threshold override | The default is the published 100,000 characters. `loop_engine.options.tool_result_max_chars` is a local extension that lets an operator bound it (1,000–10,000,000); the published contract fixes the threshold and defines no override. |
 | Overflow file location | `/mnt/session/tool_outputs`. The published contract states "a sandbox file" without fixing the directory. |
 | Per-tool config shape | SandBase accepts named per-tool config blocks in a toolset. Field names inside the web policy follow the published ones. |
+| Worker builtin dispatch | The bundled worker's `tool_call` executor covers `bash` plus the file/search operations it already implemented for the other work kinds; a builtin name outside that set (`web_fetch`, `web_search`) is answered `is_error` so the call resolves rather than parks forever. The published worker executes the full toolset; covering the web names on the worker is recorded as a gap, not hidden. |
 
 ## 5. Reason for the difference
 
@@ -371,6 +405,17 @@ client loop reads — `evaluated_permission` and `evaluation` included.
   `custom_tool_use_id` on an accepted `user.custom_tool_result`, the top-level
   `id` staying the event id, the fields being absent rather than `null` when the
   block lacks them, and no field leaking onto an event type that declares none.
+- `tests/integration/worker-builtin-tools.test.ts` — the self-hosted builtin
+  path end to end: a scripted `bash` call persists `agent.tool_use` carrying
+  `awaiting_tool_result`, parks the session, and enqueues a `tool_call` item;
+  a worker's claim and completion through the real routes injects the
+  `user.tool_result` and resumes the turn; an `is_error` completion reaches
+  the model flagged; a second completion cannot answer twice.
+- `tests/integration/tool-result-admission.test.ts` — the `user.tool_result`
+  admission rules: acceptance by the event id and by the block-id spelling,
+  and the named refusals — an unissued id, a call the runtime executed, a
+  confirmation-gated call, a duplicate, a foreign session, and a malformed
+  payload — each as its coded 400.
 
 ## 7. Status
 

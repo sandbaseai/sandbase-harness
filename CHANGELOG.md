@@ -4,6 +4,27 @@
 
 ### Added
 
+- Self-hosted environments now execute built-in `agent_toolset` calls on the
+  environment's workers — the published "your integration provides
+  `agent_toolset` results" split. A non-confirmation-gated builtin call on a
+  `self_hosted` environment persists `agent.tool_use` with
+  `metadata.awaiting_tool_result`, parks the session `requires_action`
+  alongside the other parked families, and enqueues a `tool_call` work item
+  (`{tool_name, tool_use_id, input}` — a new work kind beside `custom_tool`
+  sharing its claim/complete routes and payload shape). The recorded
+  completion is injected back as a `user.tool_result` through the same
+  `sendEvent` admission rules as a caller's answer, and the bundled worker's
+  new builtin executor dispatches `bash` and the file/search names. A caller
+  or worker token may also post `user.tool_result` directly against a parked
+  worker call, by the published event id or the block-id spelling; anything
+  else is refused before persistence with `400 tool_result_not_pending`
+  (an unissued id, a call the runtime executed, a confirmation-gated call,
+  or a duplicate) or `400 tool_result_invalid` (a malformed payload).
+  Confirmation-gated calls keep the `user.tool_confirmation` channel, MCP
+  and delegation calls keep runtime execution, and `user.tool_result` is
+  also admitted at the budget ceiling because it settles parked work. The
+  old `self_hosted_tool_result_not_supported` refusal is gone.
+
 - `POST /v1/agents` and `POST|PUT /v1/agents/{id}` now accept a canonical
   `multiagent` block in exactly one shape — the delegation-only
   `{"type":"coordinator","agents":[1–20 predefined-agent entries]}` subset

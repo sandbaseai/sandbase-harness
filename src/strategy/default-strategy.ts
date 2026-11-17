@@ -26,6 +26,7 @@ import type {
   ExternalAuthorizationRequest,
 } from '@/types/strategy.js';
 import type { PermissionPolicyType } from '@/types/agent.js';
+import { BUILTIN_TOOL_NAMES } from '@/types/agent.js';
 import type { SessionEvent } from '@/types/session.js';
 import type { ContentBlock } from '@/types/cma-protocol.js';
 import { resolveMcpServerName } from '@/core/mcp/mcp-manager.js';
@@ -52,7 +53,7 @@ import {
 } from '@/strategy/in-loop-context.js';
 import { splitModelRequestUsage } from './model-usage.js';
 import { createAiSdkV4ExecutionGuard } from './ai-sdk-v4-execution-guard.js';
-import type { CustomToolCallSubmitter } from '@/sandbox/self-hosted-provider.js';
+import type { CustomToolCallSubmitter, ToolCallSubmitter } from '@/sandbox/self-hosted-provider.js';
 
 /**
  * Local tool-result ceiling, re-exported from the overflow contract.
@@ -222,6 +223,16 @@ export class DefaultStrategy implements AgentStrategy {
     const customTools = new Set(customToolNames ?? []);
     const confirmableToolCallIds = new Set<string>();
     const customToolCallIds = new Set<string>();
+    // Builtin calls a self-hosted environment's worker executes: on that
+    // backend the published contract parks a non-gated `agent.tool_use` for the
+    // worker instead of running it in-process. The sandbox exposes the queue
+    // through `enqueueToolCall`; a provider without it leaves builtin calls on
+    // the runtime's own executor, unchanged. Calls that still park locally —
+    // `requires_confirmation` and `auto` verdicts of `ask` — keep their own
+    // channels and are excluded here, so the worker family is exactly the set
+    // the runtime would otherwise have run itself.
+    const toolCallSubmitter = (_sandbox as unknown as Partial<ToolCallSubmitter>).enqueueToolCall?.bind(_sandbox);
+    const workerToolCallIds = new Set<string>();
     // Calls whose `execute` returned a ToolResultError marker. The wrapper in
     // `toAiTool` unwraps the marker back to its message so the model-visible
     // text is unchanged; the id recorded here flags the emitted tool_result.
@@ -239,6 +250,17 @@ export class DefaultStrategy implements AgentStrategy {
       permissionMeta?: Record<string, unknown>;
     }> = [];
     const pendingCustomToolCalls: Array<{
+      toolCallId: string;
+      toolName: string;
+      input: Record<string, unknown>;
+      tokensIn: number;
+      tokensOut: number;
+      stopReason?: string;
+    }> = [];
+    // Builtin calls parked for a self-hosted worker: same collection shape as a
+    // pending custom call — persisted after the raw stream guard admits them —
+    // then handed to the environment's work queue for a `user.tool_result`.
+    const pendingWorkerToolCalls: Array<{
       toolCallId: string;
       toolName: string;
       input: Record<string, unknown>;
@@ -365,11 +387,29 @@ export class DefaultStrategy implements AgentStrategy {
       const autoToolDefinitions = Object.fromEntries(
         Object.entries(governedTools).filter(([name]) => autoTools.has(name)),
       );
+      // On a self-hosted backend the builtin agent-toolset executes on the
+      // environment's workers, not in-process. Lock those tools the same way a
+      // confirmation- or custom-gated tool is locked — the SDK emits the call
+      // without running it — so the emitted `agent.tool_use` parks for a
+      // worker's `user.tool_result`. The set is the published `agent_toolset`
+      // inventory minus the tools that park for another reason (confirmation,
+      // `auto`) or that another executor owns (custom, MCP, delegation — none
+      // of which is in `BUILTIN_TOOL_NAMES`).
+      const workerToolDefinitions = toolCallSubmitter
+        ? Object.fromEntries(
+          Object.entries(governedTools).filter(([name]) =>
+            (BUILTIN_TOOL_NAMES as readonly string[]).includes(name)
+            && !confirmTools.has(name)
+            && !customTools.has(name)),
+        )
+        : {};
+      const workerToolNames = new Set(Object.keys(workerToolDefinitions));
       const lockedConfirmationTools = createAiSdkExecutionLock(confirmationToolDefinitions);
       const lockedCustomTools = createAiSdkExecutionLock(customToolDefinitions);
+      const lockedWorkerTools = createAiSdkExecutionLock(workerToolDefinitions);
       const aiTools: Record<string, any> = {};
       for (const [name, tool] of Object.entries(governedTools)) {
-        const base = lockedConfirmationTools[name] ?? lockedCustomTools[name]
+        const base = lockedConfirmationTools[name] ?? lockedCustomTools[name] ?? lockedWorkerTools[name]
           ?? (autoTools.has(name) && evaluateAutoCall
             ? autoPermissionTool(tool, name, evaluateAutoCall, autoVerdicts)
             : tool);
@@ -424,6 +464,14 @@ export class DefaultStrategy implements AgentStrategy {
           ...(customTools.size > 0
             ? [({ steps }: { steps: Array<{ toolCalls?: Array<{ toolName: string }> }> }) =>
               steps.at(-1)?.toolCalls?.some((call) => customTools.has(call.toolName)) ?? false]
+            : []),
+          // A builtin call parked for a self-hosted worker has no in-process
+          // executor either — its `execute` was locked away — so the turn stops
+          // for the worker's `user.tool_result` the same way it stops for a
+          // custom call's `user.custom_tool_result`.
+          ...(workerToolNames.size > 0
+            ? [({ steps }: { steps: Array<{ toolCalls?: Array<{ toolName: string }> }> }) =>
+              steps.at(-1)?.toolCalls?.some((call) => workerToolNames.has(call.toolName)) ?? false]
             : []),
         ],
         temperature: config.temperature,
@@ -574,6 +622,21 @@ export class DefaultStrategy implements AgentStrategy {
                 }
                 continue;
               }
+              // A builtin call headed for a self-hosted worker is likewise never
+              // executed here: it is collected and persisted after the guard so a
+              // malformed call never reaches the log, and the work item is
+              // enqueued beside the parked `agent.tool_use`.
+              if (workerToolNames.has(toolCall.toolName) && !resultIds.has(toolCall.toolCallId)) {
+                pendingWorkerToolCalls.push({
+                  toolCallId: toolCall.toolCallId,
+                  toolName: toolCall.toolName,
+                  input: toolCall.input as Record<string, unknown>,
+                  tokensIn,
+                  tokensOut,
+                  stopReason,
+                });
+                continue;
+              }
               const autoVerdict = autoVerdicts.get(toolCall.toolCallId);
               const awaitsConfirmation =
                 (confirmTools.has(toolCall.toolName) || autoVerdict?.type === 'ask')
@@ -689,6 +752,10 @@ export class DefaultStrategy implements AgentStrategy {
             for (const toolCall of step.toolCalls) {
               if (resultIds.has(toolCall.toolCallId)) continue;
               if (customTools.has(toolCall.toolName) || confirmTools.has(toolCall.toolName)) continue;
+              // A builtin call parked for a self-hosted worker is waiting on a
+              // `user.tool_result`, not a local result — a synthetic error here
+              // would claim it failed while the worker still holds it.
+              if (workerToolNames.has(toolCall.toolName)) continue;
               // An `auto` call the judge parked is already on the confirmation
               // path — a synthetic error here would claim it failed.
               if (autoVerdicts.get(toolCall.toolCallId)?.type === 'ask') continue;
@@ -835,6 +902,49 @@ export class DefaultStrategy implements AgentStrategy {
         }
       }
 
+      for (const pendingCall of pendingWorkerToolCalls) {
+        const matches = guarded.decisions.filter(
+          (decision) => decision.toolCallId === pendingCall.toolCallId && decision.name === pendingCall.toolName,
+        );
+        if (matches.length !== 1) continue;
+
+        const authority = guard.takeDecision(matches[0].internalId);
+        if (!authority || !authority.value || typeof authority.value !== 'object' || Array.isArray(authority.value)) continue;
+
+        workerToolCallIds.add(pendingCall.toolCallId);
+        const toolUseEvent = eventLog.append(session.id, {
+          type: 'agent.tool_use',
+          content: [{
+            type: 'tool_use',
+            id: pendingCall.toolCallId,
+            name: pendingCall.toolName,
+            input: authority.value as Record<string, unknown>,
+          }] as ContentBlock[],
+          tokensIn: pendingCall.tokensIn,
+          tokensOut: pendingCall.tokensOut,
+          modelUsed,
+          stopReason: pendingCall.stopReason,
+          // The parked-call marker `parkedCalls` and `validateToolResult` read:
+          // this call waits on a worker's `user.tool_result`, not on a
+          // confirmation. `requires_confirmation` is deliberately absent — the
+          // answer channel is the tool-result, not `user.tool_confirmation`.
+          metadata: { awaiting_tool_result: true },
+        });
+        broadcast(toolUseEvent);
+        // The sandbox instance owns the queue and the event must already be on
+        // the log so the worker's `user.tool_result` resolves the parked call
+        // by its tool_use block id — the same ordering the custom path keeps.
+        try {
+          toolCallSubmitter?.({
+            name: pendingCall.toolName,
+            toolUseId: pendingCall.toolCallId,
+            input: authority.value,
+          });
+        } catch {
+          // Enqueueing is best-effort; the parked event is the record.
+        }
+      }
+
       for (const pendingCall of pendingConfirmationCalls) {
         const matches = guarded.decisions.filter(
           (decision) => decision.toolCallId === pendingCall.toolCallId && decision.name === pendingCall.toolName,
@@ -888,8 +998,14 @@ export class DefaultStrategy implements AgentStrategy {
       const pendingCustom = pending.filter(
         (c: any) => customTools.has(c.toolName) && customToolCallIds.has(c.toolCallId),
       );
+      // A builtin call persisted for a self-hosted worker is parked the same
+      // way: the session waits on the worker's `user.tool_result`, which is the
+      // same `requires_action` shape an approval or a custom call produces.
+      const pendingWorker = pending.filter(
+        (c: any) => workerToolCallIds.has(c.toolCallId),
+      );
 
-      if ((pendingConfirm.length > 0 || pendingCustom.length > 0) && config.onRequiresAction) {
+      if ((pendingConfirm.length > 0 || pendingCustom.length > 0 || pendingWorker.length > 0) && config.onRequiresAction) {
         config.onRequiresAction();
       }
 

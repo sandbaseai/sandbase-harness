@@ -50,6 +50,13 @@ export function findOrphanedToolUses(events: SessionEvent[]): OrphanedToolUse[] 
         | { type: 'tool_result'; tool_use_id: string }
         | undefined;
       if (block) resolved.add(block.tool_use_id);
+    } else if (event.type === 'user.tool_result') {
+      // A worker-executed builtin call's answer pairs the same way a runtime
+      // result does — by block id, carried on the event's metadata. Without
+      // this the recovery pass would rewrite a parked worker call as
+      // "interrupted" while the session is still legitimately waiting on it.
+      const id = event.metadata?.tool_use_id;
+      if (typeof id === 'string') resolved.add(id);
     }
   }
 

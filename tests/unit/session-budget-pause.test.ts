@@ -236,6 +236,6 @@ describe('SessionManager budget pause', () => {
     await expect(manager.sendEvent(session.id, {
       type: 'user.message',
       content: [{ type: 'text', text: 'more work' }],
-    })).rejects.toThrow(/reached its budget.*user\.tool_confirmation, user\.custom_tool_result, user\.interrupt/);
+    })).rejects.toThrow(/reached its budget.*user\.tool_confirmation, user\.custom_tool_result, user\.tool_result, user\.interrupt/);
   });
 });

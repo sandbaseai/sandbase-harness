@@ -110,11 +110,17 @@ The append path and the row shape are `src/core/session/session-manager.ts` and
   persisting reasoning traces means the block is a marker, not a transcript.
   `agent.thread_context_compacted` is emitted when a turn's context had to be
   compacted; thread-scoped variants do not exist because no thread surface
-  does. `user.tool_result` is not implemented: session admission refuses it
-  with `400 invalid_request_error` / `self_hosted_tool_result_not_supported`
-  before persistence or execution, including whole-batch preflight. The worker
-  token's event-name allowlist grants permission to request this channel, not an
-  implemented answer lifecycle. Local worker results use `/v1/x/worker/complete`.
+  does. `user.tool_result` is implemented as the answer channel for the builtin
+  calls this runtime parks for the environment's workers — an `agent.tool_use`
+  persisted with `metadata.awaiting_tool_result` on a self-hosted environment
+  (see [`work.md`](./work.md)) — and `validateToolResult` admits it only
+  against a parked worker call it names, by the published **event** id or by
+  the local `tool_use` block id spelling; anything else answers `400
+  invalid_request_error` with `tool_result_not_pending` (an unissued id, a
+  call the runtime ran, a confirmation-gated call, or a second answer) or
+  `tool_result_invalid` (a malformed payload) before persistence or execution.
+  A worker's own results still ride the local `/v1/x/worker/complete`
+  channel and are injected back as this same event.
 - Every model request is bracketed by a `span.model_request_start` /
   `span.model_request_end` pair. The builtin strategy opens the start when the
   SDK prepares the step's request and the Pi translator opens its own; the end
