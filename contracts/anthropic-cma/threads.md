@@ -17,7 +17,7 @@ threads-and-coordinator: unavailable
 
 ## 1. Official definition
 
-As of the 2026-10-31 documentation snapshot
+As of the 2026-11-17 documentation snapshot
 ([`official-docs/multiagent-orchestration.md`](./official-docs/multiagent-orchestration.md),
 [`official-docs/session-threads.md`](./official-docs/session-threads.md),
 [`official-docs/workflow-runs.md`](./official-docs/workflow-runs.md)):
@@ -83,7 +83,11 @@ agents per run, 24-hour default lifetime.
 
 An earlier revision of this section described a `multiagent.agents` roster
 with `advisor` entries. The published shape is the `multiagent_20261001` type
-above; the roster model no longer appears in the current documentation.
+above. The older `coordinator` type is still accepted by the API — an update
+that sends it, or that mixes it with `multiagent_20261001`, replaces the
+stored block wholesale; see
+[`official-docs/multiagent-orchestration.md`](./official-docs/multiagent-orchestration.md)
+("Move from the `coordinator` type").
 
 ## 2. Current SandBase shape
 

@@ -55,7 +55,7 @@ Your organization’s web fetch settings on the same page also apply to `web_fet
 
 ## Set domain lists on an agent
 
-The following example creates an agent that limits `web_search` to two sites and blocks one host for `web_fetch`. It also sets `user_location` (java, php: `userLocation`; csharp, go: `UserLocation`) and `max_content_tokens` (java, php: `maxContentTokens`; csharp, go: `MaxContentTokens`), which [Settings](https://platform.claude.com/docs/en/managed-agents/tools-web-restrictions#settings) describes. The response echoes the `configs` (csharp, go: `Configs`) array.
+The following example creates an agent that limits `web_search` to two sites and blocks one host for `web_fetch`. It also sets `user_location` (java, php: `userLocation`; csharp, go: `UserLocation`) and `max_content_tokens` (java, php: `maxContentTokens`; csharp, go: `MaxContentTokens`). [Settings](https://platform.claude.com/docs/en/managed-agents/tools-web-restrictions#settings) describes both.
 
 <CodeGroup defaultLanguage="CLI">
   ```bash cURL
@@ -121,7 +121,7 @@ The following example creates an agent that limits `web_search` to two sites and
       ```
     </File>
 
-    [`ant apply`](https://platform.claude.com/docs/en/cli-sdks-libraries/cli/apply) creates the agent and prints its ID, not the `configs` array.
+    [`ant apply`](https://platform.claude.com/docs/en/cli-sdks-libraries/cli/apply) creates the agent and prints its ID.
   </CodeGroupItem>
 
   ```python Python
@@ -326,6 +326,7 @@ The following example creates an agent that limits `web_search` to two sites and
   ```php PHP
   use Anthropic\Beta\Agents\BetaManagedAgentsAgentToolset20260401;
   use Anthropic\Beta\Agents\BetaManagedAgentsAgentToolset20260401Params;
+  use Anthropic\Beta\Agents\BetaManagedAgentsModel;
   use Anthropic\Beta\Agents\BetaManagedAgentsUserLocation;
   use Anthropic\Beta\Agents\BetaManagedAgentsWebFetchToolConfigParams;
   use Anthropic\Beta\Agents\BetaManagedAgentsWebSearchToolConfigParams;
@@ -335,7 +336,7 @@ The following example creates an agent that limits `web_search` to two sites and
 
   $agent = $client->beta->agents->create(
       name: 'Research Agent',
-      model: 'claude-opus-5-5',
+      model: BetaManagedAgentsModel::CLAUDE_OPUS_5_5,
       tools: [
           BetaManagedAgentsAgentToolset20260401Params::with(
               configs: [
@@ -367,7 +368,7 @@ The following example creates an agent that limits `web_search` to two sites and
 
   agent = client.beta.agents.create(
     name: "Research Agent",
-    model: "claude-opus-5-5",
+    model: Anthropic::Beta::BetaManagedAgentsModel::CLAUDE_OPUS_5_5,
     tools: [
       {
         type: :agent_toolset_20260401,
@@ -387,9 +388,10 @@ The following example creates an agent that limits `web_search` to two sites and
     ]
   )
 
-  case agent.tools.first
-  in Anthropic::Models::Beta::BetaManagedAgentsAgentToolset20260401 => toolset
-    puts JSON.pretty_generate(toolset.configs.map(&:to_h))
+  agent.tools.each do |tool|
+    if tool.is_a?(Anthropic::Beta::BetaManagedAgentsAgentToolset20260401)
+      puts JSON.pretty_generate(tool.configs.map(&:to_h))
+    end
   end
   ```
 </CodeGroup>
@@ -417,7 +419,7 @@ For the types the SDK uses for these entries, see [Config entry types in the SDK
 
 ## Domain list rules
 
-These rules apply to `allowed_domains` (java, php: `allowedDomains`; csharp, go: `AllowedDomains`) and `blocked_domains` (java, php: `blockedDomains`; csharp, go: `BlockedDomains`) alike. A request that breaks one is rejected, as [Validation errors](https://platform.claude.com/docs/en/managed-agents/tools-web-restrictions#validation-errors) describes.
+These rules apply to `allowed_domains` (java, php: `allowedDomains`; csharp, go: `AllowedDomains`) and `blocked_domains` (java, php: `blockedDomains`; csharp, go: `BlockedDomains`) alike. The API rejects a request that breaks any of these rules, as [Validation errors](https://platform.claude.com/docs/en/managed-agents/tools-web-restrictions#validation-errors) describes.
 
 * **At most one list on an entry:** Set either `allowed_domains` (java, php: `allowedDomains`; csharp, go: `AllowedDomains`) or `blocked_domains` (java, php: `blockedDomains`; csharp, go: `BlockedDomains`) on an entry, not both.
 * **List size:** Each list holds 1 to 64 domains, each 1 to 255 characters.
@@ -447,7 +449,7 @@ Each domain is a registrable domain name, or a subdomain of one, written as a pl
 | A single-label name                                                            | `intranet`               | A full domain such as `example.co.uk` |
 | Non-ASCII characters, as in an internationalized domain name                   |                          | The `xn--` (Punycode) form            |
 
-A domain is also rejected if it contains credentials or whitespace, or if one of its labels starts or ends with a hyphen. `localhost` and hosts ending in `.localhost`, `.local`, `.internal`, `.localdomain`, or `.invalid` are rejected too.
+The API also rejects a domain that contains credentials or whitespace, or that has a label starting or ending with a hyphen. It rejects `localhost` and hosts ending in `.localhost`, `.local`, `.internal`, `.localdomain`, or `.invalid` too.
 
 ### Path suffixes on web search domains
 
@@ -459,19 +461,19 @@ Prefer plain hostnames for `web_search` too. The search provider matches path su
 
 The API validates these settings when you [create an agent](https://platform.claude.com/docs/en/managed-agents/agent-setup#create-an-agent) or [update an agent](https://platform.claude.com/docs/en/managed-agents/agent-setup#update-an-agent). It also validates them when you create or update a session that supplies `tools` (csharp, go: `Tools`).
 
-Format and limit violations are rejected with a 400 `invalid_request_error`:
+The API rejects format and limit violations with a 400 `invalid_request_error`:
 
-| Violation                      | Error message                                                                                                                                                  |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| An entry sets both lists.      | Includes `Only one of allowed_domains or blocked_domains may be set.`                                                                                          |
-| A list is empty.               | Includes `allowed_domains: Empty list of domains is ambiguous. Provide at least one domain or null.`                                                           |
-| A domain breaks a format rule. | Names the domain’s list and zero-based position. For example, `allowed_domains.0: IP addresses are not supported; provide a plain hostname like "example.com"` |
+| Violation                      | Error message                                                                                                                                           |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| An entry sets both lists.      | Includes `Only one of allowed_domains or blocked_domains may be set.`                                                                                   |
+| A list is empty.               | Includes `allowed_domains: Empty list of domains is ambiguous. Provide at least one domain or null.`                                                    |
+| A domain breaks a format rule. | Names the domain’s list and zero-based position, as in `allowed_domains.0: IP addresses are not supported; provide a plain hostname like "example.com"` |
 
 On the same requests, the API also rejects three settings that depend on the search and fetch providers:
 
 * A domain in `allowed_domains` (java, php: `allowedDomains`; csharp, go: `AllowedDomains`) that Anthropic’s crawler is not allowed to access.
-* A `user_location.country` that the search provider does not support. The message ends in `user_location.country: not a country the search provider supports`.
-* A `user_location.timezone` that is not a valid IANA name.
+* A `user_location.country` (java, php: `userLocation.country`; csharp, go: `UserLocation.Country`) that the search provider does not support. The message ends in `user_location.country: not a country the search provider supports`.
+* A `user_location.timezone` (java, php: `userLocation.timezone`; csharp, go: `UserLocation.Timezone`) that is not a valid IANA time zone name.
 
 In a cloud environment with `limited` [networking](https://platform.claude.com/docs/en/managed-agents/environments#networking), session create and update also check `allowed_domains` (java, php: `allowedDomains`; csharp, go: `AllowedDomains`) against the environment’s `allowed_hosts` (java, php: `allowedHosts`; csharp, go: `AllowedHosts`). See the rule in [Set domain lists on an agent](https://platform.claude.com/docs/en/managed-agents/tools-web-restrictions#set-domain-lists-on-an-agent).
 

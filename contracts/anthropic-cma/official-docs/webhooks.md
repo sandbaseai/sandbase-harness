@@ -10,7 +10,7 @@ featureMetadata:
   betaHeader: managed-agents-2026-04-01
   zdr:
     eligibility: not-eligible
-    note: Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes.
+    note: Not eligible for ZDR, except for self-hosted Managed Agents. Sessions are stateful resources; transcripts persist until you delete them.
   supportedModels:
     - claude-fable-5-2
     - claude-mythos-5-2
@@ -127,7 +127,7 @@ Webhook events return the event `type` and `id`, not the full object. When you r
 
 ## Register an endpoint
 
-In the Claude Console, go to the [Webhooks](https://platform.claude.com/settings/workspaces/default/webhooks) page (`platform.claude.com/settings/workspaces/default/webhooks`). Each endpoint belongs to one workspace. Select the workspace you want in the workspace picker in the sidebar.
+In the Claude Console, go to the [Webhooks](https://platform.claude.com/settings/workspaces/default/webhooks) page (`platform.claude.com/settings/workspaces/default/webhooks`). Each endpoint belongs to one workspace. Select the workspace you want in the workspace picker.
 
 A webhook endpoint consists of:
 
@@ -137,7 +137,7 @@ A webhook endpoint consists of:
 
 ## Verify the signature
 
-Every delivery carries the `webhook-id`, `webhook-timestamp`, and `webhook-signature` headers. In every SDK except C#, use the `unwrap()` (csharp, go: `Unwrap()`) helper to verify the signature and parse the event in one step. It throws if the signature is invalid or the payload is more than 5 minutes old.
+Every delivery carries the `webhook-id`, `webhook-timestamp`, and `webhook-signature` headers. In every SDK except C#, use the `unwrap()` (csharp, go: `Unwrap()`) helper to verify the signature and parse the event in one step. It reports an error if the signature is invalid or the payload is more than 5 minutes old.
 
 Set `ANTHROPIC_WEBHOOK_SIGNING_KEY` to the `whsec_`-prefixed secret shown at endpoint creation.
 
@@ -338,7 +338,7 @@ Set `ANTHROPIC_WEBHOOK_SIGNING_KEY` to the `whsec_`-prefixed secret shown at end
 
 ## Handle an event
 
-Parse the body, switch on `data.type`, and fetch the resource by ID. Return any `2xx` to acknowledge. Any other response counts against the endpoint: a `3xx` disables it immediately (redirects are never followed), whereas other failures are retried; see [Delivery behavior](https://platform.claude.com/docs/en/managed-agents/webhooks#delivery-behavior) for the retry and auto-disable rules.
+Parse the body, switch on `data.type`, and fetch the resource by ID. Return any `2xx` to acknowledge. Any other response counts against the endpoint. A `3xx` disables it immediately (redirects are never followed), whereas other failures are retried. For the retry and auto-disable rules, see [Delivery behavior](https://platform.claude.com/docs/en/managed-agents/webhooks#delivery-behavior).
 
 Every event payload has the same structure, including the event type, the identifier, and the timestamp of when the event occurred.
 
@@ -465,10 +465,10 @@ Beta headers allow you to access experimental features and new model capabilitie
 
 [Data handling overview](https://platform.claude.com/docs/en/manage-claude/api-and-data-retention#feature-eligibility)
 
-| Item    | Zero data retention                                                                                                                                      | HIPAA                                                                        |
-| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Status  | Not eligible                                                                                                                                             | Not eligible                                                                 |
-| Details | Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes. | Applies to all Managed Agents sub-features, including Self-hosted sandboxes. |
+| Item    | Zero data retention                                                                                                                                                                                                                                         | HIPAA                                                               |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Status  | Not eligible                                                                                                                                                                                                                                                | Not eligible                                                        |
+| Details | Not eligible for ZDR, except for self-hosted Managed Agents. Sessions are stateful resources; transcripts persist until you delete them. [Learn more](https://platform.claude.com/docs/en/managed-agents/self-hosted-data-and-access#how-long-data-is-kept) | Not eligible for HIPAA. Applies to all Managed Agents sub-features. |
 
 Applicable endpoints:
 

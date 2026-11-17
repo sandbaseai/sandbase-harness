@@ -10,7 +10,7 @@ featureMetadata:
   betaHeader: managed-agents-2026-04-01
   zdr:
     eligibility: not-eligible
-    note: Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes.
+    note: Not eligible for ZDR, except for self-hosted Managed Agents. Sessions are stateful resources; transcripts persist until you delete them.
   supportedModels:
     - claude-fable-5-2
     - claude-mythos-5-2
@@ -50,7 +50,7 @@ When creating a deployment, you pass the [session configurations](https://platfo
 * In the `schedule` (csharp, go: `Schedule`), you define a cron `expression` (csharp, go: `Expression`) and a `timezone` (csharp, go: `Timezone`). Maximum granularity supported is at the minute level.
 
 <Note>
-  On [Claude Platform on AWS](https://platform.claude.com/docs/en/build-with-claude/claude-platform-on-aws), each run creates its session as an IAM role in your AWS account. Before you create the deployment, set `execution_identity` on the agent to `{"type": "aws_role", "role_arn": "arn:aws:iam::123456789012:role/example-role"}`. Creating a deployment for an agent without this field returns a 400 error.
+  On [Claude Platform on AWS](https://platform.claude.com/docs/en/build-with-claude/claude-platform-on-aws), each run creates its session as an IAM role in your AWS account. When you create the agent, set `execution_identity` to `{"type": "aws_role", "role_arn": "arn:aws:iam::123456789012:role/example-role"}`. You can set the role only when you create the agent, and not in the Claude Console. If an agent has no role, create another agent with one. Creating a deployment for an agent without this field returns a 400 error.
 
   * **Trust policy:** Allow the `aws-external-anthropic.amazonaws.com` service principal to call `sts:AssumeRole` and `sts:SetSourceIdentity`.
   * **Role permissions:** Allow `aws-external-anthropic:CreateSession`, `sts:GetWebIdentityToken`, and `sts:TagGetWebIdentityToken`.
@@ -759,7 +759,13 @@ Each lifecycle change emits a [webhook event](https://platform.claude.com/docs/e
 
 Session creation rate-limit responses are recorded immediately as a `session_rate_limited_error` run without retry; the schedule attempts again at the next scheduled occurrence. Rate limits on underlying API calls within a session are handled by the session itself.
 
-If a deployment’s agent has been archived, the deployment is automatically archived in the same operation. If the agent has been deleted, the next scheduled trigger detects the missing agent and automatically archives the deployment. In both cases no deployment run is recorded. If a subagent referenced by the agent has been archived, the next trigger records a failed run with `error.type: "agent_archived_error"` and the deployment is automatically paused so you can update the agent and resume. Other unrecoverable session-creation errors, such as an archived environment or vault, behave the same way: the trigger records a failed run and the deployment is automatically paused. The deployment’s `paused_reason.error.type` mirrors the failed run’s `error.type`.
+If a deployment’s agent is archived, the same operation archives the deployment. If the agent is deleted, the next scheduled trigger detects the missing agent and archives the deployment. Neither records a deployment run. If the agent references an archived subagent, the next trigger records a failed run with `error.type: "agent_archived_error"` and pauses the deployment. Other unrecoverable session-creation errors, such as an archived environment or vault, behave the same way: the trigger records a failed run and pauses the deployment. The deployment’s `paused_reason.error.type` mirrors the failed run’s `error.type`.
+
+If a deployment is paused because the agent has an archived subagent:
+
+1. Remove or replace the archived subagent when you [update the agent](https://platform.claude.com/docs/en/api/beta/agents/update).
+2. Move the deployment to the agent’s latest version: [update the deployment](https://platform.claude.com/docs/en/api/beta/deployments/update) and pass the same agent ID again in `agent` (csharp, go: `Agent`). A deployment runs one version of its agent and keeps it even when the agent changes.
+3. Unpause the deployment, as [Managing deployment lifecycle](https://platform.claude.com/docs/en/managed-agents/scheduled-deployments#managing-deployment-lifecycle) describes.
 
 ## Trigger a manual run
 
@@ -835,10 +841,10 @@ Beta headers allow you to access experimental features and new model capabilitie
 
 [Data handling overview](https://platform.claude.com/docs/en/manage-claude/api-and-data-retention#feature-eligibility)
 
-| Item    | Zero data retention                                                                                                                                      | HIPAA                                                                        |
-| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Status  | Not eligible                                                                                                                                             | Not eligible                                                                 |
-| Details | Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes. | Applies to all Managed Agents sub-features, including Self-hosted sandboxes. |
+| Item    | Zero data retention                                                                                                                                                                                                                                         | HIPAA                                                               |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Status  | Not eligible                                                                                                                                                                                                                                                | Not eligible                                                        |
+| Details | Not eligible for ZDR, except for self-hosted Managed Agents. Sessions are stateful resources; transcripts persist until you delete them. [Learn more](https://platform.claude.com/docs/en/managed-agents/self-hosted-data-and-access#how-long-data-is-kept) | Not eligible for HIPAA. Applies to all Managed Agents sub-features. |
 
 Applicable endpoints:
 

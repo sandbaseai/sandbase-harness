@@ -2,9 +2,12 @@
 
 A verbatim snapshot of the public Claude Managed Agents documentation,
 crawled from `https://platform.claude.com/docs/en/managed-agents/*.md` (and
-`agents-and-tools/mcp-tunnels/*.md`) on **2026-10-31**, and verified
-byte-identical on a **2026-11-01** re-crawl (41 managed-agents pages plus 9
-mcp-tunnels pages; no page added, removed, or changed upstream).
+`agents-and-tools/mcp-tunnels/*.md`) on **2026-10-31**, and re-crawled on
+**2026-11-17**: 41 managed-agents pages refreshed for upstream drift (mostly
+ZDR wording, `coordinator`→`multiagent_20261001` migration notes, fast-mode
+deprecation of Opus 4.8, and style edits), the `self-hosted/` subtree added
+(10 pages), and the two top-level `self-hosted*.md` pages added — 62 managed-agents
+pages plus 9 mcp-tunnels pages in all.
 
 Purpose:
 
@@ -18,6 +21,7 @@ Purpose:
 Layout:
 
 - `*.md` — the `managed-agents` doc tree, one file per published page.
+- `self-hosted/` — the `managed-agents/self-hosted` doc subtree (10 pages).
 - `mcp-tunnels/` — the `agents-and-tools/mcp-tunnels` doc tree (a separate
   URL family refused by this runtime; see [`../unsupported.md`](../unsupported.md)).
 
@@ -35,8 +39,9 @@ Each page is served as markdown at its docs URL plus ".md"
 (`https://platform.claude.com/docs/en/managed-agents/<page>.md`), and the full
 page list is the file set in this directory — the crawl diffs what is pinned,
 so a page added upstream but never snapshotted is the one change it cannot
-see. Remove stale pages when the upstream tree changes rather than adding
-alongside them.
+see (a new subtree like `self-hosted/` is found by watching
+`https://platform.claude.com/docs/llms.txt`). Remove stale pages when the
+upstream tree changes rather than adding alongside them.
 
 Licensing note: these files are Anthropic's published documentation kept for
 local contract review. Do not copy their prose into SandBase docs — cite the

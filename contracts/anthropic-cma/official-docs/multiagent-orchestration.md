@@ -10,7 +10,7 @@ featureMetadata:
   betaHeader: managed-agents-2026-04-01
   zdr:
     eligibility: not-eligible
-    note: Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes.
+    note: Not eligible for ZDR, except for self-hosted Managed Agents. Sessions are stateful resources; transcripts persist until you delete them.
   supportedModels:
     - claude-fable-5-2
     - claude-mythos-5-2
@@ -725,7 +725,7 @@ Create the researcher, which declares the GitHub MCP server, and the agent that 
   ```ruby Ruby
   research_agent = client.beta.agents.create(
     name: "researcher",
-    model: "claude-haiku-5-5",
+    model: Anthropic::Beta::BetaManagedAgentsModel::CLAUDE_HAIKU_5_5,
     mcp_servers: [
       {type: "url", name: "github", url: "https://api.githubcopilot.com/mcp/"}
     ],
@@ -736,7 +736,7 @@ Create the researcher, which declares the GitHub MCP server, and the agent that 
 
   lead_agent = client.beta.agents.create(
     name: "lead",
-    model: "claude-opus-5-5",
+    model: Anthropic::Beta::BetaManagedAgentsModel::CLAUDE_OPUS_5_5,
     tools: [
       {type: "agent_toolset_20260401"}
     ],
@@ -1317,7 +1317,7 @@ Each consultation runs as a platform-spawned thread named `anthropic.advisor` th
 4. `session.thread_status_idle` (`stop_reason: end_turn`)
 5. `session.thread_status_terminated`
 
-No `agent.tool_use` events are emitted for a consultation, and no `agent.thread_message_sent` event appears on the session’s event stream, because the consultation input is composed by the platform rather than sent by the agent. If you list the advisor thread’s own events, the advice also appears there as an `agent.thread_message_sent` event. The advice delivery (event 3) is not guaranteed to arrive before the advisor thread’s idle and terminated events, so don’t treat those as a signal that the advice has already been delivered.
+A consultation emits no `agent.tool_use` events, and no `agent.thread_message_sent` event appears on the session’s event stream. The platform composes the consultation input, so the agent doesn’t send it. If you list the advisor thread’s own events, the advice also appears there as an `agent.thread_message_sent` event. The advice delivery (event 3) is not guaranteed to arrive before the advisor thread’s idle and terminated events, so don’t treat those as a signal that the advice has already been delivered.
 
 Whether your client can read the advice is the advisor model’s policy. It mirrors the [result variants](https://platform.claude.com/docs/en/agents-and-tools/tool-use/advisor-tool#result-variants) split on the Messages API advisor tool. An advisor model that returns plaintext results there delivers readable text here. One that returns redacted results delivers a `[{"type": "redacted"}]` placeholder on every client surface, while the agent still reads the full advice server-side. The preceding example uses the newest Opus model available to you as the advisor. It returns redacted results, so your client sees only the placeholder. To read the advice on the event stream, use an advisor that returns plaintext, such as Claude Opus 4.8. A model’s policy can change with no change to the API, so handle both `text` and `redacted` blocks. Some agent models pair only with redacted-result advisors; see the advisor tool’s [Model compatibility](https://platform.claude.com/docs/en/agents-and-tools/tool-use/advisor-tool#model-compatibility) section. Advisor thinking is never surfaced. Clients cannot send `redacted` blocks themselves; an event containing one is rejected with a 400 validation error.
 
@@ -1403,10 +1403,10 @@ Beta headers allow you to access experimental features and new model capabilitie
 
 [Data handling overview](https://platform.claude.com/docs/en/manage-claude/api-and-data-retention#feature-eligibility)
 
-| Item    | Zero data retention                                                                                                                                      | HIPAA                                                                        |
-| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Status  | Not eligible                                                                                                                                             | Not eligible                                                                 |
-| Details | Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes. | Applies to all Managed Agents sub-features, including Self-hosted sandboxes. |
+| Item    | Zero data retention                                                                                                                                                                                                                                         | HIPAA                                                               |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Status  | Not eligible                                                                                                                                                                                                                                                | Not eligible                                                        |
+| Details | Not eligible for ZDR, except for self-hosted Managed Agents. Sessions are stateful resources; transcripts persist until you delete them. [Learn more](https://platform.claude.com/docs/en/managed-agents/self-hosted-data-and-access#how-long-data-is-kept) | Not eligible for HIPAA. Applies to all Managed Agents sub-features. |
 
 Applicable endpoints:
 

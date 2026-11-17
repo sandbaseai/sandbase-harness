@@ -10,7 +10,7 @@ featureMetadata:
   betaHeader: managed-agents-2026-04-01
   zdr:
     eligibility: not-eligible
-    note: Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes.
+    note: Not eligible for ZDR, except for self-hosted Managed Agents. Sessions are stateful resources; transcripts persist until you delete them.
   supportedModels:
     - claude-fable-5-2
     - claude-mythos-5-2
@@ -59,9 +59,9 @@ You can also override `model` (csharp, go: `Model`), `system` (csharp, go: `Syst
 
 ## Create an agent
 
-The following example defines a coding agent that uses the newest Claude Opus model with access to the pre-built agent toolset. The toolset lets the agent write code, read files, search the web, and more. See the [agent tools reference](https://platform.claude.com/docs/en/managed-agents/tools) for the full list of supported tools.
+The following example defines a coding agent that uses the newest Claude Opus model with access to the pre-built agent toolset. The toolset lets the agent write code, read files, search the web, and more. See [Tools](https://platform.claude.com/docs/en/managed-agents/tools) for the full list of supported tools.
 
-The examples use curl, the `ant` CLI, or the SDK. If you haven’t set one up, the [quickstart](https://platform.claude.com/docs/en/managed-agents/quickstart#before-you-begin) covers installation and client setup.
+The examples use curl, the `ant` CLI, or the SDK. If you haven’t set one up, [Get started with Claude Managed Agents](https://platform.claude.com/docs/en/managed-agents/quickstart#before-you-begin) covers installation and client setup.
 
 <CodeGroup defaultLanguage="CLI">
   ```bash cURL
@@ -213,11 +213,11 @@ The response echoes your configuration and adds `id`, `type`, `version`, `create
 The `default_config` on the toolset shows its default [permission policy](https://platform.claude.com/docs/en/managed-agents/permission-policies), `always_allow`, which applies unless you configure one.
 
 <Tip>
-  To use Claude Opus 5.5, Claude Opus 5, or Claude Opus 4.8 with [fast mode](https://platform.claude.com/docs/en/build-with-claude/fast-mode), pass `model` as an object, for example: `{"id": "claude-opus-5-5", "speed": "fast"}`. See the fast mode page’s [supported models](https://platform.claude.com/docs/en/build-with-claude/fast-mode#supported-models).
+  To use [fast mode](https://platform.claude.com/docs/en/build-with-claude/fast-mode), pass `model` (csharp, go: `Model`) as an object, for example: `{"id": "claude-opus-5-5", "speed": "fast"}`. Fast mode on Claude Opus 4.8 is deprecated. See the fast mode page’s [supported models](https://platform.claude.com/docs/en/build-with-claude/fast-mode#supported-models) for the models that support it on Claude Managed Agents.
 </Tip>
 
 <Tip>
-  To set the model’s effort level, pass `model` as an object, for example: `{"id": "claude-opus-5-5", "effort": "high"}`. The `effort` field accepts a level string (`low`, `medium`, `high`, `xhigh`, or `max`) or an object such as `{"type": "high"}`. See [Effort levels](https://platform.claude.com/docs/en/build-with-claude/effort#effort-levels) for what each level does.
+  To set the model’s effort level, pass `model` (csharp, go: `Model`) as an object, for example: `{"id": "claude-opus-5-5", "effort": "high"}`. The `effort` (csharp, go: `Effort`) field accepts a level string (`low`, `medium`, `high`, `xhigh`, or `max`) or an object such as `{"type": "high"}`. See [Effort levels](https://platform.claude.com/docs/en/build-with-claude/effort#effort-levels) for what each level does.
 </Tip>
 
 ### Pin the inference geo
@@ -354,15 +354,17 @@ The following example pins an agent to US inference. The response carries the `i
   ```
 </CodeGroup>
 
-An `inference_geo` (java, php: `inferenceGeo`; csharp, go: `InferenceGeo`) pin is validated against the workspace’s [`allowed_inference_geos`](https://platform.claude.com/docs/en/manage-claude/data-residency#workspace-level-restrictions) when the agent is saved, when a session is created from it, and on every turn the session serves. If the workspace allowlist narrows so a pin is no longer allowed, new sessions can’t be created from the agent and running sessions refuse further turns; pins are never exempted, because workspaces rely on them for compliance and data residency.
+To change or clear the pin later, update the agent’s `model` (csharp, go: `Model`) object. Supplying `model` (csharp, go: `Model`) without `inference_geo` (java, php: `inferenceGeo`; csharp, go: `InferenceGeo`) clears the pin, as described under [Update semantics](https://platform.claude.com/docs/en/managed-agents/agent-setup#update-semantics).
 
-Setting `inference_geo` (java, php: `inferenceGeo`; csharp, go: `InferenceGeo`) on a model that doesn’t support geographic inference pinning returns a 400 error; see [Model availability](https://platform.claude.com/docs/en/manage-claude/data-residency#model-availability) for the models that do. In a `multiagent` (csharp, go: `Multiagent`) configuration, the agent’s pin and the pin of every agent listed in the `predefined_agents` (java, php: `predefinedAgents`; csharp, go: `PredefinedAgents`) list of `subagents` (csharp, go: `Subagents`) or `workflows` (csharp, go: `Workflows`) must all be set to the same value or all be unset; see [Multiagent orchestration](https://platform.claude.com/docs/en/managed-agents/multiagent-orchestration). To change or clear the pin later, update the agent’s `model` (csharp, go: `Model`) object; supplying `model` (csharp, go: `Model`) without `inference_geo` (java, php: `inferenceGeo`; csharp, go: `InferenceGeo`) clears it, as described under [Update semantics](https://platform.claude.com/docs/en/managed-agents/agent-setup#update-semantics).
+Setting `inference_geo` (java, php: `inferenceGeo`; csharp, go: `InferenceGeo`) on a model that doesn’t support it returns a 400 error. See [Model availability](https://platform.claude.com/docs/en/manage-claude/data-residency#model-availability) for the models that do.
+
+In a `multiagent` (csharp, go: `Multiagent`) configuration, `subagents` (csharp, go: `Subagents`) and `workflows` (csharp, go: `Workflows`) each have a `predefined_agents` (java, php: `predefinedAgents`; csharp, go: `PredefinedAgents`) list. The agent and every agent in those lists must all pin the same geo, or all have no pin. See [Multiagent orchestration](https://platform.claude.com/docs/en/managed-agents/multiagent-orchestration).
+
+The API checks an `inference_geo` (java, php: `inferenceGeo`; csharp, go: `InferenceGeo`) pin against the workspace’s [`allowed_inference_geos`](https://platform.claude.com/docs/en/manage-claude/data-residency#workspace-level-restrictions) list. The check runs when you set the pin, when you create a session from the agent, and on every turn of that session. If the list changes and no longer allows the pin, you can’t create new sessions from the agent. Running sessions also refuse further turns. This applies even to a pin that was allowed when you set it, because workspaces rely on these checks for compliance and data residency.
 
 ## Update an agent
 
-Updating an agent generates a new version when the configuration changes. The `version` (csharp, go: `Version`) field is optional: supply it for optimistic concurrency (a mismatch returns a 409), or omit it to apply the update unconditionally (last write wins). Updates to archived agents are rejected.
-
-With the CLI, edit the agent’s file and run `ant apply` again; apply supplies `version` for you.
+Updating an agent generates a new version when the configuration changes. The `version` (csharp, go: `Version`) field is optional. Supply the version that you last read, and the update applies only if the agent is still at that version. Otherwise, the request returns a 409 error. Omit `version` (csharp, go: `Version`) to apply the update whatever the agent’s current version. In that case, if two updates set the same field or `metadata` (csharp, go: `Metadata`) key, the last write wins. The API rejects updates to archived agents.
 
 <CodeGroup defaultLanguage="CLI">
   ```bash cURL
@@ -394,6 +396,8 @@ With the CLI, edit the agent’s file and run `ant apply` again; apply supplies 
       You are a helpful coding agent. Always write tests.
       ```
     </File>
+
+    Edit the agent’s file and run `ant apply` again. The command supplies `version` for you.
   </CodeGroupItem>
 
   ```python Python
@@ -470,7 +474,7 @@ With the CLI, edit the agent’s file and run `ant apply` again; apply supplies 
   ```
 </CodeGroup>
 
-The preceding example supplies `version` (csharp, go: `Version`) from the create response, so the update only applies if nothing else has changed the agent since you read it. To apply an update unconditionally, omit `version` (csharp, go: `Version`) from the request:
+The preceding example supplies `version` (csharp, go: `Version`), so the update only applies if the agent is still at that version. To apply an update unconditionally, omit `version` (csharp, go: `Version`) from the request:
 
 <CodeGroup>
   ```bash cURL
@@ -559,21 +563,26 @@ The preceding example supplies `version` (csharp, go: `Version`) from the create
 
 ### Update semantics
 
-* **`version` (csharp, go: `Version`)** is optional and must be at least 1 when supplied. When supplied, the request returns a 409 if it doesn’t match the agent’s current version, even when the fields you send already match the stored values; re-read the agent and retry. When omitted, the update applies unconditionally and the most recent update silently replaces any concurrent one, with no error to either caller. Supplying `version` (csharp, go: `Version`) is the recommended default for interactive callers, and omitting it fits declarative apply loops, such as a CI job that syncs checked-in agent definitions, where the loop owns the agent.
+* **`version` (csharp, go: `Version`)** is optional and must be at least 1 when supplied. When supplied, it must match the agent’s current version. If it doesn’t, the request returns a 409, even when the fields you send already match the stored values. Reread the agent and retry. When omitted, the update applies unconditionally. If two concurrent updates set the same field or `metadata` (csharp, go: `Metadata`) key, the later value is kept, with no error to either caller. When too many writes reach the agent at once, a request can fail with a 429 error. Supplying `version` (csharp, go: `Version`) is the recommended default for interactive callers. Omitting it fits declarative apply loops where the loop owns the agent, such as a CI job that syncs checked-in agent definitions.
 
 * **Omitted fields are preserved.** You only need to include the fields you want to change.
 
-* **Scalar fields** (`model` (csharp, go: `Model`), `system` (csharp, go: `System`; ruby: `system_`), `name` (csharp, go: `Name`), `description` (csharp, go: `Description`)) are replaced with the new value. `system` (csharp, go: `System`; ruby: `system_`) and `description` (csharp, go: `Description`) can be cleared by passing `null` (python: `None`; ruby: `nil`; java: `Optional.empty()`; go: `param.Null[string]()`; php: `requestOptions: ['extraBodyParams' => ['system' => null, 'description' => null]]`). `model` (csharp, go: `Model`) and `name` (csharp, go: `Name`) are mandatory and cannot be cleared. Within a `model` (csharp, go: `Model`) object you supply, `effort` (csharp, go: `Effort`) is the sole exception: if the model `id` (csharp, go: `ID`) is unchanged, omitting `effort` (csharp, go: `Effort`) leaves the stored effort level unchanged. If you change the model `id` (csharp, go: `ID`), an omitted `effort` (csharp, go: `Effort`) resets to the new model’s default. Other `model` (csharp, go: `Model`) fields are replaced along with the object: supplying `model` (csharp, go: `Model`) without `inference_geo` (java, php: `inferenceGeo`; csharp, go: `InferenceGeo`) clears the agent’s inference geo pin.
+* **`model` (csharp, go: `Model`), `system` (csharp, go: `System`; ruby: `system_`), `name` (csharp, go: `Name`), and `description` (csharp, go: `Description`)** are replaced with the new value. To clear `system` (csharp, go: `System`; ruby: `system_`) or `description` (csharp, go: `Description`), pass `null` (python: `None`; ruby: `nil`; java: `Optional.empty()`; go: `param.Null[string]()`; php: `requestOptions: ['extraBodyParams' => ['system' => null, 'description' => null]]`). Every agent needs a `model` (csharp, go: `Model`) and a `name` (csharp, go: `Name`), so those two can’t be cleared. When you supply `model` (csharp, go: `Model`), it replaces the stored object as a whole, so `model` (csharp, go: `Model`) fields that you omit aren’t kept. For example, supplying `model` (csharp, go: `Model`) without `inference_geo` (java, php: `inferenceGeo`; csharp, go: `InferenceGeo`) clears the agent’s inference geo pin. The one exception to this rule is `effort` (csharp, go: `Effort`). If the model `id` (csharp, go: `ID`) is unchanged, omitting `effort` (csharp, go: `Effort`) leaves the stored effort level unchanged. If you change the model `id` (csharp, go: `ID`), an omitted `effort` (csharp, go: `Effort`) resets to the new model’s default.
 
 * **Array fields** (`tools` (csharp, go: `Tools`), `mcp_servers` (java, php: `mcpServers`; csharp: `McpServers`; go: `MCPServers`), `skills` (csharp, go: `Skills`)) are fully replaced by the new array. To clear an array field entirely, pass `null` (python: `None`; ruby: `nil`; java: `Optional.empty()`; go: `param.NullSlice[[]anthropic.BetaAgentUpdateParamsToolUnion]()`; php: `requestOptions: ['extraBodyParams' => ['mcp_servers' => null]]`) or an empty array.
 
-* **`multiagent` (csharp, go: `Multiagent`)** is merged into the stored block level by level when the update keeps the `multiagent_20261001` type. A setting that you omit keeps its stored value, and a `predefined_agents` (java, php: `predefinedAgents`; csharp, go: `PredefinedAgents`) list that you send replaces the stored list. Any other update that sends `multiagent` (csharp, go: `Multiagent`) replaces the stored block as a whole, and the settings that it omits take their defaults. Pass `"multiagent": null` (python: `multiagent=None`; typescript: `multiagent: null`; ruby: `multiagent: nil`; go: `Multiagent: param.NullStruct[anthropic.BetaManagedAgentsMultiagentParamsUnion]()`; java: `.multiagent(Optional.empty())`; csharp: `Multiagent = null`; php: `requestOptions: ['extraBodyParams' => ['multiagent' => null]]`) to clear the whole block. Inside the block, `null` resets a setting to its default, so setting `workflows` (csharp, go: `Workflows`) to `null` turns dynamic workflows on. See [Turn on dynamic workflows](https://platform.claude.com/docs/en/managed-agents/multiagent-orchestration#turn-on-dynamic-workflows).
+* **`multiagent` (csharp, go: `Multiagent`)** updates merge or replace, depending on the type:
+
+  * When the stored block and the update both use the `multiagent_20261001` type, the update is merged into the stored block. A setting that you omit keeps its stored value, both at the top of the block and inside `subagents` (csharp, go: `Subagents`) or `workflows` (csharp, go: `Workflows`). A `predefined_agents` (java, php: `predefinedAgents`; csharp, go: `PredefinedAgents`) list that you send replaces the stored list. A setting that you send with a new `type`, such as `{"type": "disabled"}`, replaces the stored setting. Fields that it omits take their defaults.
+  * If the stored block or the update uses the [`coordinator` type](https://platform.claude.com/docs/en/managed-agents/multiagent-orchestration#move-from-the-coordinator-type), the update replaces the stored block as a whole. Settings that it omits take their defaults.
+
+  To clear the whole block, pass `"multiagent": null` (python: `multiagent=None`; typescript: `multiagent: null`; ruby: `multiagent: nil`; go: `Multiagent: param.NullStruct[anthropic.BetaManagedAgentsMultiagentParamsUnion]()`; java: `.multiagent(Optional.empty())`; csharp: `Multiagent = null`; php: `requestOptions: ['extraBodyParams' => ['multiagent' => null]]`). To reset one setting to its default, set it to `null` inside the block. For example, setting `workflows` (csharp, go: `Workflows`) to `null` turns dynamic workflows on, because that is its default. See [Turn on dynamic workflows](https://platform.claude.com/docs/en/managed-agents/multiagent-orchestration#turn-on-dynamic-workflows).
 
 * **Metadata** is merged at the key level. Keys you provide are added or updated. Keys you omit are preserved. To delete a specific key, set its value to `null`.
 
 * **No-op detection.** If the update produces no change relative to the current version, no new version is created and the existing version is returned.
 
-* **Other agents’ `predefined_agents` (java, php: `predefinedAgents`; csharp, go: `PredefinedAgents`) lists are not updated.** Agents that list this agent in the `predefined_agents` (java, php: `predefinedAgents`; csharp, go: `PredefinedAgents`) list of `subagents` (csharp, go: `Subagents`) or `workflows` (csharp, go: `Workflows`) keep the version that was pinned when they were created or when an update last sent that list, even if the reference omits `version` (csharp, go: `Version`). To delegate to the new version, [update the agent that lists it](https://platform.claude.com/docs/en/managed-agents/multiagent-orchestration#list-the-subagents) so that the list references the new version.
+* **Other agents’ `predefined_agents` (java, php: `predefinedAgents`; csharp, go: `PredefinedAgents`) lists are not updated.** Updating this agent doesn’t change any agent that lists it in the `predefined_agents` (java, php: `predefinedAgents`; csharp, go: `PredefinedAgents`) list of `subagents` (csharp, go: `Subagents`) or `workflows` (csharp, go: `Workflows`). A listing agent keeps referencing the same version of this agent. That version is set when the listing agent is created, and again whenever an update to the listing agent includes that list. A reference that omits `version` (csharp, go: `Version`) is set to the latest version at that moment, and it doesn’t follow later versions. To delegate to the new version, [update the agent that lists it](https://platform.claude.com/docs/en/managed-agents/multiagent-orchestration#list-the-subagents) so that the list references the new version.
 
 The following update clears the description, deletes the `team` key from `metadata` (csharp, go: `Metadata`), and sets `workflows` (csharp, go: `Workflows`) to `null`, which turns dynamic workflows on:
 
@@ -614,7 +623,7 @@ The following update clears the description, deletes the `team` key from `metada
       ```
     </File>
 
-    The file no longer has `description` or the `team` key, so `ant apply` sends `null` for them. Deleting a setting inside `multiagent` keeps its stored value, so the file sets `workflows` to `null`.
+    The stored agent has a `description` and a `team` key in `metadata`, but the file doesn’t, so `ant apply` sends `null` for them. `multiagent` is different: for a setting missing from inside it, `ant apply` sends nothing, so the API keeps the stored value. To reset `workflows`, the file sets it to `null`.
   </CodeGroupItem>
 
   ```python Python
@@ -725,7 +734,7 @@ The following update clears the description, deletes the `team` key from `metada
 
 ### List versions
 
-Fetch the full version history to track how an agent has changed over time. Results are paginated, and the SDK examples fetch every page automatically.
+Fetch the full version history to track how an agent has changed over time. Results are paginated, and the SDK can fetch every page for you.
 
 <CodeGroup>
   ```bash cURL
@@ -857,7 +866,7 @@ Archiving makes the agent read-only and cannot be undone. Existing sessions cont
   </Card>
 
   <Card title="Start a session" icon="play" href="https://platform.claude.com/docs/en/managed-agents/sessions">
-    Create a session to run your agent and start running tasks.
+    Create a session to start running tasks with your agent.
   </Card>
 
   <Card title="Reference" icon="book" href="https://platform.claude.com/docs/en/managed-agents/reference">
@@ -891,10 +900,10 @@ Beta headers allow you to access experimental features and new model capabilitie
 
 [Data handling overview](https://platform.claude.com/docs/en/manage-claude/api-and-data-retention#feature-eligibility)
 
-| Item    | Zero data retention                                                                                                                                      | HIPAA                                                                        |
-| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Status  | Not eligible                                                                                                                                             | Not eligible                                                                 |
-| Details | Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes. | Applies to all Managed Agents sub-features, including Self-hosted sandboxes. |
+| Item    | Zero data retention                                                                                                                                                                                                                                         | HIPAA                                                               |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Status  | Not eligible                                                                                                                                                                                                                                                | Not eligible                                                        |
+| Details | Not eligible for ZDR, except for self-hosted Managed Agents. Sessions are stateful resources; transcripts persist until you delete them. [Learn more](https://platform.claude.com/docs/en/managed-agents/self-hosted-data-and-access#how-long-data-is-kept) | Not eligible for HIPAA. Applies to all Managed Agents sub-features. |
 
 Applicable endpoints:
 

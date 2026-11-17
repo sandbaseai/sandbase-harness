@@ -32,7 +32,7 @@ dreams: supported
 - `GET /v1/dreams` lists newest-first and supports `limit` (default 20, max
   100), `page`, and `include_archived`. `GET /v1/dreams/{id}` retrieves one.
 
-The published documentation as crawled 2026-10-31
+The published documentation as crawled 2026-11-17
 ([`official-docs/dreams.md`](./official-docs/dreams.md)) describes only these
 parameters. `output_behavior`, a `{id, speed}` model object, repeatable
 `statuses` filters, and `created_at` bounds are **not in the published doc**;
