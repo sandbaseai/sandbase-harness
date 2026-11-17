@@ -25,6 +25,7 @@ import {
   agentToolsetSchema,
   mcpServerConfigSchema,
   multiagentRosterRefusal,
+  parseCoordinatorBlock,
   skillRefSchema,
   type ValidationError,
 } from './schema.js';
@@ -46,6 +47,9 @@ const UPDATE_FIELD_SCHEMAS: Record<string, z.ZodTypeAny> = {
   max_turns: z.union([z.number().int().positive().max(1000), z.null()]),
   temperature: z.union([z.number().min(0).max(2), z.null()]),
   delegations: z.union([z.array(z.string()), z.null()]),
+  // Internal provenance marker produced by the coordinator normalizer; accepted
+  // here so the normalized update body validates. `null` clears it.
+  delegations_source: z.union([z.literal('coordinator'), z.null()]),
   // The local delegation extension, accepted on this path for the same reason
   // the create path accepts it: the executor honours `enable_general_subagent`
   // when it builds the agent's delegation tools, so refusing it here would make
@@ -178,8 +182,27 @@ export function validateAgentUpdateRequest(input: unknown): AgentUpdateRequestRe
     if ((PRECONDITION_FIELDS as readonly string[]).includes(key)) continue;
     // The canonical roster gets its own refusal rather than the generic
     // unknown-field message, so this path and the create path answer a roster
-    // with the same capability id and the same reason.
+    // with the same capability id and the same reason. The /v1/agents write
+    // path rewrites every `multiagent` value before this validator runs —
+    // `null` becomes a `delegations` clear and a coordinator block becomes a
+    // normalized roster — so a value seen here is one no store-backed path
+    // pre-processed; the coordinator-specific refusal names that bound and a
+    // malformed block reports the coordinator rule.
     if (key === 'multiagent') {
+      if (value !== null) {
+        const parsed = parseCoordinatorBlock(value);
+        if (parsed !== 'not-coordinator') {
+          if (!parsed.ok) {
+            errors.push(...parsed.errors);
+          } else {
+            errors.push({
+              path: 'multiagent',
+              message: 'A coordinator multiagent block is normalized to `delegations` on the /v1/agents write path; this update validator holds no store to resolve ids against.',
+            });
+          }
+          continue;
+        }
+      }
       errors.push(multiagentRosterRefusal());
       continue;
     }

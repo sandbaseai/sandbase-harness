@@ -179,8 +179,9 @@ Known unsupported official SDK operations instead return HTTP 400 with
 `error.details.capabilities` containing the capability id and reason. These
 explicit refusals cover MCP tunnels, hosted user profiles, and
 session threads (the multiagent surface is in scope under
-[decision 0002](../decisions/0002-cma-multiagent-parity.md), but still
-`unavailable` in the capability matrix); they do not create
+[decision 0002](../decisions/0002-cma-multiagent-parity.md); the
+delegation-only `coordinator` block is now accepted on the agent write paths,
+while the thread routes themselves stay refused); they do not create
 resources or
 execute work. Authentication, throttling, and compatibility admission still run
 first. Only the documented official methods and paths are registered; unrelated
@@ -464,6 +465,44 @@ stale config rather than leaving a previous id and speed pointing at the old mod
 On create, omitted, `null`, or empty `system` normalizes to an empty string.
 On update, an omitted `system` keeps the existing prompt; `null` or an empty
 string clears it. Non-string, non-null values are rejected on both write paths.
+
+#### `multiagent` on the write paths
+
+The canonical `multiagent` block is accepted in exactly one shape — the
+delegation-only coordinator subset upstream self-hosted accepts:
+
+```json
+"multiagent": {
+  "type": "coordinator",
+  "agents": [
+    "agent_abc123",
+    { "type": "agent", "id": "agent_def456" },
+    { "type": "agent", "id": "agent_def456", "version": 2 },
+    { "type": "self" }
+  ]
+}
+```
+
+`agents` is a top-level list of 1–20 predefined-agent entries. On create or
+update each `agent_…` id is resolved against the store to the agent's name
+(an unknown id is a `400`), the roster is stored as `delegations` with
+`delegations_source: "coordinator"` — the marker that applies the published
+one-level delegation rule at execution — and `{type:"self"}` maps to
+`enable_general_subagent`, the local one-level self-copy mechanism. A
+`version` pin is accepted and resolves to latest rather than to an archived
+version row. The block replaces the stored roster wholesale, and
+`"multiagent": null` clears a coordinator-produced roster (roster, marker,
+and the self flag) while leaving a roster written through the local
+`delegations` extension alone.
+
+Every other `multiagent` shape is refused by name with capability
+`multiagent-roster`: `multiagent_20261001`, any `advisor`, `workflows`,
+`subagents`, or `inline_agents` member — including on a `coordinator` block —
+and a coordinator block that breaks a bound (1–20 entries, a recognized entry
+form) is refused with the coordinator rule named. No thread resource,
+workflow-run executor, or advisor surface exists; the five thread routes stay
+`unsupported_capability` refusals. Delegation itself runs as nested turns, not
+threads.
 
 The optimistic-lock precondition is accepted as either `expected_version` or the
 published `version`: absent means no precondition, and a malformed value is a `400`

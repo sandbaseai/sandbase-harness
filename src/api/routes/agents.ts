@@ -25,7 +25,125 @@ import {
   parseAgentDefinitionFromRow,
   refreshAgentsFromDb,
 } from '@/core/agent/store.js';
+import {
+  multiagentRosterRefusal,
+  parseCoordinatorBlock,
+  type ParsedCoordinatorAgentRef,
+  type ValidationError,
+} from '@/core/agent/schema.js';
 import { publishOperationEvent } from './operation-events.js';
+
+/**
+ * Rewrite a caller's `multiagent` value into the definition fields the runtime
+ * honours, before either write path validates. Three cases:
+ *
+ * - `coordinator` block — the delegation-only subset upstream self-hosted
+ *   accepts. Each `agents` entry is resolved to a live agent's **name** here
+ *   because `delegations` is name-canonical and `DelegationService` resolves
+ *   names against loaded agents. `{"type":"self"}` maps to
+ *   `enable_general_subagent` — the local self-copy mechanism — rather than to
+ *   the agent's own name in `delegations`, where cycle detection would refuse
+ *   the call. `version` pins are accepted and resolved to latest: the
+ *   archived-version lookup is a separate feature, and the published entry
+ *   itself defaults to latest when `version` is omitted. The normalized
+ *   definition carries `delegations_source: 'coordinator'` so the execution
+ *   layer applies the published one-level depth rule.
+ * - `null` — upstream clears the whole block. Here it clears `delegations`,
+ *   `delegations_source`, and `enable_general_subagent` — the only
+ *   coordinator-produced fields. A stored definition whose roster came from a
+ *   coordinator block loses all three; a caller-owned
+ *   `enable_general_subagent` without the marker is left alone, so the field
+ *   only dies with the spelling that set it.
+ * - anything else — `multiagent_20261001` and every other shape stays refused
+ *   by name; a malformed coordinator block reports the coordinator rule.
+ *
+ * Returns the rewritten body, or the refusal details the route answers.
+ */
+function normalizeMultiagentField(
+  deps: ServerDeps,
+  body: Record<string, unknown>,
+  current: Record<string, unknown> | undefined,
+): { ok: true; body: Record<string, unknown> } | { ok: false; errors: ValidationError[] } {
+  if (!Object.prototype.hasOwnProperty.call(body, 'multiagent')) {
+    return { ok: true, body };
+  }
+  const value = body.multiagent;
+  const next = { ...body };
+  delete next.multiagent;
+
+  if (value === null) {
+    // Upstream: `null` clears the whole multiagent block. The only canonical
+    // block this runtime stores is a coordinator-produced roster, so the clear
+    // is scoped by provenance: a stored definition carrying the coordinator
+    // marker loses `delegations`, `delegations_source`, and
+    // `enable_general_subagent` (the field `{type:"self"}` normalized to). A
+    // caller-owned `delegations` list or `enable_general_subagent` flag —
+    // written through the local extension, never through `multiagent` — is
+    // left alone, because clearing it would let a `null` meant for one field
+    // silently erase another.
+    if (current?.delegations_source === 'coordinator') {
+      next.delegations = null;
+      next.delegations_source = null;
+      next.enable_general_subagent = null;
+    }
+    return { ok: true, body: next };
+  }
+
+  const parsed = parseCoordinatorBlock(value);
+  if (parsed === 'not-coordinator') {
+    return { ok: false, errors: [multiagentRosterRefusal()] };
+  }
+  if (!parsed.ok) {
+    return { ok: false, errors: parsed.errors };
+  }
+
+  // A caller-supplied roster field beside the block is replaced wholesale —
+  // the published rule is that a stored-or-incoming coordinator block replaces
+  // `multiagent` wholesale. `enable_general_subagent` is the one conflict that
+  // cannot resolve wholesale: `{type:"self"}` must produce it, so an explicit
+  // `false` contradicts the block and is refused rather than silently flipped.
+  if (parsed.selfIncluded && body.enable_general_subagent === false) {
+    return {
+      ok: false,
+      errors: [{
+        path: 'multiagent',
+        message: 'coordinator multiagent: {type:"self"} enables self-delegation, which conflicts with enable_general_subagent: false in the same request; send one or the other',
+      }],
+    };
+  }
+
+  const refs: ParsedCoordinatorAgentRef[] = parsed.refs;
+  const names: string[] = [];
+  const missing: string[] = [];
+  for (const ref of refs) {
+    const row = ref.id ? loadAgentRowById(deps.db, ref.id) : undefined;
+    const definition = row ? parseAgentDefinitionFromRow(row) : undefined;
+    // A dangling id is refused at write time: resolving to a name that never
+    // loads would store a roster entry that can only fail at execution, which
+    // is exactly the silent gap the normalization exists to prevent.
+    if (!row || row.status === 'archived' || row.archived_at || !definition) {
+      missing.push(ref.id ?? 'self');
+      continue;
+    }
+    names.push(definition.name);
+  }
+  if (missing.length > 0) {
+    return {
+      ok: false,
+      errors: [{
+        path: 'multiagent.agents',
+        message: `coordinator multiagent: agent id not found: ${missing.join(', ')}`,
+      }],
+    };
+  }
+
+  next.delegations = names;
+  next.delegations_source = 'coordinator';
+  if (parsed.selfIncluded) {
+    next.enable_general_subagent = true;
+  }
+  return { ok: true, body: next };
+}
 
 export function agentsRoutes(deps: ServerDeps) {
   const app = new Hono();
@@ -64,7 +182,17 @@ export function agentsRoutes(deps: ServerDeps) {
       return c.json({ error: { type: 'invalid_request_error', message: 'Request body must be valid JSON' } }, 400);
     }
 
-    const result = validateAgentDefinition(body);
+    // A `multiagent` value is rewritten before validation: the coordinator
+    // block resolves its ids against the store here, where the store is in
+    // scope, and every other shape is refused by name.
+    const normalizedBody = body && typeof body === 'object' && !Array.isArray(body)
+      ? normalizeMultiagentField(deps, body as Record<string, unknown>, undefined)
+      : { ok: true as const, body };
+    if (!normalizedBody.ok) {
+      return c.json({ error: { type: 'invalid_request_error', message: 'Invalid agent definition', details: normalizedBody.errors } }, 400);
+    }
+
+    const result = validateAgentDefinition(normalizedBody.body);
     if (!result.valid || !result.data) {
       return c.json({ error: { type: 'invalid_request_error', message: 'Invalid agent definition', details: result.errors } }, 400);
     }
@@ -128,11 +256,40 @@ export function agentsRoutes(deps: ServerDeps) {
       return c.json({ error: { type: 'not_found', message: `Agent not found: ${id}` } }, 404);
     }
 
+    // Read the stored definition the way every other read path does, so a row
+    // written before `effort` moved inside the profile is folded before the patch
+    // is merged onto it. Parsing the column directly would hand the merge a sibling
+    // `effort`, the non-strict schema would strip it on revalidation, and a caller
+    // who changed only the description would silently lose the level.
+    //
+    // The raw object is still what an unreadable row is merged from: a request that
+    // would change something has to be judged on the definition it produces — an
+    // invalid definition rather than a missing one — and only the no-change branch
+    // below refuses it as missing. It also feeds the `multiagent` normalization:
+    // `null` clears the coordinator-produced fields only when the stored roster
+    // actually came from a coordinator block.
+    const parsed = parseAgentDefinitionFromRow(existing);
+    const current = parsed ?? (parseObject(existing.definition) as Record<string, unknown>);
+
+    // Rewrite `multiagent` before the update validator sees it — the same
+    // normalization the create path runs, with the stored definition's
+    // coordinator provenance available for the `null` clear.
+    const normalizedBody = body && typeof body === 'object' && !Array.isArray(body)
+      ? normalizeMultiagentField(
+          deps,
+          body as Record<string, unknown>,
+          current as Record<string, unknown>,
+        )
+      : { ok: true as const, body };
+    if (!normalizedBody.ok) {
+      return c.json({ error: { type: 'invalid_request_error', message: 'Invalid agent update', details: normalizedBody.errors } }, 400);
+    }
+
     // Partial-update semantics: validate the fields the body actually carries,
     // merge them onto the stored definition, then revalidate the merged result
     // so a request that changes one side of a coupled pair is judged on the
     // pair it produces.
-    const patch = validateAgentUpdateRequest(body);
+    const patch = validateAgentUpdateRequest(normalizedBody.body);
     if (!patch.valid) {
       return c.json({ error: { type: 'invalid_request_error', message: 'Invalid agent update', details: patch.errors } }, 400);
     }
@@ -155,8 +312,6 @@ export function agentsRoutes(deps: ServerDeps) {
     // would change something has to be judged on the definition it produces — an
     // invalid definition rather than a missing one — and only the no-change branch
     // below refuses it as missing.
-    const parsed = parseAgentDefinitionFromRow(existing);
-    const current = parsed ?? (parseObject(existing.definition) as Record<string, unknown>);
     const merged = applyAgentUpdatePatch(current as never, patch.fields);
     if (agentDefinitionsEqual(current, merged)) {
       // No field actually changed, so no new immutable version is written. The

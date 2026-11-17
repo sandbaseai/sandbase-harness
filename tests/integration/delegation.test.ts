@@ -126,4 +126,64 @@ describe('Multi-agent delegation', () => {
     const result = await (strat.builtTools['general_subagent'] as any).execute({ task: 'sub work' });
     expect(result).toContain('handled: sub work');
   });
+
+  it('clamps a coordinator-sourced roster to one level while a caller roster keeps the deeper chain', async () => {
+    // `delegations_source: "coordinator"` is the marker the write path stamps
+    // when it normalizes {"type":"coordinator"}: the published rule is one
+    // level deep, so the delegate's own `delegations` must not fire inside
+    // that call. A caller-written `delegations` roster keeps the extension's
+    // deeper chain — same mechanism, different contract.
+    const chained: AgentDefinition[] = [
+      {
+        name: 'coordinator-clamped', model: 'm', system: 'c',
+        delegations: ['middle'], delegations_source: 'coordinator',
+      },
+      { name: 'middle', model: 'm', system: 'm', delegations: ['leaf'] },
+      { name: 'leaf', model: 'm', system: 'l' },
+      {
+        name: 'local-chain', model: 'm', system: 'c',
+        delegations: ['middle'],
+      },
+    ];
+    const modelRegistry = new ModelRegistry();
+    (modelRegistry as any).createModel = () => fakeModel();
+    const strat = new EchoStrategy();
+    const exec = new DefaultSessionExecutor({
+      agents: chained,
+      modelRegistry,
+      sandboxProvider: new LocalSandboxProvider(tmpDir),
+      strategy: strat,
+      eventLogger: new InMemoryEventLog() as any,
+    });
+
+    const run = async (id: string, agentName: string) => {
+      const session = {
+        id, agentId: agentName, agentName,
+        environmentId: 'env_default', status: 'running' as const,
+        createdAt: new Date(), updatedAt: new Date(),
+      };
+      for await (const _ of exec.execute(session, { type: 'user.message', content: [{ type: 'text', text: 'go' }] } as any)) { /* drain */ }
+      return strat.builtTools;
+    };
+
+    // Coordinator-sourced: the delegate tool fires at depth 0→1…
+    const clampedTools = await run('sess_c', 'coordinator-clamped');
+    const firstHop = await (clampedTools['delegate_to_middle'] as any).execute({ task: 'hop one' });
+    expect(firstHop).toContain('[middle] handled: hop one');
+    // …but the child context ran at depth 1 of maxDepth 1, so inside that call
+    // "middle"'s own `delegate_to_leaf` exists yet refuses on execute — the
+    // one-level rule held even though "middle" declares `delegations`.
+    const childSeen = strat.builtTools;
+    const leafCall = await (childSeen['delegate_to_leaf'] as any).execute({ task: 'hop two' });
+    expect(leafCall).toContain('Delegation error');
+    expect(leafCall).toContain('depth');
+
+    // Same roster written as the local extension: the deeper chain is allowed,
+    // because a caller-written `delegations` roster keeps the extension's own
+    // maxDepth default.
+    const localTools = await run('sess_l', 'local-chain');
+    await (localTools['delegate_to_middle'] as any).execute({ task: 'hop' });
+    const leafResult = await (strat.builtTools['delegate_to_leaf'] as any).execute({ task: 'deep hop' });
+    expect(leafResult).toContain('[leaf] handled: deep hop');
+  });
 });

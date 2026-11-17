@@ -4,6 +4,25 @@
 
 ### Added
 
+- `POST /v1/agents` and `POST|PUT /v1/agents/{id}` now accept a canonical
+  `multiagent` block in exactly one shape — the delegation-only
+  `{"type":"coordinator","agents":[1–20 predefined-agent entries]}` subset
+  upstream self-hosted accepts — and normalize it to the delegation
+  mechanism: each `agent_…` id resolves to the loaded agent's name at write
+  time (a dangling id is a `400`), the roster is stored as `delegations`
+  with `delegations_source: "coordinator"` so the published one-level
+  delegation rule applies at execution, `{type:"self"}` maps to
+  `enable_general_subagent`, `version` pins resolve to latest, the block
+  replaces the stored roster wholesale on update, and `"multiagent": null`
+  clears a coordinator-produced roster only. A coordinator block that
+  breaks a bound — over 20 entries, an `advisor`/`workflows`/`subagents`/
+  `inline_agents` member, an unrecognized entry form — is refused with the
+  coordinator rule named; `multiagent_20261001` and every other `type`
+  stay refused under `multiagent-roster`. `threads-and-coordinator` moves
+  to `partial`: the roster is honoured but there is still no thread
+  resource, workflow-run, or advisor surface — delegation executes as
+  nested turns, not threads.
+
 - M063 adds the session-threads persistence schema that Track 1 of the
   multiagent plan builds on: a `session_threads` table (durable thread
   identity, lifecycle status, parent and workflow-run links), a nullable

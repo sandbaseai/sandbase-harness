@@ -13,7 +13,7 @@ import { normalizeMemoryRecordPath } from '@/core/memory/mount-adapter.js';
 import { collectGrepHits, editOnce, mountProviderUnavailable, mountRelativePath, refuseBashOnMemoryMount, type SessionMemoryMount } from './memory-mount-tools.js';
 import { McpManager, type McpServerStatus } from '@/core/mcp/mcp-manager.js';
 import { toolError, toolErrorText } from '@/core/tool-result-error.js';
-import { rootDelegationContext, DEFAULT_MAX_DELEGATION_DEPTH } from '@/core/orchestrator/agent-orchestrator.js';
+import { rootDelegationContext, DEFAULT_MAX_DELEGATION_DEPTH, type DelegationContext } from '@/core/orchestrator/agent-orchestrator.js';
 import type { EventLogger } from './event-logger.js';
 import type { DelegationService } from './delegation-service.js';
 import { getCustomToolConfigs, getCustomToolNames, getEnabledToolNames, mcpDiscoveredToolAdmitted, resolveToolsRequiringConfirmation } from '@/core/agent/standard.js';
@@ -119,7 +119,7 @@ export class ToolResolver {
   ): Promise<Record<string, any>> {
     const bindings = resolveMemoryBindings(session.resources, this.deps.memoryStoreName);
     const mount = this.deps.memoryMount ? { adapter: this.deps.memoryMount, sessionId: session.id } : undefined;
-    const delegationCtx = rootDelegationContext(agent.name, DEFAULT_MAX_DELEGATION_DEPTH);
+    const delegationCtx = delegationContextFor(agent);
     const tools = this.buildSandboxTools(agent, sandbox, bindings, mount, credentials, session);
     Object.assign(tools, await this.getOrConnectMcp(session, agent, sandbox));
     Object.assign(tools, this.deps.delegationService.buildDelegationTools(agent, delegationCtx, session));
@@ -221,7 +221,7 @@ export class ToolResolver {
         executableTools,
         this.deps.delegationService.buildDelegationTools(
           agent,
-          rootDelegationContext(agent.name, DEFAULT_MAX_DELEGATION_DEPTH),
+          delegationContextFor(agent),
           session,
         ),
       );
@@ -637,4 +637,21 @@ export class ToolResolver {
     this.mcpToolCache.set(sessionId, tools);
     return tools;
   }
+}
+
+/**
+ * The delegation depth a roster runs under.
+ *
+ * A roster normalized from a canonical `multiagent: {type:"coordinator"}` block
+ * honours the published coordinator rule — "Delegation is one level deep"
+ * (`official-docs/multiagent-orchestration.md`) — so its root context clamps to
+ * `maxDepth` 1: the coordinator may call its listed subagents, and a subagent's
+ * own `delegations` do not fire from inside that call. A roster written
+ * directly as the local `delegations` extension keeps the extension's own
+ * default; the field that carries the provenance is `delegations_source`,
+ * written only by the write-path normalizer.
+ */
+function delegationContextFor(agent: AgentDefinition): DelegationContext {
+  const maxDepth = agent.delegations_source === 'coordinator' ? 1 : DEFAULT_MAX_DELEGATION_DEPTH;
+  return rootDelegationContext(agent.name, maxDepth);
 }

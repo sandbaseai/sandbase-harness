@@ -297,4 +297,100 @@ describe('Agent Definition Schema Validation', () => {
       expect(result.valid).toBe(true);
     });
   });
+
+  describe('coordinator multiagent block', () => {
+    /**
+     * The validator holds no store, so a coordinator block in its input is
+     * never normalized here — it is either a malformed-block refusal naming
+     * the coordinator rule, or a well-formed block answered with the write-path
+     * pointer. Resolution itself is covered in
+     * tests/integration/agent-roster-refusal.test.ts.
+     */
+    const coordinator = (agents: unknown[], extra: Record<string, unknown> = {}) => ({
+      ...validMinimal,
+      multiagent: { type: 'coordinator', agents, ...extra },
+    });
+
+    it('answers a well-formed coordinator block with the write-path refusal', () => {
+      for (const agents of [
+        ['agent_abc'],
+        [{ type: 'agent', id: 'agent_abc' }],
+        [{ type: 'agent', id: 'agent_abc', version: 2 }],
+        [{ type: 'self' }],
+        [{ type: 'agent', id: 'agent_abc' }, { type: 'self' }],
+      ]) {
+        const result = validateAgentDefinition(coordinator(agents));
+        expect(result.valid).toBe(false);
+        expect(result.errors![0].path).toBe('multiagent');
+        expect(result.errors![0].message).toContain('/v1/agents');
+      }
+    });
+
+    it('refuses extra keys on a coordinator block with the coordinator rule named', () => {
+      for (const extra of [
+        { advisor: { model: 'x' } },
+        { workflows: {} },
+        { subagents: {} },
+        { inline_agents: {} },
+        { anything: 1 },
+      ]) {
+        const result = validateAgentDefinition(coordinator(['agent_abc'], extra));
+        expect(result.valid).toBe(false);
+        expect(result.errors![0].message).toContain('coordinator multiagent');
+      }
+    });
+
+    it('enforces the 1–20 agents bound', () => {
+      const empty = validateAgentDefinition(coordinator([]));
+      expect(empty.valid).toBe(false);
+      expect(empty.errors![0].message).toContain('coordinator multiagent');
+
+      const over = validateAgentDefinition(
+        coordinator(Array.from({ length: 21 }, () => ({ type: 'agent', id: 'agent_abc' }))),
+      );
+      expect(over.valid).toBe(false);
+      expect(over.errors![0].message).toContain('coordinator multiagent');
+    });
+
+    it('refuses unrecognized entry forms and a missing agents list', () => {
+      for (const agents of [
+        [{ type: 'agent' }],
+        [{ type: 'unknown', id: 'agent_abc' }],
+        ['not-an-agent-id'],
+        [42],
+        undefined,
+      ]) {
+        const body: Record<string, unknown> = { ...validMinimal, multiagent: { type: 'coordinator' } };
+        if (agents !== undefined) (body.multiagent as Record<string, unknown>).agents = agents;
+        const result = validateAgentDefinition(body);
+        expect(result.valid).toBe(false);
+        expect(result.errors![0].message).toContain('coordinator multiagent');
+      }
+    });
+
+    it('still refuses every non-coordinator type with the roster refusal', () => {
+      for (const block of [
+        { type: 'multiagent_20261001' },
+        { type: 'multiagent_20261001', subagents: {} },
+        { type: 'other' },
+        'roster',
+        [1, 2],
+      ]) {
+        const result = validateAgentDefinition({ ...validMinimal, multiagent: block });
+        expect(result.valid).toBe(false);
+        expect(result.errors![0].path).toBe('multiagent');
+        expect(result.errors![0].message).toContain('multiagent-roster');
+      }
+    });
+
+    it('persists delegations_source on a normalized definition', () => {
+      const result = validateAgentDefinition({
+        ...validMinimal,
+        delegations: ['research-analyst'],
+        delegations_source: 'coordinator',
+      });
+      expect(result.valid).toBe(true);
+      expect(result.data?.delegations_source).toBe('coordinator');
+    });
+  });
 });

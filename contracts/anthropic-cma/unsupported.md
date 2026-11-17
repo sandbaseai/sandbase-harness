@@ -31,13 +31,17 @@ mcp-tunnel: not_applicable
 Session budget is implemented and has its own file, [`budget.md`](./budget.md).
 Dreams are implemented too — a session-backed memory-consolidation job — and
 have their own file, [`dreams.md`](./dreams.md).
-Threads, subagent delegation, dynamic workflows, the advisor, and the canonical
-`multiagent` block are **not** implemented either; they have their own file,
+Threads, subagent delegation beyond the declared roster, dynamic workflows,
+the advisor, and every `multiagent` shape other than `coordinator` are **not**
+implemented either; they have their own file,
 [`threads.md`](./threads.md), which records the gap and the refusal that keeps a
 caller from assuming otherwise. The five published thread routes are mounted
 `unsupported_capability` refusals, so the SDK's `sessions.threads` methods get a
-decodable 400 rather than a 404; the `multiagent` block is refused on the agent
-write path, which is where workflow runs are enabled.
+decodable 400 rather than a 404; non-coordinator `multiagent` blocks are refused
+on the agent write path, which is where workflow runs are enabled. The
+delegation-only `coordinator` subset is accepted there and normalized to
+`delegations` — the smallest piece of this surface upstream self-hosted itself
+serves.
 
 Failure mechanism:
 
@@ -96,9 +100,10 @@ unsupported capability and its reason, and separating "not implemented" from
   rejected and no session is created.
 - `tests/unit/loop-engine-truthfulness.test.ts` — no capability is reported as
   available when it cannot execute.
-- `tests/integration/agent-roster-refusal.test.ts` — the related refusal this
-  file's threads gap depends on: a canonical `multiagent` block is rejected by
-  name before anything is persisted.
+- `tests/integration/agent-roster-refusal.test.ts` — the related boundary this
+  file's threads gap depends on: a non-coordinator `multiagent` block is
+  rejected by name before anything is persisted, while the coordinator subset
+  is accepted and normalized.
 
 ## 7. Status
 
@@ -106,7 +111,8 @@ The two matrix entries owned by this file remain `not_applicable`; hosted
 user profiles are also refused and tracked in the route inventory. These
 exclusions remain visible limitations against the full compatibility target.
 Session budget, `web_search`, dreams, and `mcp_oauth_validate` have their own
-contracts because implementations now exist. Multiagent is `unavailable`
-under [decision 0002](../../decisions/0002-cma-multiagent-parity.md), which
-supersedes its earlier scope exclusion; [`threads.md`](./threads.md) records
-that open implementation gap and its continuing refusals.
+contracts because implementations now exist. Multiagent is split under
+[decision 0002](../../decisions/0002-cma-multiagent-parity.md), which
+supersedes its earlier scope exclusion: the `coordinator` subset is `partial`
+in [`threads.md`](./threads.md) — accepted and normalized to `delegations` —
+while the full roster (`multiagent-roster`) stays `unavailable` and refused.

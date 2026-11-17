@@ -47,6 +47,17 @@ export interface AgentDefinition {
   temperature?: number;
   /** Agent names this agent can delegate to (CMA callable_agents roster) */
   delegations?: string[];
+  /**
+   * Provenance of `delegations` when it was written by normalizing a canonical
+   * `multiagent: {type:"coordinator"}` block rather than by the caller naming
+   * the local extension directly. Set by the write-path normalizer, persisted
+   * on the stored definition, and read by the execution layer to apply the
+   * published coordinator depth rule (one level) instead of the local
+   * delegation default. Never projected on agent reads — `delegations` remains
+   * the canonical stored field. A caller that writes it directly only narrows
+   * their own delegation depth, so it is not a security surface.
+   */
+  delegations_source?: 'coordinator';
   /** Enable CMA general_subagent tool for ad-hoc sub-task delegation */
   enable_general_subagent?: boolean;
   /** Strategy name (default: 'default') */
