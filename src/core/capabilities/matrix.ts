@@ -140,7 +140,7 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
     area: 'agents',
     id: 'multiagent-roster',
     status: 'unavailable',
-    reason: 'In scope but not implemented (decisions/0002): a canonical `multiagent` block (`multiagent_20261001` or any other shape) is refused by name on both agent create and agent update, because no thread, subagent, workflow, or advisor surface exists to honour it and the surface is a protocol of its own this runtime does not implement; accepting it would let a caller believe delegation or workflow runs are in effect. Local delegation is registered separately as an extension.',
+    reason: 'In scope but not implemented (decisions/0002): a canonical `multiagent` block with `type` other than `coordinator` — `multiagent_20261001`, an `advisor`, `workflows`, `subagents`, or `inline_agents` — is refused by name on both agent create and agent update, because no thread, workflow, or advisor surface exists to honour it and the surface is a protocol of its own this runtime does not implement; accepting it would let a caller believe delegation or workflow runs are in effect. The `coordinator` subset is accepted and normalized to `delegations` under `threads-and-coordinator`; local delegation stays registered separately as an extension.',
     contract: 'contracts/anthropic-cma/agents.md',
   },
   {
@@ -475,8 +475,8 @@ export const CMA_CAPABILITY_MATRIX: readonly CapabilityEntry[] = [
   {
     area: 'threads',
     id: 'threads-and-coordinator',
-    status: 'unavailable',
-    reason: 'In scope but not implemented (decisions/0002): there is no thread resource, no thread lifecycle or per-thread event isolation, no subagent, workflow-run, or advisor surface, and no thread-scoped budget event. The five published thread routes are mounted `unsupported_capability` refusals naming this capability, so an SDK caller decodes a 400 rather than hitting a 404. A request carrying a `multiagent` block is refused by name rather than silently stripped. Delegation exists only as the local single-level `delegations` / `enable_general_subagent` extension, which is not this surface.',
+    status: 'partial',
+    reason: 'The delegation-only coordinator subset is accepted on both agent write paths and normalized to the delegation mechanism: `{"type":"coordinator","agents":[1–20 predefined-agent entries]}` resolves each `agent_…` id to the loaded agent name, stores the roster in `delegations` with `delegations_source: "coordinator"` so the published one-level depth rule applies, maps `{type:"self"}` to `enable_general_subagent`, and honours `multiagent: null` as clearing that roster; a `version` pin resolves to latest. Every other `multiagent` shape — `multiagent_20261001`, `advisor`, `workflows`, `subagents`, `inline_agents` — stays refused under `multiagent-roster`. There is still no thread resource, no thread lifecycle or per-thread event isolation, no workflow-run or advisor surface, and no thread-scoped budget event: delegation executes as nested turns, not threads. The five published thread routes remain `unsupported_capability` refusals naming this capability, so an SDK caller decodes a 400 rather than hitting a 404.',
     contract: 'contracts/anthropic-cma/threads.md',
   },
   {

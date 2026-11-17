@@ -480,7 +480,7 @@ describe('contract honesty guard', () => {
   it('turns red when a real status block is edited to disagree with the matrix', () => {
     const tampered = contractDocuments().map((document) =>
       document.name === 'threads.md'
-        ? { ...document, text: document.text.replace('threads-and-coordinator: unavailable', 'threads-and-coordinator: partial') }
+        ? { ...document, text: document.text.replace('threads-and-coordinator: partial', 'threads-and-coordinator: unavailable') }
         : document,
     );
 
@@ -491,7 +491,7 @@ describe('contract honesty guard', () => {
       mountedRouteKeys: mountedRouteKeys(),
     });
 
-    expect(problems.join('\n')).toMatch(/threads\.md: status block says threads-and-coordinator is "partial" but the matrix says "unavailable"/);
+    expect(problems.join('\n')).toMatch(/threads\.md: status block says threads-and-coordinator is "unavailable" but the matrix says "partial"/);
   });
 
   it('has a guarded invariant for every rule the guard claims', () => {
@@ -581,17 +581,21 @@ describe('contract document parsing', () => {
 // ---------------------------------------------------------------------------
 
 describe('documented capability decisions', () => {
-  it('records multiagent as an open implementation gap without claiming delegation is parity', () => {
-    // Decision 0002 restores scope; neither the roster nor the thread
-    // executor has been implemented by the reporting change.
+  it('records the coordinator roster as accepted and the rest of multiagent as refused', () => {
+    // Decision 0002 restores scope. The coordinator subset is the one shape
+    // upstream self-hosted accepts, so it is normalized to `delegations` and
+    // the capability moves to `partial`; the full roster — workflows, advisor,
+    // multiagent_20261001 — has no executor and stays `unavailable`.
     expect(entry('multiagent-roster').status).toBe('unavailable');
-    expect(entry('threads-and-coordinator').status).toBe('unavailable');
+    expect(entry('threads-and-coordinator').status).toBe('partial');
     expect(entry('multiagent-roster').reason).toMatch(/decisions\/0002/);
-    expect(entry('threads-and-coordinator').reason).toMatch(/decisions\/0002/);
+    expect(entry('multiagent-roster').reason).toMatch(/coordinator/);
+    expect(entry('threads-and-coordinator').reason).toMatch(/coordinator/);
     expect(entry('local-delegation-subagent').status).toBe('supported');
 
     const threads = documentNamed('threads.md').text;
     expect(threads).toContain('multiagent-roster');
+    expect(threads).toContain('coordinator');
     expect(threads).toContain('decisions/0002-cma-multiagent-parity.md');
     expect(threads).toContain('decisions/0001-multiagent-out-of-scope.md');
     expect(parseDocumentedRoutes(threads)).toEqual([]);

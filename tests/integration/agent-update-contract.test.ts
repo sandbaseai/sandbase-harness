@@ -847,9 +847,11 @@ describe('PUT /v1/agents/:id partial update', () => {
 
     // The canonical roster is refused with the capability it names, so this
     // path and the create path answer a `multiagent` field identically rather
-    // than one of them stripping it.
+    // than one of them stripping it. `multiagent_20261001` is the refused
+    // shape; the coordinator subset is accepted and covered in
+    // tests/integration/agent-roster-refusal.test.ts.
     const rosterAttempt = await request(ctx.app, 'PUT', `/v1/agents/${agent.id}`, {
-      multiagent: { type: 'coordinator', agents: [{ type: 'agent', id: plain.id }] },
+      multiagent: { type: 'multiagent_20261001', subagents: { predefined_agents: [{ type: 'agent', id: plain.id }] } },
     });
     expect(rosterAttempt.res.status).toBe(400);
     expect(rosterAttempt.body.error.details).toContainEqual({

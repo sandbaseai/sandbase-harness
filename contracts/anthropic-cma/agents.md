@@ -88,13 +88,23 @@ the model profile is `src/core/agent/model-object.ts`, and the routes are
   the update unconditionally; that is exactly the local behaviour, so only the
   name differs. Both are read, and sending both with different values is refused
   rather than resolved by precedence.
-- A canonical `multiagent` block is **refused by name** on both write paths. An
-  agent's create path checks the caller's own payload in
-  `validateAgentDefinition`, because the Zod schema strips keys it does not
-  declare and a stripped roster would answer 201 while doing nothing. The update
-  path special-cases the key in `validateAgentUpdateRequest` so both answers are
-  identical. Both name the capability `multiagent-roster` and point at the local
-  extension.
+- A canonical `multiagent` block with `type` other than `coordinator` is
+  **refused by name** on both write paths. A `{"type":"coordinator","agents":[…]}`
+  block — the delegation-only subset upstream self-hosted accepts — is
+  normalized on the `/v1/agents` write paths rather than refused: each
+  `agent_…` entry resolves to the loaded agent's name, the roster is stored in
+  `delegations` with `delegations_source: "coordinator"` so the published
+  one-level depth rule applies, `{type:"self"}` maps to
+  `enable_general_subagent`, and `multiagent: null` clears a
+  coordinator-produced roster. An `agent_…` id that resolves to nothing is a
+  `400` at write time, and a `version` pin resolves to latest rather than to an
+  archived version row. Every other shape — `multiagent_20261001`, `advisor`,
+  `workflows`, `subagents`, `inline_agents` — is still refused with
+  `multiagent-roster`. The resolution lives in
+  `src/api/routes/agents.ts` (`normalizeMultiagentField`), which runs before
+  `validateAgentDefinition`/`validateAgentUpdateRequest`, because the
+  validators hold no store to resolve ids against; reaching a validator with
+  the raw block still answers a named refusal rather than a silent strip.
 - Local delegation is a separate extension, not the roster: `delegations` is a
   list of agent names, and the boolean `enable_general_subagent` exposes one
   extra tool that runs a temporary copy of the agent for a single level. Both
@@ -115,7 +125,7 @@ field the runtime cannot honour instead of dropping it.
 | `model.speed` | Executed on the Anthropic provider when the model supports it: `fast` is sent as `speed: "fast"` and the provider attaches the `fast-mode-2026-02-01` beta. The capability table (`src/model/anthropic-capabilities.ts`) holds the published fast-mode list — Opus 5.5, Opus 5, Opus 4.8 — and `fast` on a listed model that cannot take it is refused at create/update with `unsupported_model_speed` rather than stored and silently degraded. `standard` and the local `extended` produce no wire field. A model id the table does not know is accepted and sends nothing. |
 | `model.effort` | Parsed, validated, stored in the model profile, and returned by every read projection (agent, version, and session snapshot). On the Anthropic provider the level reaches the request as `output_config.effort` — capability-gated per level, because the published lists are not uniform (Opus 4.6 and Sonnet 4.6 take `max` but not `xhigh`; Opus 4.5 tops out at `high`; Haiku 4.5 takes no effort). A listed model refused its level fails create/update with `unsupported_model_effort` naming the allowed set; a level outside the published vocabulary is `invalid_model_effort`. Models outside the table, and every non-Anthropic provider, accept the field and send nothing. A deployment may also set `reasoning_effort` in its own model settings — operator-level, applying to the model rather than to an agent. |
 | `model.inference_geo` | Refused by name with `unsupported_model_field` when a well-formed pin is sent: this runtime has no inference-geography control, so accepting it would promise a pin it cannot hold. An unknown value is `invalid_inference_geo` first. |
-| `multiagent` block | Refused by name on create and update (capability `multiagent-roster`) because no thread, subagent, workflow, or advisor surface exists. The published `multiagent_20261001` shape is not implemented. See [`threads.md`](./threads.md). |
+| `multiagent` block | `{"type":"coordinator"}` is accepted and normalized to `delegations` (ids resolved to names at write, `version` resolved to latest, `{type:"self"}` → `enable_general_subagent`, `multiagent: null` clears a coordinator-produced roster). Every other `type` or member — `multiagent_20261001`, `advisor`, `workflows`, `subagents`, `inline_agents` — is refused by name with capability `multiagent-roster` on create and update, and a coordinator block that breaks a published bound (1–20 entries, a recognized entry form, no extra keys) is refused with the coordinator rule named. See [`threads.md`](./threads.md). |
 | `max_turns` | Local extension, not a published field: the published model counts turns client-side, so no server cap exists there. Here it is a positive-integer server-side turn limit validated on create and update, stored on the definition, executed by the builtin strategy (agent value, else the workspace `default_max_steps`), and echoed on every agent projection. It is absent — never `null` — on definitions that do not set it. |
 | Local delegation extension | `delegations` plus `enable_general_subagent` is a local one-level parent/child mechanism with its own tool names (`delegate_to_<name>`, `general_subagent`). The published contract defines neither field, and this is not presented as the canonical roster. |
 | Version retention | SandBase keeps prior agent versions readable in its own archive table. The published contract states versioning but not the retention mechanism. |
@@ -144,10 +154,16 @@ field the runtime cannot honour instead of dropping it.
   support it and nothing for the rest. `omitted` keeps thinking content out of
   the response, matching the policy of never persisting reasoning traces.
 - The `multiagent` block is a substantial protocol surface (threads, subagent
-  delegation, dynamic workflows, advisor consultations). Mapping a local
-  delegation helper onto it would overstate coverage, and accepting the field
-  would let a caller build on delegation or workflow runs that never happen.
-  Refusing it is the only answer that cannot be misread.
+  delegation, dynamic workflows, advisor consultations). The one member
+  upstream self-hosted itself accepts — the delegation-only `coordinator` —
+  maps honestly onto the local delegation mechanism: its `agents` list is a
+  predefined-agent roster, `delegations` is the runtime's roster field, and
+  the one-level rule is enforced through the coordinator provenance marker.
+  Refusing *that* shape would refuse the one multiagent form a self-hosted
+  SDK caller can actually send. Every other shape is still refused rather
+  than stored and ignored, because accepting `multiagent_20261001` or an
+  `advisor` would let a caller build on delegation, workflow runs, or
+  consultations that never happen.
 - The local delegation fields are documented in the contract rather than hidden,
   because a caller reading only the published contract would otherwise not know
   how to reach the one delegation mechanism this runtime has.
@@ -206,8 +222,12 @@ model object profile: `effort` and `speed` are executed on the Anthropic
 provider under the capability table — with admission refusing what a listed
 model cannot take — and stored-not-sent elsewhere, while `inference_geo` is
 refused rather than honoured. The canonical
-`multiagent` block is `unavailable` — in scope under
-[decision 0002](../../decisions/0002-cma-multiagent-parity.md), not implemented — and
-refused by name; the local delegation
+`multiagent` block is split: the delegation-only `{"type":"coordinator"}`
+subset is accepted and normalized to `delegations` under
+`threads-and-coordinator` (recorded `partial` in
+[`threads.md`](./threads.md)), while `multiagent-roster` stays `unavailable`
+for `multiagent_20261001`, `advisor`, `workflows`, `subagents`, and
+`inline_agents` — in scope under
+[decision 0002](../../decisions/0002-cma-multiagent-parity.md); the local delegation
 extension is `supported` and is recorded as an extension, never as the
 published multiagent surface.

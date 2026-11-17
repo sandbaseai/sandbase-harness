@@ -222,6 +222,13 @@ export const agentDefinitionSchema = z.object({
   max_turns: z.number().int().positive().max(1000).optional(),
   temperature: z.number().min(0).max(2).optional(),
   delegations: z.array(z.string()).optional(),
+  /**
+   * Internal provenance marker, written only by the coordinator normalizer on
+   * the API write path. Declared here so a stored definition keeps it through
+   * re-validation (the schema strips undeclared keys); callers writing it
+   * directly only narrow their own delegation depth.
+   */
+  delegations_source: z.literal('coordinator').optional(),
   enable_general_subagent: z.boolean().optional(),
   strategy: z.string().optional(),
   environment: z.string().optional(),
@@ -256,21 +263,36 @@ export interface ValidationResult {
 export const MULTIAGENT_ROSTER_CAPABILITY_ID = 'multiagent-roster';
 
 /**
+ * Capability id the coordinator acceptance points at.
+ *
+ * Coordinator is the delegation-only subset upstream self-hosted accepts; the
+ * roster admission lives under the threads capability because the delivery
+ * surface it belongs to is the thread family. Kept separate from
+ * `MULTIAGENT_ROSTER_CAPABILITY_ID` so a caller refused the full roster and a
+ * caller whose coordinator block almost parsed can be told which rule broke.
+ */
+export const THREADS_COORDINATOR_CAPABILITY_ID = 'threads-and-coordinator';
+
+/**
  * The refusal for a canonical `multiagent` roster.
  *
  * Returned rather than letting the schema strip the field. `agentDefinitionSchema`
  * drops what it does not declare, so without this check a create request carrying
  * a roster would answer 201 and behave as if the roster did not exist — the
  * caller would believe delegation by roster was in effect. The runtime implements
- * no thread, coordinator, or advisor surface, so the only honest answer is a named
+ * no thread, workflow, or advisor surface, so the only honest answer is a named
  * refusal that points at the capability and at the local delegation extension.
+ *
+ * Coordinator is the one block shape this does not cover: a `type:"coordinator"`
+ * block is the delegation-only subset upstream self-hosted accepts, and it is
+ * normalized to `delegations` before this refusal could see it.
  */
 export function multiagentRosterRefusal(): ValidationError {
   return {
     path: 'multiagent',
     message:
-      `The canonical multiagent roster is not implemented yet (capability "${MULTIAGENT_ROSTER_CAPABILITY_ID}", decision decisions/0002): no thread, coordinator, or advisor surface is implemented, so the roster is refused rather than accepted and ignored. `
-      + 'Use the local delegation extension instead — "delegations" names agents to call, and "enable_general_subagent" allows a one-level temporary sub-agent. '
+      `The canonical multiagent roster is not implemented yet (capability "${MULTIAGENT_ROSTER_CAPABILITY_ID}", decision decisions/0002): no thread, workflow, or advisor surface is implemented, so every \`type\` other than "coordinator" is refused rather than accepted and ignored. `
+      + 'The delegation-only coordinator subset is accepted and normalized to `delegations`; "enable_general_subagent" allows a one-level temporary sub-agent. '
       + 'GET /v1/x/capabilities records the gap.',
   };
 }
@@ -283,6 +305,106 @@ export function declaresMultiagentRoster(input: unknown): boolean {
     && !Array.isArray(input)
     && Object.prototype.hasOwnProperty.call(input, 'multiagent')
   );
+}
+
+// ============================================================
+// Coordinator multiagent block
+// ============================================================
+
+/**
+ * The `agents` entry forms upstream accepts inside a coordinator block: a bare
+ * `agent_…` id string, `{"type":"agent","id":"agent_…"}`, the same with a
+ * `version` pin, and `{"type":"self"}` for a copy of the agent itself. The
+ * published forms are verified against
+ * `official-docs/multiagent-orchestration.md` ("Predefined and inline
+ * agents"); anything else — an inline agent definition, a workflow block, an
+ * advisor — is refused by the coordinator rule, not the generic roster one,
+ * so the caller learns which bound they broke.
+ */
+const coordinatorAgentEntrySchema = z.union([
+  z.string().regex(/^agent_[A-Za-z0-9_-]+$/, 'agents[] entries must name an agent id (agent_…) or use {type:"agent",id}/{type:"self"}'),
+  z.object({
+    type: z.literal('agent'),
+    id: z.string().regex(/^agent_[A-Za-z0-9_-]+$/, 'agents[].id must be an agent id (agent_…)'),
+    // Accepted and documented as resolved-to-latest rather than pinned: the
+    // archived-version lookup is a separate feature, and storing the pin would
+    // promise a resolution the roster does not perform.
+    version: z.number().int().positive().optional(),
+  }).strict(),
+  z.object({ type: z.literal('self') }).strict(),
+]);
+
+/**
+ * The one `multiagent` block shape this runtime accepts: upstream self-hosted's
+ * delegation-only coordinator subset. `agents` is the top-level list of 1–20
+ * predefined-agent entries — upstream: "List 1 to 20 agents in `agents`"
+ * (`official-docs/self-hosted/differences.md`).
+ *
+ * Strict so a coordinator block carrying `advisor`, `workflows`, `subagents`,
+ * `inline_agents`, or any other key is a coordinator-rule refusal rather than
+ * an unknown-key strip: the caller sent the accepted type and broke a named
+ * bound, and the refusal must say so.
+ */
+export const coordinatorMultiagentSchema = z.object({
+  type: z.literal('coordinator'),
+  agents: z.array(coordinatorAgentEntrySchema)
+    .min(1, 'coordinator agents must list 1 to 20 entries')
+    .max(20, 'coordinator agents must list 1 to 20 entries'),
+}).strict();
+
+export interface ParsedCoordinatorAgentRef {
+  /** `agent_…` id, or `null` for a `{type:"self"}` entry. */
+  id: string | null;
+  /** Present when the caller pinned a version; resolved to latest, by decision. */
+  version?: number;
+}
+
+export type CoordinatorNormalization =
+  | { ok: true; refs: ParsedCoordinatorAgentRef[]; selfIncluded: boolean }
+  | { ok: false; errors: ValidationError[] };
+
+/**
+ * Parse a `multiagent` block the caller sent. Three outcomes:
+ *
+ * - not an object / not a `coordinator` block → the generic roster refusal
+ *   (every other `type` stays refused, `multiagent_20261001` included);
+ * - a `coordinator` block that breaks the published bounds → a refusal that
+ *   names the coordinator rule, so a caller who sent the accepted type learns
+ *   which bound they hit (advisor key, 21 entries, an inline form, a missing
+ *   `agents`, …);
+ * - a well-formed block → the parsed refs for id→name resolution. `agents`
+ *   entries are not resolved here because this layer does not hold the store.
+ */
+export function parseCoordinatorBlock(input: unknown): CoordinatorNormalization | 'not-coordinator' {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return 'not-coordinator';
+  const record = input as Record<string, unknown>;
+  if (record.type !== 'coordinator') return 'not-coordinator';
+
+  const result = coordinatorMultiagentSchema.safeParse(input);
+  if (!result.success) {
+    return {
+      ok: false,
+      errors: result.error.issues.map((issue) => ({
+        path: ['multiagent', ...issue.path].join('.'),
+        message: `coordinator multiagent: ${issue.message}`,
+      })),
+    };
+  }
+
+  const refs: ParsedCoordinatorAgentRef[] = [];
+  let selfIncluded = false;
+  for (const entry of result.data.agents) {
+    if (typeof entry === 'string') {
+      refs.push({ id: entry });
+      continue;
+    }
+    if (entry.type === 'self') {
+      selfIncluded = true;
+      continue;
+    }
+    refs.push({ id: entry.id, ...(entry.version !== undefined ? { version: entry.version } : {}) });
+  }
+  return { ok: true, refs, selfIncluded };
 }
 
 /**
@@ -304,6 +426,25 @@ export function validateAgentDefinition(input: unknown): ValidationResult {
   // Refused from the caller's own value, before the schema's stripped copy is
   // trusted, so the field cannot be dropped on the way to the store.
   if (declaresMultiagentRoster(input)) {
+    const block = (input as Record<string, unknown>).multiagent;
+    const parsed = parseCoordinatorBlock(block);
+    if (parsed !== 'not-coordinator') {
+      // A coordinator block is accepted on the /v1/agents write path, where it
+      // is normalized to `delegations` by resolving each id against the store.
+      // This layer holds no store, so a definition file or a merged update that
+      // still carries the raw block cannot be resolved here; the refusal names
+      // the path that can. A malformed block reports the coordinator rule first
+      // so the caller learns which bound they broke.
+      if (!parsed.ok) return { valid: false, errors: parsed.errors };
+      return {
+        valid: false,
+        errors: [{
+          path: 'multiagent',
+          message:
+            'A coordinator multiagent block is accepted on the /v1/agents write paths, where its agent ids resolve to names; this path cannot resolve ids, so write it through the API or use the local "delegations" name list.',
+        }],
+      };
+    }
     return { valid: false, errors: [multiagentRosterRefusal()] };
   }
 

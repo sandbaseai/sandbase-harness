@@ -207,18 +207,21 @@ describe('capability matrix', () => {
     // and publishes vault_credential.refresh_failed.
     expect(capabilityEntry('oauth-refresh').status).toBe('supported');
     expect(capabilityEntry('oauth-refresh').reason.toLowerCase()).toContain('refresh_failed');
-    // The scope reversal does not provide an executor: threads are an open
-    // implementation gap under decision 0002, separate from local delegation.
-    expect(capabilityEntry('threads-and-coordinator').status).toBe('unavailable');
+    // The scope reversal now has one honest implementable subset: the
+    // delegation-only coordinator roster, which upstream self-hosted itself
+    // accepts. Threads, workflows, and the advisor remain an open gap under
+    // decision 0002, separate from local delegation.
+    expect(capabilityEntry('threads-and-coordinator').status).toBe('partial');
     expect(capabilityEntry('threads-and-coordinator').contract).toBe('contracts/anthropic-cma/threads.md');
   });
 
   it('names the unimplemented surface and its current scope decision', () => {
-    // A return to the roadmap must not be read as executable support.
+    // The accepted coordinator subset must not read as thread support: the
+    // reason still names what does not exist and what the roster maps to.
     const reason = capabilityEntry('threads-and-coordinator').reason.toLowerCase();
-    expect(reason).toContain('in scope but not implemented');
-    expect(reason).toContain('decisions/0002');
-    expect(reason).toContain('no subagent, workflow-run, or advisor surface');
+    expect(reason).toContain('coordinator');
+    expect(reason).toContain('no thread resource');
+    expect(reason).toContain('workflow-run or advisor surface');
     expect(reason).toContain('enable_general_subagent');
   });
 
