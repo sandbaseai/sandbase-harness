@@ -92,6 +92,7 @@ implemented, but not part of the published definition.
 | Dream webhooks | No `dream.*` operation events are published; the lifecycle is observable through the resource itself and the session event stream. |
 | Console UI | None in this phase; dreams are reachable through the API and SDK only. |
 | Workspace scoping | Single-tenant runtime: the published "same workspace" checks are trivially satisfied — every store and session id resolves against the one local database. |
+| Self-hosted surface | Upstream self-hosted mounts no dream routes at all (`official-docs/self-hosted/differences.md`). SandBase keeps `/v1/dreams` as a superset: the session-backed consolidation pipeline runs locally, so a workload using dreams works here and has no upstream self-hosted equivalent. |
 
 ## 5. Reason for the difference
 
