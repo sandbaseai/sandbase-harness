@@ -18,6 +18,22 @@ Two contract layers, kept strictly separate:
 `/v1/x/*` is deliberately excluded from CMA request admission, so a local
 extension cannot be gated by a cloud beta header.
 
+### Upstream reference behaviours
+
+The target now has **two** published upstream behaviours, not one: the hosted
+service (the canonical contract every file in this directory describes) and
+self-hosted Claude Managed Agents, which shares the hosted API with documented
+differences. The `official-docs/self-hosted/` subtree is the pinned snapshot
+of the self-hosted documentation set, and
+[`official-docs/self-hosted/differences.md`](./official-docs/self-hosted/differences.md)
+is the canonical delta — the page where upstream records what self-hosted
+removes, refuses, or serves differently. Contract files cite it in §4 wherever
+the two targets disagree with this runtime (for example `rescheduling`,
+`url`-sourced content blocks, `cloud` environments, `mcp_oauth`, dreams,
+files, and webhooks), so a reader can tell which upstream behaviour a row is
+measured against. Where upstream self-hosted *removes* a surface SandBase
+keeps, the contract records it as a deliberate superset rather than a gap.
+
 ## File format
 
 Every contract file uses the same seven sections:

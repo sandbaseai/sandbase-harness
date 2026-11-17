@@ -22,6 +22,16 @@ entries include local extensions, and a supported operation can still have
 documented field or backend limitations. Hosted user-profile refusals are
 tracked in the route inventory and are not a separate matrix entry.
 
+The compatibility target now has two published upstream behaviours: the hosted
+service and self-hosted CMA. The `contracts/anthropic-cma/official-docs/self-hosted/`
+subtree is the pinned self-hosted documentation set, and
+[`self-hosted/differences.md`](contracts/anthropic-cma/official-docs/self-hosted/differences.md)
+is the canonical delta against the hosted contract. Where the two targets
+disagree with this runtime the contract files record both readings in §4; where
+upstream self-hosted *removes* a surface SandBase keeps (`/v1/files`,
+`mcp_oauth`, webhooks and scheduled deployments, `/v1/dreams`), it is recorded
+as a deliberate superset, not a gap to close.
+
 ### Protocol and execution gaps
 
 Each row is an implementation track, not one combined PR. Split the row into
