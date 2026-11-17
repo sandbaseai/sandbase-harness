@@ -15,7 +15,7 @@ system-message-events: supported
 
 ## 1. Official definition
 
-As of the 2026-10-31 documentation snapshot
+As of the 2026-11-17 documentation snapshot
 ([`official-docs/events-and-streaming.md`](./official-docs/events-and-streaming.md)
 "Send system messages"):
 

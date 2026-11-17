@@ -10,7 +10,7 @@ featureMetadata:
   betaHeader: managed-agents-2026-04-01
   zdr:
     eligibility: not-eligible
-    note: Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes.
+    note: Not eligible for ZDR, except for self-hosted Managed Agents. Sessions are stateful resources; transcripts persist until you delete them.
   supportedModels:
     - claude-fable-5-2
     - claude-mythos-5-2
@@ -41,7 +41,7 @@ Optionally review each session’s events with an offline job. Watch webhooks fo
 
 ## Optionally have an offline reviewer read every transcript
 
-An offline reviewer is a job you run, separate from the sessions it reviews, that reads each session’s events after they are written. Long sessions have too many events for a person to read, so the job has Claude read them. The review flags behavior beyond what the agent was granted. For a review prompt, setup steps, and working code, see the [security review recipe](https://platform.claude.com/cookbook/managed-agents-cma-agent-security-review) in the Claude Cookbook.
+An offline reviewer is a job you run, separate from the sessions it reviews, that reads each session’s events after they are written. Long sessions have too many events for a person to read, so the job has Claude read them. The review flags behavior beyond what you granted the agent. For a review prompt, setup steps, and working code, see the [security review recipe](https://platform.claude.com/cookbook/managed-agents-cma-agent-security-review) in the Claude Cookbook.
 
 ## Monitor sessions and review retention
 
@@ -53,13 +53,13 @@ Subscribe to the webhooks that tell you when a session needs attention, and dele
 | Sessions that reach a budget or terminate               | The `session.budget_reached` and `session.status_terminated` webhooks                                                                                                                                                                                                               |
 | Scheduled runs that fail to start a session             | The `deployment_run.failed` and `deployment.paused` webhooks                                                                                                                                                                                                                        |
 | MCP OAuth credentials that cannot refresh               | The `vault_credential.refresh_failed` webhook                                                                                                                                                                                                                                       |
-| Tool calls the server denied or paused                  | `evaluated_permission` on `agent.tool_use` and `agent.mcp_tool_use` events. In a multiagent session, also list each thread’s events                                                                                                                                                 |
+| Tool calls the server denied or paused                  | `evaluated_permission` (java, php: `evaluatedPermission`; csharp, go: `EvaluatedPermission`) on `agent.tool_use` and `agent.mcp_tool_use` events. In a multiagent session, also list each thread’s events                                                                           |
 | What an agent did in a session                          | The Claude Console session viewer                                                                                                                                                                                                                                                   |
-| Behavior beyond what the agent was granted              | An optional offline review job you run that reads each session’s events. See [Optionally have an offline reviewer read every transcript](https://platform.claude.com/docs/en/managed-agents/secure-deployment-monitoring#optionally-have-an-offline-reviewer-read-every-transcript) |
+| Behavior beyond what you granted the agent              | An optional offline review job you run that reads each session’s events. See [Optionally have an offline reviewer read every transcript](https://platform.claude.com/docs/en/managed-agents/secure-deployment-monitoring#optionally-have-an-offline-reviewer-read-every-transcript) |
 
-To see why a session went idle, list its events with `types` set to `session.status_idle`, `order` set to `desc`, and `limit` set to `1`. The event is named `session.status_idle`, and the webhook is named `session.status_idled`. If `stop_reason.type` is `requires_action`, the session is waiting on you, and `stop_reason.event_ids` lists the events it is waiting on. To answer them, see [Answer tool calls that pause the session](https://platform.claude.com/docs/en/managed-agents/events-and-streaming#answer-tool-calls-that-pause-the-session). In a self-hosted sandbox, an `agent.tool_use` event can be waiting for your sandbox to return the tool’s result. With workflow runs open, a tool call can wait for your answer while the session stays `running`. Answer each call when its event arrives. See [While a run is open](https://platform.claude.com/docs/en/managed-agents/workflow-runs#while-a-run-is-open).
+To see why a session went idle, list its events with `types` (curl: `types[]`; cli: `--type`; csharp, go: `Types`) set to `session.status_idle`, `order` (csharp, go: `Order`) set to `desc`, and `limit` (csharp, go: `Limit`) set to `1`. The event is named `session.status_idle`, and the webhook is named `session.status_idled`. If `stop_reason.type` is `requires_action`, the session is waiting on you, and `stop_reason.event_ids` lists the events it is waiting on. To answer them, see [Answer tool calls that pause the session](https://platform.claude.com/docs/en/managed-agents/events-and-streaming#answer-tool-calls-that-pause-the-session). In a self-hosted sandbox, an `agent.tool_use` event can be waiting for your sandbox to return the tool’s result. With workflow runs open, a tool call can wait for your answer while the session stays `running`. Answer each call when its event arrives. See [While a run is open](https://platform.claude.com/docs/en/managed-agents/workflow-runs#while-a-run-is-open).
 
-A webhook delivery can be missed, so also list your sessions on a schedule and check the idle ones.
+You can miss a webhook delivery, so also list your sessions on a schedule and check the idle ones.
 
 See [Subscribe to webhooks](https://platform.claude.com/docs/en/managed-agents/webhooks) and [Inspect sessions and track usage](https://platform.claude.com/docs/en/managed-agents/session-observability#inspect-a-session-in-the-console).
 

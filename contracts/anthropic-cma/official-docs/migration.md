@@ -10,7 +10,7 @@ featureMetadata:
   betaHeader: managed-agents-2026-04-01
   zdr:
     eligibility: not-eligible
-    note: Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes.
+    note: Not eligible for ZDR, except for self-hosted Managed Agents. Sessions are stateful resources; transcripts persist until you delete them.
   supportedModels:
     - claude-fable-5-2
     - claude-mythos-5-2
@@ -41,22 +41,30 @@ Claude Managed Agents replaces your hand-written agent loop with managed infrast
 
 ## From a Messages API agent loop
 
-If you built an agent by calling `client.messages.create()` (csharp: `client.Messages.Create()`; go: `client.Messages.New()`; java: `client.messages().create()`; php: `$client->messages->create()`; cli: `ant messages create`; curl: `POST /v1/messages`) in a loop, running tool calls yourself, and appending results to the conversation history, most of that code goes away.
+If you built an agent by calling `client.messages.create()` (csharp: `client.Messages.Create()`; go: `client.Messages.New()`; java: `client.messages().create()`; php: `$client->messages->create()`; cli: `ant messages create`; curl: `POST /v1/messages`) in a loop, running tool calls yourself, and appending results to the conversation history, Claude Managed Agents replaces most of that loop code.
 
 ### What you stop managing
 
-| Before                                                                                           | After                                                                                                                      |
-| ------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
-| You maintain the conversation history array and pass it back on every turn.                      | The session stores history server-side. You send events and receive events.                                                |
-| You iterate `tool_use` content blocks, run each tool, and loop back with `tool_result` messages. | Pre-built tools run inside the sandbox automatically. You only handle custom tools through `agent.custom_tool_use` events. |
-| You provision your own sandbox for running agent-generated code.                                 | The session sandbox handles code execution, file operations, and bash.                                                     |
-| You decide when the loop is done.                                                                | The session emits `session.status_idle` when the agent has nothing more to do.                                             |
+| Before                                                                                           | After                                                                                                                     |
+| ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
+| You maintain the conversation history array and pass it back on every turn.                      | The session stores history server-side. You send events and receive events.                                               |
+| You iterate `tool_use` content blocks, run each tool, and loop back with `tool_result` messages. | Built-in tools run inside the sandbox automatically. You only handle custom tools through `agent.custom_tool_use` events. |
+| You provision your own sandbox for running agent-generated code.                                 | The session sandbox handles code execution, file operations, and bash.                                                    |
+| You decide when the loop is done.                                                                | The session emits `session.status_idle` when the agent has nothing more to do.                                            |
 
 ### Code comparison
 
 **Before** (Messages API loop, simplified):
 
 <CodeGroup exclude="shell:cURL, shell:CLI">
+  <CodeGroupItem language="cURL">
+    This loop needs more logic than a single shell command. Use the [Anthropic SDK](https://platform.claude.com/docs/en/cli-sdks-libraries/overview) to run it.
+  </CodeGroupItem>
+
+  <CodeGroupItem language="CLI">
+    This loop needs more logic than a single shell command. Use the [Anthropic SDK](https://platform.claude.com/docs/en/cli-sdks-libraries/overview) to run it.
+  </CodeGroupItem>
+
   ```python Python
   messages = [{"role": "user", "content": task}]
   while True:
@@ -270,11 +278,11 @@ If you built an agent by calling `client.messages.create()` (csharp: `client.Mes
 
 <CodeGroup exclude="shell:cURL, shell:CLI">
   <CodeGroupItem language="cURL">
-    This workflow needs more logic than a single shell command. Use the [Claude SDK](https://platform.claude.com/docs/en/cli-sdks-libraries/overview) to run it.
+    This workflow needs more logic than a single shell command. Use the [Anthropic SDK](https://platform.claude.com/docs/en/cli-sdks-libraries/overview) to run it.
   </CodeGroupItem>
 
   <CodeGroupItem language="CLI">
-    This workflow needs more logic than a single shell command. Use the [Claude SDK](https://platform.claude.com/docs/en/cli-sdks-libraries/overview) to run it.
+    This workflow needs more logic than a single shell command. Use the [Anthropic SDK](https://platform.claude.com/docs/en/cli-sdks-libraries/overview) to run it.
   </CodeGroupItem>
 
   ```python Python
@@ -522,12 +530,12 @@ If you built an agent by calling `client.messages.create()` (csharp: `client.Mes
   ```
 </CodeGroup>
 
-### What you still control
+### What you control
 
-* **System prompt and model:** Same fields, now on the agent definition.
-* **Custom tools:** Still declared with JSON Schema. Execution moves from inline handling to responding to `agent.custom_tool_use` events. See [Session event stream](https://platform.claude.com/docs/en/managed-agents/events-and-streaming).
-* **Web search and web fetch settings:** Same `allowed_domains` (java, php: `allowedDomains`; csharp, go: `AllowedDomains`), `blocked_domains` (java, php: `blockedDomains`; csharp, go: `BlockedDomains`), `max_content_tokens` (java, php: `maxContentTokens`; csharp, go: `MaxContentTokens`), and `user_location` (java, php: `userLocation`; csharp, go: `UserLocation`) fields, now set once on the `web_search` and `web_fetch` entries of the agent toolset’s `configs` (csharp, go: `Configs`) array instead of on every request. The `max_uses` (java, php: `maxUses`; csharp, go: `MaxUses`), `citations` (csharp, go: `Citations`), and `cache_control` (java, php: `cacheControl`; csharp, go: `CacheControl`) fields are not available. See [Differences from the Messages API tools](https://platform.claude.com/docs/en/managed-agents/tools-web-restrictions#differences-from-the-messages-api-tools).
-* **Context:** You can still inject context through the system prompt, [file resources](https://platform.claude.com/docs/en/managed-agents/files), or [skills](https://platform.claude.com/docs/en/managed-agents/skills).
+* **System prompt and model:** Same fields, on the agent definition.
+* **Custom tools:** Declared with JSON Schema. Your client runs them when `agent.custom_tool_use` events arrive, not inside a request loop. See [Session event stream](https://platform.claude.com/docs/en/managed-agents/events-and-streaming).
+* **Web search and web fetch settings:** Same `allowed_domains` (java, php: `allowedDomains`; csharp, go: `AllowedDomains`), `blocked_domains` (java, php: `blockedDomains`; csharp, go: `BlockedDomains`), `max_content_tokens` (java, php: `maxContentTokens`; csharp, go: `MaxContentTokens`), and `user_location` (java, php: `userLocation`; csharp, go: `UserLocation`) fields, set once on the `web_search` and `web_fetch` entries of the agent toolset’s `configs` (csharp, go: `Configs`) array instead of on every request. The `max_uses` (java, php: `maxUses`; csharp, go: `MaxUses`), `citations` (csharp, go: `Citations`), and `cache_control` (java, php: `cacheControl`; csharp, go: `CacheControl`) fields are not available. See [Differences from the Messages API tools](https://platform.claude.com/docs/en/managed-agents/tools-web-restrictions#differences-from-the-messages-api-tools).
+* **Context:** You can inject context through the system prompt, [file resources](https://platform.claude.com/docs/en/managed-agents/files), or [skills](https://platform.claude.com/docs/en/managed-agents/skills).
 
 ## From the Claude Agent SDK
 
@@ -535,16 +543,16 @@ If you built with the [Claude Agent SDK](https://code.claude.com/docs/en/agent-s
 
 ### What changes
 
-| Agent SDK                                                                                   | Managed Agents                                                                                                                                                                                                                                                                                                                                   |
-| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ClaudeAgentOptions(...)` (typescript: `options`) constructed per run                       | `client.beta.agents.create(...)` (csharp: `client.Beta.Agents.Create(...)`; go: `client.Beta.Agents.New(...)`; java: `client.beta().agents().create(...)`; php: `$client->beta->agents->create(...)`) once; the Agent is persisted and versioned server-side. See [Agent setup](https://platform.claude.com/docs/en/managed-agents/agent-setup). |
-| `async with ClaudeSDKClient(...)` or `query(...)`                                           | `client.beta.sessions.create(...)` (csharp: `client.Beta.Sessions.Create(...)`; go: `client.Beta.Sessions.New(...)`; java: `client.beta().sessions().create(...)`; php: `$client->beta->sessions->create(...)`) then send and receive [events](https://platform.claude.com/docs/en/managed-agents/events-and-streaming).                         |
-| Functions defined with `@tool` (typescript: `tool()`), dispatched automatically by the SDK  | Declare as `{"type": "custom", ...}` on the Agent; your client handles `agent.custom_tool_use` events and replies with `user.custom_tool_result`. See [Tools](https://platform.claude.com/docs/en/managed-agents/tools).                                                                                                                         |
-| Built-in tools run in your process against your filesystem                                  | `{"type": "agent_toolset_20260401"}` runs the same tools inside the session sandbox against `/workspace`.                                                                                                                                                                                                                                        |
-| `cwd`, `add_dirs` (typescript: `additionalDirectories`) point at local paths                | Upload or mount [files](https://platform.claude.com/docs/en/managed-agents/files) as session resources.                                                                                                                                                                                                                                          |
-| `system_prompt` (typescript: `systemPrompt`) and the `CLAUDE.md` hierarchy                  | A single `system` (csharp, go: `System`; ruby: `system_`) string on the Agent. Each update that changes the agent produces a new server-side version; pin sessions to a specific version to promote or roll back without a deploy. See [Agent setup](https://platform.claude.com/docs/en/managed-agents/agent-setup).                            |
-| `mcp_servers` (typescript: `mcpServers`) configured and authenticated in one place          | Declare servers on the Agent; provide credentials through a [Vault](https://platform.claude.com/docs/en/managed-agents/vaults) on the Session.                                                                                                                                                                                                   |
-| `permission_mode` (typescript: `permissionMode`), `can_use_tool` (typescript: `canUseTool`) | Per-tool [`permission_policy` (java, php: `permissionPolicy`; csharp, go: `PermissionPolicy`)](https://platform.claude.com/docs/en/managed-agents/permission-policies) (`always_allow`, `always_ask`, or `auto`); send `user.tool_confirmation` events for calls that pause for your approval.                                                   |
+| Agent SDK                                                                                   | Managed Agents                                                                                                                                                                                                                                                                                                                                                                                           |
+| ------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ClaudeAgentOptions(...)` (typescript: `options`) constructed for each run                  | `client.beta.agents.create(...)` (csharp: `client.Beta.Agents.Create(...)`; go: `client.Beta.Agents.New(...)`; java: `client.beta().agents().create(...)`; php: `$client->beta->agents->create(...)`; cli: `ant beta:agents create`; curl: `POST /v1/agents`) once. The server persists and versions the agent. See [Define your agent](https://platform.claude.com/docs/en/managed-agents/agent-setup). |
+| `async with ClaudeSDKClient(...)` or `query(...)`                                           | `client.beta.sessions.create(...)` (csharp: `client.Beta.Sessions.Create(...)`; go: `client.Beta.Sessions.New(...)`; java: `client.beta().sessions().create(...)`; php: `$client->beta->sessions->create(...)`; cli: `ant beta:sessions create`; curl: `POST /v1/sessions`) then send and receive [events](https://platform.claude.com/docs/en/managed-agents/events-and-streaming).                     |
+| Functions defined with `@tool` (typescript: `tool()`), dispatched automatically by the SDK  | Declare as `{"type": "custom", ...}` on the agent; your client handles `agent.custom_tool_use` events and replies with `user.custom_tool_result`. See [Tools](https://platform.claude.com/docs/en/managed-agents/tools).                                                                                                                                                                                 |
+| Built-in tools run in your process against your filesystem                                  | `{"type": "agent_toolset_20260401"}` runs the same tools inside the session sandbox against `/workspace`.                                                                                                                                                                                                                                                                                                |
+| `cwd`, `add_dirs` (typescript: `additionalDirectories`) point at local paths                | Upload or mount [files](https://platform.claude.com/docs/en/managed-agents/files) as session resources.                                                                                                                                                                                                                                                                                                  |
+| `system_prompt` (typescript: `systemPrompt`) and the `CLAUDE.md` hierarchy                  | A single `system` (csharp, go: `System`; ruby: `system_`) string on the agent. Each update that changes the agent produces a new server-side version; pin sessions to a specific version to promote or roll back without a deploy. See [Define your agent](https://platform.claude.com/docs/en/managed-agents/agent-setup).                                                                              |
+| `mcp_servers` (typescript: `mcpServers`) configured and authenticated in one place          | Declare servers on the agent; provide credentials through a [vault](https://platform.claude.com/docs/en/managed-agents/vaults) on the session.                                                                                                                                                                                                                                                           |
+| `permission_mode` (typescript: `permissionMode`), `can_use_tool` (typescript: `canUseTool`) | Per-tool [`permission_policy` (java, php: `permissionPolicy`; csharp, go: `PermissionPolicy`)](https://platform.claude.com/docs/en/managed-agents/permission-policies) (`always_allow`, `always_ask`, or `auto`). Send `user.tool_confirmation` events for calls that pause for your approval.                                                                                                           |
 
 ### Code comparison
 
@@ -609,7 +617,15 @@ If you built with the [Claude Agent SDK](https://code.claude.com/docs/en/agent-s
 
 **After** (Managed Agents):
 
-<CodeGroup exclude="shell">
+<CodeGroup exclude="shell:cURL, shell:CLI">
+  <CodeGroupItem language="cURL">
+    This loop needs more logic than a single shell command. Use the [Anthropic SDK](https://platform.claude.com/docs/en/cli-sdks-libraries/overview) to run it.
+  </CodeGroupItem>
+
+  <CodeGroupItem language="CLI">
+    This loop needs more logic than a single shell command. Use the [Anthropic SDK](https://platform.claude.com/docs/en/cli-sdks-libraries/overview) to run it.
+  </CodeGroupItem>
+
   ```python Python
   from anthropic import Anthropic
 
@@ -1157,7 +1173,7 @@ If you built with the [Claude Agent SDK](https://code.claude.com/docs/en/agent-s
               break;
           case $event instanceof ManagedAgentsSessionStatusIdleEvent:
               if ($event->stopReason instanceof ManagedAgentsSessionEndTurn) {
-                  break 2;
+                  break 2; // Leave the foreach loop
               }
               break;
       }
@@ -1232,7 +1248,7 @@ If you built with the [Claude Agent SDK](https://code.claude.com/docs/en/agent-s
   ```
 </CodeGroup>
 
-The Agent and Environment are created once and reused across sessions. The tool function still runs in your process; the difference is that you read the `agent.custom_tool_use` event and send the result explicitly instead of the SDK dispatching it for you.
+You create the agent and environment once and reuse them across sessions. The tool function still runs in your process. The difference is that you read the `agent.custom_tool_use` event and send the result explicitly instead of the Agent SDK dispatching it for you.
 
 ### Features that move to your client
 
@@ -1251,8 +1267,8 @@ The tradeoff for Anthropic running the agent loop is that a few things the SDK h
 2. Port your system prompt and tool selection to an [agent definition](https://platform.claude.com/docs/en/managed-agents/agent-setup).
 3. Replace your loop: [create a session](https://platform.claude.com/docs/en/managed-agents/sessions) with `client.beta.sessions.create()` (go: `client.Beta.Sessions.New()`; csharp: `client.Beta.Sessions.Create()`; java: `client.beta().sessions().create()`; php: `$client->beta->sessions->create()`; cli: `ant beta:sessions create`; curl: `POST /v1/sessions`) and [stream its events](https://platform.claude.com/docs/en/managed-agents/events-and-streaming) with `client.beta.sessions.events.stream()` (ruby: `client.beta.sessions.events.stream_events()`; go: `client.Beta.Sessions.Events.StreamEvents()`; csharp: `client.Beta.Sessions.Events.StreamStreaming()`; java: `client.beta().sessions().events().streamStreaming()`; php: `$client->beta->sessions->events->streamStream()`; cli: `ant beta:sessions:events stream`; curl: `GET /v1/sessions/{session_id}/events/stream`).
 4. For any local files the agent reads, upload them through the [Files API](https://platform.claude.com/docs/en/managed-agents/files) and mount them as `resources` (csharp, go: `Resources`).
-5. For any custom tool handlers, move execution into your event loop as responses to `agent.custom_tool_use` events.
-6. Verify with a test session before pointing production traffic at the new flow.
+5. For any custom tool handlers, run them in your event loop as responses to `agent.custom_tool_use` events.
+6. Run a test session before you point production traffic at the migrated flow.
 
 ## Migrating between model versions
 
@@ -1352,10 +1368,10 @@ When a new Claude model is released, migrating a Claude Managed Agents integrati
   ```
 </CodeGroup>
 
-Most model-level behavior changes documented in the [Messages API migration guide](https://platform.claude.com/docs/en/about-claude/models/migration-guide) do not require action on your side:
+Most model-level behavior changes documented in the [Migration guides](https://platform.claude.com/docs/en/about-claude/models/migration-guide) do not require action on your side:
 
-* **Request parameter changes** (`max_tokens` (java, php: `maxTokens`; csharp, go: `MaxTokens`) defaults, `thinking` (csharp, go: `Thinking`) configuration) are handled by the Claude Managed Agents runtime. These fields are not exposed on the agent definition.
-* **Assistant message prefilling** does not exist in the event-based session model, so its removal on newer models is a no-op.
-* **Tool argument JSON escaping** is parsed by the runtime before you receive `agent.custom_tool_use` events. You see structured data, not raw strings.
+* **Request parameter changes** (`max_tokens` (java, php: `maxTokens`; csharp, go: `MaxTokens`) defaults, `thinking` (csharp, go: `Thinking`) configuration) need no action: the Claude Managed Agents runtime handles them. The agent definition does not expose these fields.
+* **Assistant message prefilling** does not exist in the event-based session model, so moving to a model that rejects prefill needs no change from you.
+* **Tool argument JSON escaping** needs no action: the runtime parses the arguments before you receive `agent.custom_tool_use` events. You see structured data, not raw strings.
 
-The behavior descriptions in the Messages API guide (what the model does differently) still apply. The migration steps (how to change your request code) do not.
+The behavior descriptions in those guides (what the model does differently) still apply. The migration steps (how to change your request code) do not.

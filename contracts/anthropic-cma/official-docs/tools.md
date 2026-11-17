@@ -10,7 +10,7 @@ featureMetadata:
   betaHeader: managed-agents-2026-04-01
   zdr:
     eligibility: not-eligible
-    note: Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes.
+    note: Not eligible for ZDR, except for self-hosted Managed Agents. Sessions are stateful resources; transcripts persist until you delete them.
   supportedModels:
     - claude-fable-5-2
     - claude-mythos-5-2
@@ -61,7 +61,7 @@ When a tool output exceeds 100,000 characters (about 25,000 tokens), it is autom
 
 Enable the full toolset with `agent_toolset_20260401` when creating an agent. Use the `configs` (csharp, go: `Configs`) array to disable specific tools or override their settings. Each entry is identified by its `name` (csharp, go: `Name`), which takes a value from the Name column in [Available tools](https://platform.claude.com/docs/en/managed-agents/tools#available-tools). An entry also accepts an optional `type` (csharp, go: `Type`) field with the same value.
 
-Each config entry can also set a `permission_policy` (java, php: `permissionPolicy`; csharp, go: `PermissionPolicy`). The policy controls whether the tool’s calls run without confirmation, require confirmation, or are evaluated individually by the server. See [Permission policies](https://platform.claude.com/docs/en/managed-agents/permission-policies) for the available policy types.
+Each config entry can also set a `permission_policy` (java, php: `permissionPolicy`; csharp, go: `PermissionPolicy`). The policy controls whether the tool’s calls run without confirmation, require confirmation, or go to the server, which evaluates each call. See [Permission policies](https://platform.claude.com/docs/en/managed-agents/permission-policies) for the available policy types.
 
 The following example enables the toolset and disables `web_fetch`:
 
@@ -424,6 +424,7 @@ The following example creates an agent with one custom tool, `get_weather`, and 
   ```
 
   ```java Java
+  import com.anthropic.core.JsonValue;
   import com.anthropic.models.beta.agents.*;
   import java.util.Map;
 
@@ -486,7 +487,7 @@ The following example creates an agent with one custom tool, `get_weather`, and 
   ```
 </CodeGroup>
 
-A custom tool’s name can’t start with `mcp__` or `ant__`, or match the name of a built-in agent tool. A request that breaks this rule returns a 400 error. An agent that already has a custom tool whose name starts with `ant__` accepts an update only if the update sends `tools` (csharp, go: `Tools`) without that name, so rename or remove the tool in your next update. A new session is refused with a 400 error if such a tool is on its agent (after any [overrides](https://platform.claude.com/docs/en/managed-agents/sessions#override-agent-configuration-for-a-session)), on an agent in the `predefined_agents` (java, php: `predefinedAgents`; csharp, go: `PredefinedAgents`) list of `subagents` (csharp, go: `Subagents`), or on an agent in the `predefined_agents` (java, php: `predefinedAgents`; csharp, go: `PredefinedAgents`) list of `workflows` (csharp, go: `Workflows`). Sessions that already exist aren’t affected.
+New custom tool names can’t start with `mcp__` or `ant__`, or match the name of a built-in agent tool. A request that breaks this rule returns a 400 error. However, an existing custom tool might start with `ant__`. An agent with such a tool accepts an update only if the update sends `tools` (csharp, go: `Tools`) without that name, so rename or remove the tool in your next update. A new session is refused with a 400 error if such a tool is on its agent (after any [overrides](https://platform.claude.com/docs/en/managed-agents/sessions#override-agent-configuration-for-a-session)), on an agent in the `predefined_agents` (java, php: `predefinedAgents`; csharp, go: `PredefinedAgents`) list of `subagents` (csharp, go: `Subagents`), or on an agent in the `predefined_agents` (java, php: `predefinedAgents`; csharp, go: `PredefinedAgents`) list of `workflows` (csharp, go: `Workflows`). Sessions that already exist aren’t affected.
 
 The agent calls its custom tools during a session. To receive the calls and return results, see [Answer tool calls that pause the session](https://platform.claude.com/docs/en/managed-agents/events-and-streaming#handling-custom-tool-calls).
 
@@ -553,10 +554,10 @@ Beta headers allow you to access experimental features and new model capabilitie
 
 [Data handling overview](https://platform.claude.com/docs/en/manage-claude/api-and-data-retention#feature-eligibility)
 
-| Item    | Zero data retention                                                                                                                                      | HIPAA                                                                        |
-| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Status  | Not eligible                                                                                                                                             | Not eligible                                                                 |
-| Details | Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes. | Applies to all Managed Agents sub-features, including Self-hosted sandboxes. |
+| Item    | Zero data retention                                                                                                                                                                                                                                         | HIPAA                                                               |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Status  | Not eligible                                                                                                                                                                                                                                                | Not eligible                                                        |
+| Details | Not eligible for ZDR, except for self-hosted Managed Agents. Sessions are stateful resources; transcripts persist until you delete them. [Learn more](https://platform.claude.com/docs/en/managed-agents/self-hosted-data-and-access#how-long-data-is-kept) | Not eligible for HIPAA. Applies to all Managed Agents sub-features. |
 
 Applicable endpoints:
 

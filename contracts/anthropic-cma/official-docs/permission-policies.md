@@ -10,7 +10,7 @@ featureMetadata:
   betaHeader: managed-agents-2026-04-01
   zdr:
     eligibility: not-eligible
-    note: Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes.
+    note: Not eligible for ZDR, except for self-hosted Managed Agents. Sessions are stateful resources; transcripts persist until you delete them.
   supportedModels:
     - claude-fable-5-2
     - claude-mythos-5-2
@@ -37,7 +37,7 @@ featureMetadata:
     Claude Models on Google Cloud (Anthropic managed): beta
 ---
 
-Permission policies control whether server-executed tools (the pre-built agent toolset and MCP toolset) run automatically, wait for your approval, or have each call evaluated by the server. Custom tools are run by your application and controlled by you, so they are not governed by permission policies.
+Permission policies apply to server-executed tools: the prebuilt agent toolset and MCP toolsets. A policy determines whether a tool’s calls run automatically, wait for your approval, or go to the server, which evaluates each call. Custom tools run in your application, under your control, so permission policies don’t apply to custom tools.
 
 ## Permission policy types
 
@@ -655,17 +655,17 @@ Use the `configs` (csharp, go: `Configs`) array to override the default for indi
   ```
 </CodeGroup>
 
-Pass this `tools` (csharp, go: `Tools`) configuration in the agent create request (the CLI tab shows the complete command). MCP toolsets support the same per-tool overrides, with `name` (csharp, go: `Name`) set to the tool name reported by the MCP server. See [Configure which MCP tools are available](https://platform.claude.com/docs/en/managed-agents/mcp-connector#configure-which-mcp-tools-are-available).
+Pass this `tools` (csharp, go: `Tools`) configuration when you create the agent. MCP toolsets support the same per-tool overrides, with `name` (csharp, go: `Name`) set to the tool name reported by the MCP server. See [Configure which MCP tools are available](https://platform.claude.com/docs/en/managed-agents/mcp-connector#configure-which-mcp-tools-are-available).
 
 ## Let the server evaluate each call with `auto`
 
-With the `auto` permission policy, the server evaluates each call before it runs. Because the evaluation considers the tool, the call’s input, and the session’s content up to that point, the server can treat two calls to the same tool differently. Each call has one of three outcomes:
+With the `auto` permission policy, the server evaluates each call before it runs. The evaluation considers context such as the tool, the call’s input, the agent’s earlier calls, and your intent, meaning what you have asked for. As a result, the server can treat two calls to the same tool differently. Each call has one of three outcomes:
 
 * **The call runs.** When the server determines that the call is safe, the tool runs as it would under `always_allow`.
 * **The call is denied.** When the server evaluates the call as high-risk, the tool does not run. The agent receives an error tool result with the content `Permission to use {tool_name} has been denied.` and `is_error: true`. The session keeps running, and your client cannot override the denial.
 * **The call pauses for your approval.** When the server reaches no determination, the session pauses as it does under `always_ask`. See [Respond to confirmation requests](https://platform.claude.com/docs/en/managed-agents/permission-policies#respond-to-confirmation-requests).
 
-To turn on `auto`, set `permission_policy` to `{"type": "auto"}`. It goes in the same two places as the other policies: a toolset’s [`default_config` (java, php: `defaultConfig`; csharp, go: `DefaultConfig`)](https://platform.claude.com/docs/en/managed-agents/permission-policies#set-a-policy-for-a-toolset) for the whole toolset, or a [`configs` (csharp, go: `Configs`) entry](https://platform.claude.com/docs/en/managed-agents/permission-policies#override-an-individual-tool-policy) for one tool. The agent toolset and MCP toolsets both accept it. No toolset uses `auto` by default.
+To turn on `auto`, set `permission_policy` (java, php: `permissionPolicy`; csharp, go: `PermissionPolicy`) to `{"type": "auto"}`. It goes in the same two places as the other policies: a toolset’s [`default_config` (java, php: `defaultConfig`; csharp, go: `DefaultConfig`)](https://platform.claude.com/docs/en/managed-agents/permission-policies#set-a-policy-for-a-toolset) for the whole toolset, or a [`configs` (csharp, go: `Configs`) entry](https://platform.claude.com/docs/en/managed-agents/permission-policies#override-an-individual-tool-policy) for one tool. The agent toolset and MCP toolsets both accept it. No toolset uses `auto` by default.
 
 The following example sets `auto` as the default for the agent toolset and for the `github` MCP toolset, and overrides `bash` to `always_ask`:
 
@@ -985,7 +985,7 @@ The following example sets `auto` as the default for the agent toolset and for t
   ```
 </CodeGroup>
 
-What you post in `user.message` events counts as your intent, and it can lead the server to allow a call it would otherwise deny. The server does not read intent from a tool result, a fetched webpage, an MCP server’s response, or a message between [session threads](https://platform.claude.com/docs/en/managed-agents/session-threads#tool-permissions-and-custom-tools). It assesses that content but does not take instructions from it. The server evaluates some calls as high-risk no matter who asks. If you relay untrusted end-user input in `user.message` events, the server reads that input as your intent too, and it can get a call allowed. Configure `always_ask` on the tools you would not let that end user run without review.
+What you post in `user.message` events counts as your intent, and it can lead the server to allow a call it would otherwise deny. The server does not read intent from a tool result, a fetched webpage, an MCP server’s response, or a message between [session threads](https://platform.claude.com/docs/en/managed-agents/session-threads#tool-permissions-and-custom-tools). The server evaluates some calls as high-risk no matter who asks. If you relay untrusted end-user input in `user.message` events, the server reads that input as your intent too, and it can get a call allowed. Configure `always_ask` on the tools you would not let that end user run without review.
 
 <Warning>
   `auto` is not a human checkpoint. If the server determines that a call is safe, the call runs before anyone sees it, and its effects might not be reversible. If a person must review a tool’s calls before they run, configure `always_ask` on that tool.
@@ -1069,7 +1069,7 @@ In the following examples, the tool-use event IDs come from the `stop_reason.eve
 <CodeGroup>
   ```bash cURL
   # Allow the tool to run
-  curl -fsSL "https://api.anthropic.com/v1/sessions/$SESSION_ID/events" \
+  curl -fsSL https://api.anthropic.com/v1/sessions/sesn_011CZkZAtmR3yMPDzynEDxu7/events \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
     -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
@@ -1078,14 +1078,14 @@ In the following examples, the tool-use event IDs come from the `stop_reason.eve
       "events": [
         {
           "type": "user.tool_confirmation",
-          "tool_use_id": "'$AGENT_TOOL_USE_EVENT_ID'",
+          "tool_use_id": "sevt_011CZkZbMpR8aS3Wtv5Yq2Ln",
           "result": "allow"
         }
       ]
     }'
 
-  # Or deny it with an explanation
-  curl -fsSL "https://api.anthropic.com/v1/sessions/$SESSION_ID/events" \
+  # Deny another call with an explanation
+  curl -fsSL https://api.anthropic.com/v1/sessions/sesn_011CZkZAtmR3yMPDzynEDxu7/events \
     -H "x-api-key: $ANTHROPIC_API_KEY" \
     -H "anthropic-version: 2026-10-21" \
     -H "anthropic-beta: managed-agents-2026-04-01" \
@@ -1094,9 +1094,9 @@ In the following examples, the tool-use event IDs come from the `stop_reason.eve
       "events": [
         {
           "type": "user.tool_confirmation",
-          "tool_use_id": "'$MCP_TOOL_USE_EVENT_ID'",
+          "tool_use_id": "sevt_011CZkZcNqT9bT4Xuw6Zr3Mo",
           "result": "deny",
-          "deny_message": "Don'\''t create issues in the production project. Use the staging project."
+          "deny_message": "Do not create issues in the production project. Use the staging project."
         }
       ]
     }'
@@ -1105,38 +1105,37 @@ In the following examples, the tool-use event IDs come from the `stop_reason.eve
   ```bash CLI
   # Allow the tool to run
   ant beta:sessions:events send \
-    --session-id "$SESSION_ID" \
-    --event "{type: user.tool_confirmation, tool_use_id: $AGENT_TOOL_USE_EVENT_ID, result: allow}"
+    --session-id sesn_011CZkZAtmR3yMPDzynEDxu7 \
+    --event '{type: user.tool_confirmation, tool_use_id: sevt_011CZkZbMpR8aS3Wtv5Yq2Ln, result: allow}'
 
-  # Or deny it with an explanation
+  # Deny another call with an explanation
   ant beta:sessions:events send \
-    --session-id "$SESSION_ID" \
-    --event "{type: user.tool_confirmation, tool_use_id: $MCP_TOOL_USE_EVENT_ID, result: deny,
-      deny_message: Don't create issues in the production project. Use the staging project.}"
+    --session-id sesn_011CZkZAtmR3yMPDzynEDxu7 \
+    --event '{type: user.tool_confirmation, tool_use_id: sevt_011CZkZcNqT9bT4Xuw6Zr3Mo, result: deny, deny_message: "Do not create issues in the production project. Use the staging project."}'
   ```
 
   ```python Python
   # Allow the tool to run
   client.beta.sessions.events.send(
-      session.id,
+      "sesn_011CZkZAtmR3yMPDzynEDxu7",
       events=[
           {
               "type": "user.tool_confirmation",
-              "tool_use_id": agent_tool_use_event.id,
+              "tool_use_id": "sevt_011CZkZbMpR8aS3Wtv5Yq2Ln",
               "result": "allow",
           },
       ],
   )
 
-  # Or deny it with an explanation
+  # Deny another call with an explanation
   client.beta.sessions.events.send(
-      session.id,
+      "sesn_011CZkZAtmR3yMPDzynEDxu7",
       events=[
           {
               "type": "user.tool_confirmation",
-              "tool_use_id": mcp_tool_use_event.id,
+              "tool_use_id": "sevt_011CZkZcNqT9bT4Xuw6Zr3Mo",
               "result": "deny",
-              "deny_message": "Don't create issues in the production project. Use the staging project.",
+              "deny_message": "Do not create issues in the production project. Use the staging project.",
           },
       ],
   )
@@ -1144,53 +1143,55 @@ In the following examples, the tool-use event IDs come from the `stop_reason.eve
 
   ```typescript TypeScript
   // Allow the tool to run
-  await client.beta.sessions.events.send(session.id, {
+  await client.beta.sessions.events.send("sesn_011CZkZAtmR3yMPDzynEDxu7", {
     events: [
       {
         type: "user.tool_confirmation",
-        tool_use_id: agent_tool_use_event.id,
+        tool_use_id: "sevt_011CZkZbMpR8aS3Wtv5Yq2Ln",
         result: "allow"
       }
     ]
   });
 
-  // Or deny it with an explanation
-  await client.beta.sessions.events.send(session.id, {
+  // Deny another call with an explanation
+  await client.beta.sessions.events.send("sesn_011CZkZAtmR3yMPDzynEDxu7", {
     events: [
       {
         type: "user.tool_confirmation",
-        tool_use_id: mcp_tool_use_event.id,
+        tool_use_id: "sevt_011CZkZcNqT9bT4Xuw6Zr3Mo",
         result: "deny",
-        deny_message: "Don't create issues in the production project. Use the staging project."
+        deny_message: "Do not create issues in the production project. Use the staging project."
       }
     ]
   });
   ```
 
   ```csharp C#
+  using Anthropic.Models.Beta.Sessions.Events;
+
   // Allow the tool to run
-  await client.Beta.Sessions.Events.Send(session.ID, new()
+  await client.Beta.Sessions.Events.Send("sesn_011CZkZAtmR3yMPDzynEDxu7", new()
   {
       Events =
       [
           new BetaManagedAgentsUserToolConfirmationEventParams
           {
-              ToolUseID = agentToolUseEvent.ID,
+              ToolUseID = "sevt_011CZkZbMpR8aS3Wtv5Yq2Ln",
               Result = "allow",
           },
       ],
   });
 
-  // Or deny it with an explanation
-  await client.Beta.Sessions.Events.Send(session.ID, new()
+  // Deny another call with an explanation
+  await client.Beta.Sessions.Events.Send("sesn_011CZkZAtmR3yMPDzynEDxu7", new()
   {
       Events =
       [
           new BetaManagedAgentsUserToolConfirmationEventParams
           {
-              ToolUseID = mcpToolUseEvent.ID,
+              ToolUseID = "sevt_011CZkZcNqT9bT4Xuw6Zr3Mo",
               Result = "deny",
-              DenyMessage = "Don't create issues in the production project. Use the staging project.",
+              DenyMessage = "Do not create issues in the production project. Use the staging project.",
           },
       ],
   });
@@ -1198,10 +1199,10 @@ In the following examples, the tool-use event IDs come from the `stop_reason.eve
 
   ```go Go
   // Allow the tool to run
-  _, err = client.Beta.Sessions.Events.Send(ctx, session.ID, anthropic.BetaSessionEventSendParams{
+  _, err := client.Beta.Sessions.Events.Send(ctx, "sesn_011CZkZAtmR3yMPDzynEDxu7", anthropic.BetaSessionEventSendParams{
   	Events: []anthropic.BetaManagedAgentsEventParamsUnion{{
   		OfUserToolConfirmation: &anthropic.BetaManagedAgentsUserToolConfirmationEventParams{
-  			ToolUseID: agentToolUseEvent.ID,
+  			ToolUseID: "sevt_011CZkZbMpR8aS3Wtv5Yq2Ln",
   			Result:    anthropic.BetaManagedAgentsUserToolConfirmationEventParamsResultAllow,
   		},
   	}},
@@ -1210,13 +1211,13 @@ In the following examples, the tool-use event IDs come from the `stop_reason.eve
   	panic(err)
   }
 
-  // Or deny it with an explanation
-  _, err = client.Beta.Sessions.Events.Send(ctx, session.ID, anthropic.BetaSessionEventSendParams{
+  // Deny another call with an explanation
+  _, err = client.Beta.Sessions.Events.Send(ctx, "sesn_011CZkZAtmR3yMPDzynEDxu7", anthropic.BetaSessionEventSendParams{
   	Events: []anthropic.BetaManagedAgentsEventParamsUnion{{
   		OfUserToolConfirmation: &anthropic.BetaManagedAgentsUserToolConfirmationEventParams{
-  			ToolUseID:   mcpToolUseEvent.ID,
+  			ToolUseID:   "sevt_011CZkZcNqT9bT4Xuw6Zr3Mo",
   			Result:      anthropic.BetaManagedAgentsUserToolConfirmationEventParamsResultDeny,
-  			DenyMessage: anthropic.String("Don't create issues in the production project. Use the staging project."),
+  			DenyMessage: anthropic.String("Do not create issues in the production project. Use the staging project."),
   		},
   	}},
   })
@@ -1226,28 +1227,31 @@ In the following examples, the tool-use event IDs come from the `stop_reason.eve
   ```
 
   ```java Java
+  import com.anthropic.models.beta.sessions.events.BetaManagedAgentsUserToolConfirmationEventParams;
+  import com.anthropic.models.beta.sessions.events.EventSendParams;
+
   // Allow the tool to run
   client.beta().sessions().events().send(
-      session.id(),
+      "sesn_011CZkZAtmR3yMPDzynEDxu7",
       EventSendParams.builder()
           .addEvent(
               BetaManagedAgentsUserToolConfirmationEventParams.builder()
-                  .toolUseId(agentToolUseEvent.id())
+                  .toolUseId("sevt_011CZkZbMpR8aS3Wtv5Yq2Ln")
                   .result(BetaManagedAgentsUserToolConfirmationEventParams.Result.ALLOW)
                   .build()
           )
           .build()
   );
 
-  // Or deny it with an explanation
+  // Deny another call with an explanation
   client.beta().sessions().events().send(
-      session.id(),
+      "sesn_011CZkZAtmR3yMPDzynEDxu7",
       EventSendParams.builder()
           .addEvent(
               BetaManagedAgentsUserToolConfirmationEventParams.builder()
-                  .toolUseId(mcpToolUseEvent.id())
+                  .toolUseId("sevt_011CZkZcNqT9bT4Xuw6Zr3Mo")
                   .result(BetaManagedAgentsUserToolConfirmationEventParams.Result.DENY)
-                  .denyMessage("Don't create issues in the production project. Use the staging project.")
+                  .denyMessage("Do not create issues in the production project. Use the staging project.")
                   .build()
           )
           .build()
@@ -1259,23 +1263,23 @@ In the following examples, the tool-use event IDs come from the `stop_reason.eve
 
   // Allow the tool to run
   $client->beta->sessions->events->send(
-      $session->id,
+      'sesn_011CZkZAtmR3yMPDzynEDxu7',
       events: [
           ManagedAgentsUserToolConfirmationEventParams::with(
-              toolUseID: $agentToolUseEvent->id,
+              toolUseID: 'sevt_011CZkZbMpR8aS3Wtv5Yq2Ln',
               result: 'allow',
           ),
       ],
   );
 
-  // Or deny it with an explanation
+  // Deny another call with an explanation
   $client->beta->sessions->events->send(
-      $session->id,
+      'sesn_011CZkZAtmR3yMPDzynEDxu7',
       events: [
           ManagedAgentsUserToolConfirmationEventParams::with(
-              toolUseID: $mcpToolUseEvent->id,
+              toolUseID: 'sevt_011CZkZcNqT9bT4Xuw6Zr3Mo',
               result: 'deny',
-              denyMessage: "Don't create issues in the production project. Use the staging project.",
+              denyMessage: 'Do not create issues in the production project. Use the staging project.',
           ),
       ],
   );
@@ -1284,25 +1288,25 @@ In the following examples, the tool-use event IDs come from the `stop_reason.eve
   ```ruby Ruby
   # Allow the tool to run
   client.beta.sessions.events.send_(
-    session.id,
+    "sesn_011CZkZAtmR3yMPDzynEDxu7",
     events: [
       {
         type: "user.tool_confirmation",
-        tool_use_id: agent_tool_use_event.id,
+        tool_use_id: "sevt_011CZkZbMpR8aS3Wtv5Yq2Ln",
         result: "allow"
       }
     ]
   )
 
-  # Or deny it with an explanation
+  # Deny another call with an explanation
   client.beta.sessions.events.send_(
-    session.id,
+    "sesn_011CZkZAtmR3yMPDzynEDxu7",
     events: [
       {
         type: "user.tool_confirmation",
-        tool_use_id: mcp_tool_use_event.id,
+        tool_use_id: "sevt_011CZkZcNqT9bT4Xuw6Zr3Mo",
         result: "deny",
-        deny_message: "Don't create issues in the production project. Use the staging project."
+        deny_message: "Do not create issues in the production project. Use the staging project."
       }
     ]
   )
@@ -1351,10 +1355,10 @@ Beta headers allow you to access experimental features and new model capabilitie
 
 [Data handling overview](https://platform.claude.com/docs/en/manage-claude/api-and-data-retention#feature-eligibility)
 
-| Item    | Zero data retention                                                                                                                                      | HIPAA                                                                        |
-| ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------- |
-| Status  | Not eligible                                                                                                                                             | Not eligible                                                                 |
-| Details | Sessions are stateful resources; transcripts persist until you delete them. Applies to all Managed Agents sub-features, including Self-hosted sandboxes. | Applies to all Managed Agents sub-features, including Self-hosted sandboxes. |
+| Item    | Zero data retention                                                                                                                                                                                                                                         | HIPAA                                                               |
+| ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Status  | Not eligible                                                                                                                                                                                                                                                | Not eligible                                                        |
+| Details | Not eligible for ZDR, except for self-hosted Managed Agents. Sessions are stateful resources; transcripts persist until you delete them. [Learn more](https://platform.claude.com/docs/en/managed-agents/self-hosted-data-and-access#how-long-data-is-kept) | Not eligible for HIPAA. Applies to all Managed Agents sub-features. |
 
 Applicable endpoints:
 

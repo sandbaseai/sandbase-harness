@@ -14,8 +14,9 @@
  * directory", so the tool compares what is pinned and reports three outcomes
  * per page — `identical`, `changed`, or `missing` upstream (a 404). A page
  * added upstream but never snapshotted is invisible to a filename-driven
- * crawl and is the one case this cannot detect; the README's "remove stale
- * pages when the upstream tree changes" is the manual half of that check.
+ * crawl and is the one case this cannot detect; watching
+ * `https://platform.claude.com/docs/llms.txt` for new subtrees (the way the
+ * `self-hosted/` family appeared) is the manual half of that check.
  *
  * Default mode is read-only and exits non-zero when any page drifts, so it can
  * gate a contract change. `--write` refreshes each changed page in place and
@@ -31,9 +32,10 @@ import { fileURLToPath } from 'node:url';
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SNAPSHOT_ROOT = join(repositoryRoot, 'contracts', 'anthropic-cma', 'official-docs');
 
-/** The two URL families the snapshot covers, root-relative dir → URL prefix. */
+/** The URL families the snapshot covers, root-relative dir → URL prefix. */
 const FAMILIES: Array<{ dir: string; base: string }> = [
   { dir: '', base: 'https://platform.claude.com/docs/en/managed-agents' },
+  { dir: 'self-hosted', base: 'https://platform.claude.com/docs/en/managed-agents/self-hosted' },
   { dir: 'mcp-tunnels', base: 'https://platform.claude.com/docs/en/agents-and-tools/mcp-tunnels' },
 ];
 
