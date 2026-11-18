@@ -170,8 +170,13 @@ describe('capability matrix', () => {
     // absence, so the pins below name only what is still missing.
     expect(capabilityEntry('webhook-subscriptions').reason.toLowerCase())
       .toContain('only when the deployment sets managed_agents_webhook_screen_private_addresses');
+    // The egress refusal is now classified: a url MCP server outside
+    // allowed_hosts is refused at create and the scheduler maps it onto the
+    // published type, so the "no producing path" clause must stay gone.
     expect(capabilityEntry('scheduled-deployment-timers').reason.toLowerCase())
-      .toContain('mcp_egress_blocked_error has no producing path');
+      .toContain('mcp_egress_blocked_error is reachable');
+    expect(capabilityEntry('scheduled-deployment-timers').reason.toLowerCase())
+      .not.toContain('has no producing path');
   });
 
   it('does not describe shipped operations behaviour as absent', () => {

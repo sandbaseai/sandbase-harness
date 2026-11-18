@@ -109,6 +109,16 @@
 
 ### Fixed
 
+- A scheduled deployment whose session create is refused because the agent
+  declares an MCP `url` server the Environment's `allowed_hosts` does not
+  cover now records the run with the published `mcp_egress_blocked_error`
+  error type and auto-pauses with `paused_reason.error` mirroring it, instead
+  of reporting `unknown_error`. The thrown
+  `mcp_server_outside_allowed_hosts` admission code is mapped onto the
+  published vocabulary in the scheduler's catch; unmapped causes still report
+  `unknown_error` honestly. The non-deployment session create path is
+  unchanged — the same refusal still answers `400` before a row exists.
+
 - MiniMax M3 and M3.1 Flash preserve `reasoning_content` through streaming and
   non-streaming tool history. Session turns, approvals and custom tool results
   can replay it from a bounded private in-memory cache; it is excluded from

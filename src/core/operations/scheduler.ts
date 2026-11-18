@@ -274,6 +274,22 @@ export type ScheduleRunOutcome = {
 const RECOVERABLE_RUN_ERRORS = new Set(['session_rate_limited_error']);
 
 /**
+ * The local session-admission codes a thrown `sessionOperationError` can
+ * carry, mapped onto the published `error.type` vocabulary.
+ *
+ * `createWithInitialEvents` throws a coded refusal rather than a bare error:
+ * an MCP `url` server the Environment's `allowed_hosts` does not cover is
+ * refused at create with `mcp_server_outside_allowed_hosts`, which the
+ * published vocabulary names `mcp_egress_blocked_error`. Mapping the code —
+ * not the message — is what keeps the classification honest: the published
+ * type reports *why* the run could not start, and a bare `unknown_error`
+ * would hide a classified egress refusal behind a generic failure.
+ */
+const SESSION_ADMISSION_ERROR_TYPES: Record<string, string> = {
+  mcp_server_outside_allowed_hosts: 'mcp_egress_blocked_error',
+};
+
+/**
  * Classify a trigger failure into the published `error.type` vocabulary.
  *
  * The checks run in the order the published contract reads: the agent's
@@ -467,7 +483,15 @@ export function runSchedule(
       }, parseJsonArray(schedule.initial_events) as never[]);
       sessionId = session.id;
     } catch (err) {
-      failure = { type: 'unknown_error', message: err instanceof Error ? err.message : String(err) };
+      // A session-admission refusal carries its published error type on the
+      // thrown code (e.g. an MCP server the environment's allowed_hosts does
+      // not cover). Map it rather than reporting `unknown_error`, which would
+      // hide a classified egress refusal behind a generic failure. Anything
+      // without a mapped code stays `unknown_error` — an unclassified cause is
+      // reported honestly as unclassified, not guessed.
+      const code = err instanceof Error && 'code' in err ? (err as { code?: unknown }).code : undefined;
+      const type = typeof code === 'string' ? SESSION_ADMISSION_ERROR_TYPES[code] : undefined;
+      failure = { type: type ?? 'unknown_error', message: err instanceof Error ? err.message : String(err) };
     }
   }
 
