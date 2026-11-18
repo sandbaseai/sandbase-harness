@@ -784,6 +784,64 @@ describe('SelfHostedSandboxProvider', () => {
     expect(result.stdout).toBe('from worker');
   });
 
+  it('rides proxy env into every exec work item so a worker that honours it routes through the boundary', async () => {
+    const queue = new WorkQueue(db);
+    const provider = new SelfHostedSandboxProvider(queue);
+    const sandbox = await provider.provision('sess_egress', {
+      name: 'sh',
+      sandbox_provider: 'self_hosted',
+      timeout: 5,
+      network: { type: 'limited', allowed_hosts: ['api.github.com'] },
+    } as never);
+
+    const workerLoop = (async () => {
+      for (let i = 0; i < 50; i++) {
+        const item = queue.claim('w1', 'sess_egress');
+        if (item) {
+          // The item's env is where a remote worker would inherit the proxy.
+          // The URL host is the advertised reachable address, the token is
+          // inside it, and the allowlist rides in the boundary behind it.
+          const env = item.payload.env as Record<string, string>;
+          expect(env.HTTPS_PROXY).toMatch(/^http:\/\/sandbase:.+@.+:\d+$/);
+          expect(env.https_proxy).toBe(env.HTTPS_PROXY);
+          expect(env.HTTP_PROXY).toBe(env.HTTPS_PROXY);
+          expect(env.NO_PROXY).toContain('localhost');
+          queue.complete(item.id, 'w1', { exitCode: 0, stdout: 'via proxy', stderr: '', timedOut: false });
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 10));
+      }
+      throw new Error('worker never claimed the item');
+    })();
+
+    const result = await sandbox.execute('echo test');
+    await workerLoop;
+    expect(result.stdout).toBe('via proxy');
+  });
+
+  it('still installs the substitution boundary when the policy is not limited', async () => {
+    const queue = new WorkQueue(db);
+    const provider = new SelfHostedSandboxProvider(queue);
+    const sandbox = await provider.provision('sess_open', { name: 'sh', sandbox_provider: 'self_hosted', timeout: 5 });
+
+    const workerLoop = (async () => {
+      for (let i = 0; i < 50; i++) {
+        const item = queue.claim('w1', 'sess_open');
+        if (item) {
+          // Allow-all mode: the proxy exists for credential substitution, not
+          // for a declared allowlist, so the env still rides the item.
+          const env = item.payload.env as Record<string, string>;
+          expect(env.HTTPS_PROXY).toMatch(/^http:\/\/sandbase:/);
+          queue.complete(item.id, 'w1', { exitCode: 0, stdout: 'ok', stderr: '', timedOut: false });
+          return;
+        }
+        await new Promise((r) => setTimeout(r, 10));
+      }
+    })();
+    await sandbox.execute('echo test');
+    await workerLoop;
+  });
+
   it('stops the work a session queued when its sandbox is released', async () => {
     // The lifecycle reaches the queue through the instance's cleanup, which the runtime
     // calls when a session reaches a terminal state - a user stop included. Without

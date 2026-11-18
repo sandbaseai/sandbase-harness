@@ -2777,14 +2777,15 @@ scrubbed, while a `limited` credential is denied for it the same way it is denie
 for a shell command.
 
 The placeholder model needs an egress boundary that substitutes the value on the
-wire. On a backend that owns one — `local`, `docker` — a turn's
+wire. Every shipped backend owns one: a turn's
 `environment_variable` credentials enter the sandbox and every stdio MCP server
 as opaque `__cred_<id>__` tokens and the session's egress proxy materializes the
-real value on the outbound request. A backend with no egress boundary
-(`kubernetes`, `self_hosted`) has nothing that can substitute, so the same
-credential is refused there as `credential_backend_unsupported` — before
-decryption, recorded as `runtime_denied` audit metadata — rather than
-materialized as plaintext the process could read.
+real value on the outbound request, scoped to the credential's own
+`allowed_hosts`. The proxy that owns the substitution is the same per-session
+boundary the network policy rides — a relay fronted by a Service on
+`kubernetes` (its Pod selected by the session's NetworkPolicy), and the same
+`EgressProxy` bound on every interface for `self_hosted` so a remote worker's
+honoured proxy env reaches it.
 
 ### Memory limits, scope, and preconditions
 

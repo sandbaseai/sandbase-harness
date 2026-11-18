@@ -109,6 +109,18 @@
 
 ### Fixed
 
+- A `limited` network policy now installs an egress boundary on every shipped
+  backend, each reported at the strength it actually applies. Kubernetes
+  provisions a per-session `socat` relay Pod fronted by a Service and a
+  `NetworkPolicy` that pins the sandbox Pod's egress to DNS plus that relay —
+  enforced by the CNI rather than advisory. Self-hosted binds the same
+  `EgressProxy` on every interface and rides its variables inside each work
+  item's `env`, so a remote worker that honours proxy variables routes
+  through the allowlist — reported `best_effort`, never `enforced`, because a
+  worker that ignores the variables egresses freely. A cluster that refuses
+  the relay, Service, or NetworkPolicy fails provisioning rather than
+  starting a session under a boundary it cannot honour.
+
 - CMA admission now accepts the `anthropic-version` values official clients
   actually send: `2026-10-21` (sent by `@anthropic-ai/sdk` 1.x and shown in
   every published curl example) and `2023-06-01` (sent by 0.x releases).

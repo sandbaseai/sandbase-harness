@@ -49,8 +49,8 @@ describe('environment networking enforcement projection', () => {
     const res = await appFor({
       local: 'best_effort',
       docker: 'enforced',
-      kubernetes: 'none',
-      self_hosted: 'none',
+      kubernetes: 'enforced',
+      self_hosted: 'best_effort',
     }).request('/v1/environments', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -80,13 +80,23 @@ describe('environment networking enforcement projection', () => {
     expect(body.networking_enforced).toBe(false);
   });
 
-  it('reports a backend that cannot bound egress as unsupported', async () => {
+  it('reports a kubernetes-backed limited policy as enforced through the NetworkPolicy boundary', async () => {
+    const { status, body } = await post({
+      name: 'limited-k8s',
+      config: { type: 'kubernetes', networking: { type: 'limited', allowed_hosts: ['api.github.com'] } },
+    });
+    expect(status).toBe(201);
+    expect(body.networking_enforcement).toBe('enforced');
+    expect(body.networking_enforced).toBe(true);
+  });
+
+  it('reports a self-hosted limited policy as best effort, not enforced', async () => {
     const { status, body } = await post({
       name: 'limited-self-hosted',
       config: { type: 'self_hosted', networking: { type: 'limited', allowed_hosts: ['api.github.com'] } },
     });
     expect(status).toBe(201);
-    expect(body.networking_enforcement).toBe('unsupported');
+    expect(body.networking_enforcement).toBe('best_effort');
     expect(body.networking_enforced).toBe(false);
   });
 
