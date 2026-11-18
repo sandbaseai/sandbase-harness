@@ -277,7 +277,71 @@ export function applyAgentUpdatePatch(
     next[key] = value;
   }
 
+  // The published update rule gives `effort` one exception to whole-object
+  // replacement (`agent-setup.md` update semantics): when the model `id` is
+  // unchanged, an omitted `effort` keeps the stored level; a changed `id`
+  // resets to the new model's default. Reinject the stored level into the
+  // merged definition when the id survived — the object form gets it inside
+  // `model`, the string form inside `model_config` — so revalidation keeps it
+  // instead of filling the model's save-time default. A changed id, or a patch
+  // that names an effort anywhere, gets no reinjection: the explicit value
+  // wins, or the new model's default fills.
+  const priorModelId = modelIdOf(current.model);
+  const storedEffort = readStoredEffort(current);
+  const mergedModelId = modelIdOf(next.model);
+  const mergedEffort = effortOf(next);
+  if (
+    storedEffort !== undefined && mergedEffort === undefined
+    && priorModelId !== undefined && mergedModelId === priorModelId
+  ) {
+    if (next.model && typeof next.model === 'object' && !Array.isArray(next.model)) {
+      // Clone rather than mutate: `next.model` may be the same object the
+      // validator parsed, and writing onto it would leak into `fields`.
+      next.model = { ...(next.model as Record<string, unknown>), effort: storedEffort };
+    } else {
+      next.model_config = {
+        id: mergedModelId,
+        speed: 'standard',
+        effort: storedEffort,
+      };
+    }
+  }
+
   return next;
+}
+
+function modelIdOf(model: unknown): string | undefined {
+  if (typeof model === 'string') return model;
+  if (model && typeof model === 'object' && !Array.isArray(model)) {
+    const id = (model as Record<string, unknown>).id;
+    return typeof id === 'string' ? id : undefined;
+  }
+  return undefined;
+}
+
+/** The effort a merged definition explicitly names, in either spelling. */
+function effortOf(definition: Record<string, unknown>): string | undefined {
+  if (definition.model && typeof definition.model === 'object' && !Array.isArray(definition.model)) {
+    const effort = (definition.model as Record<string, unknown>).effort;
+    if (effort !== undefined && effort !== null) {
+      // Object-form effort ({"type": "high"}) reads as its level; anything else
+      // is a value the schema will judge, so it still counts as explicit.
+      return typeof effort === 'string' ? effort
+        : (typeof effort === 'object' && !Array.isArray(effort)
+          ? ((effort as Record<string, unknown>).type as string | undefined)
+          : undefined) ?? 'explicit';
+    }
+  }
+  const config = definition.model_config as Record<string, unknown> | undefined;
+  return typeof config?.effort === 'string' ? config.effort : undefined;
+}
+
+/** The stored effort on the pre-patch definition, in either persisted spelling. */
+function readStoredEffort(current: AgentDefinition): string | undefined {
+  const fromConfig = (current as { model_config?: { effort?: unknown } }).model_config?.effort;
+  if (typeof fromConfig === 'string' && fromConfig.length > 0) return fromConfig;
+  const legacy = (current as { effort?: unknown }).effort;
+  return typeof legacy === 'string' && legacy.length > 0 ? legacy : undefined;
 }
 
 /**

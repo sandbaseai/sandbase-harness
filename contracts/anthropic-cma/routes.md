@@ -259,6 +259,7 @@ remain unserved. See [`unsupported.md`](./unsupported.md).
 | GET | `/v1/tunnels/{id}` | `src/api/routes/unsupported-official.ts` |
 | GET | `/v1/tunnels/{id}/certificates` | `src/api/routes/unsupported-official.ts` |
 | GET | `/v1/tunnels/{id}/certificates/{certificateId}` | `src/api/routes/unsupported-official.ts` |
+| DELETE | `/v1/user_profiles/{id}` | `src/api/routes/unsupported-official.ts` |
 | GET | `/v1/user_profiles` | `src/api/routes/unsupported-official.ts` |
 | GET | `/v1/user_profiles/{id}` | `src/api/routes/unsupported-official.ts` |
 | POST | `/v1/sessions/{id}/threads/{id}/archive` | `src/api/routes/unsupported-official.ts` |
@@ -270,6 +271,7 @@ remain unserved. See [`unsupported.md`](./unsupported.md).
 | POST | `/v1/tunnels/{id}/rotate_token` | `src/api/routes/unsupported-official.ts` |
 | POST | `/v1/user_profiles` | `src/api/routes/unsupported-official.ts` |
 | POST | `/v1/user_profiles/{id}` | `src/api/routes/unsupported-official.ts` |
+| POST | `/v1/user_profiles/{id}/action_urls` | `src/api/routes/unsupported-official.ts` |
 | POST | `/v1/user_profiles/{id}/enrollment_url` | `src/api/routes/unsupported-official.ts` |
 
 ## 3. Alignment

@@ -21,6 +21,7 @@ import {
   CMA_MANAGED_AGENTS_BETA,
   createCmaRequestAdmissionMiddleware,
 } from '../../src/api/cma-admission.js';
+import { CMA_ADMITTED_ANTHROPIC_VERSIONS } from '../../src/core/cma/compatibility.js';
 
 function buildApp() {
   const app = new Hono();
@@ -76,6 +77,19 @@ describe('CMA admission: anthropic-version', () => {
     });
     expect(res.status).toBe(400);
     expect((await res.json()).error.code).toBe(CMA_ADMISSION_CODES.unsupportedVersion);
+  });
+
+  it('admits every version value a published client sends and nothing else', async () => {
+    // The two admitted values are the published `2026-10-21` (the 1.x SDK and
+    // every official-docs example) and `2023-06-01` (the 0.x SDK line). The
+    // list is closed: a third value is refused rather than pattern-matched.
+    expect(CMA_ADMITTED_ANTHROPIC_VERSIONS).toEqual(['2026-10-21', '2023-06-01']);
+    for (const version of CMA_ADMITTED_ANTHROPIC_VERSIONS) {
+      const res = await buildApp().request('/v1/agents', {
+        headers: { ...CANONICAL, 'anthropic-version': version },
+      });
+      expect(res.status, version).toBe(200);
+    }
   });
 });
 

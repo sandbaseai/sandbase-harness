@@ -313,7 +313,26 @@ export function agentsRoutes(deps: ServerDeps) {
     // invalid definition rather than a missing one — and only the no-change branch
     // below refuses it as missing.
     const merged = applyAgentUpdatePatch(current as never, patch.fields);
-    if (agentDefinitionsEqual(current, merged)) {
+
+    // A stored definition `GET` would refuse to serve, and a request that
+    // changes nothing inherits that refusal — before validation, because an
+    // unreadable row cannot survive the merge's revalidation either way.
+    if (!parsed && agentDefinitionsEqual(current, merged)) {
+      return c.json({ error: { type: 'not_found', message: `Agent not found: ${id}` } }, 404);
+    }
+
+    const result = validateAgentDefinition(merged);
+    if (!result.valid || !result.data) {
+      return c.json({ error: { type: 'invalid_request_error', message: 'Invalid agent definition', details: result.errors } }, 400);
+    }
+
+    // The no-change check runs on the validated merge, not the raw merge:
+    // `current` is the stored normalized definition — which since the
+    // save-time `model_config` fill always carries that materialized object —
+    // while the raw merge only re-describes it. Comparing the two would report
+    // a resubmitted identical body as a change and bump a version the update
+    // never produced.
+    if (agentDefinitionsEqual(current, result.data)) {
       // No field actually changed, so no new immutable version is written. The
       // response is the agent, built the way `GET /:id` builds it: from the
       // **parsed** definition. This branch used to pass `existing.definition` —
@@ -323,18 +342,7 @@ export function agentsRoutes(deps: ServerDeps) {
       // `tools`, `skills` and `metadata` zeroed, while `id` and `version` stayed
       // correct. That is the branch an idempotent re-`PUT` takes, so the fabricated
       // body arrived on the ordinary retry path.
-      if (!parsed) {
-        // A stored definition `GET /:id` also refuses to serve. Answering the same
-        // 404 keeps this branch from being the one place that projects an
-        // unreadable definition into a well-formed-looking resource.
-        return c.json({ error: { type: 'not_found', message: `Agent not found: ${id}` } }, 404);
-      }
-      return c.json(toApiAgent(parsed, agentRowMeta(deps, id)));
-    }
-
-    const result = validateAgentDefinition(merged);
-    if (!result.valid || !result.data) {
-      return c.json({ error: { type: 'invalid_request_error', message: 'Invalid agent definition', details: result.errors } }, 400);
+      return c.json(toApiAgent(parsed ?? result.data, agentRowMeta(deps, id)));
     }
 
     const agent = result.data;

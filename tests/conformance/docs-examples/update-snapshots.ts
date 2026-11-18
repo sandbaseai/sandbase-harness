@@ -1,10 +1,12 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { docsExamplePages } from './manifest.js';
-import { extractDocsExampleSource, snapshotRoot } from './source.js';
+import { extractDocsExampleSource, officialDocsRoot, snapshotRoot } from './source.js';
 
-const docsRoot = process.env.CMA_DOCS_DIR?.trim();
-if (!docsRoot) throw new Error('Set CMA_DOCS_DIR to a trusted local documentation checkout before updating snapshots.');
+// Default to the pinned snapshot; CMA_DOCS_DIR remains an override for a
+// deliberate re-baseline against a live documentation checkout, which the
+// digest diff then records.
+const docsRoot = process.env.CMA_DOCS_DIR?.trim() || officialDocsRoot;
 const sources = docsExamplePages.filter((page) => page.status === 'enabled')
   .map((page) => ({ page, source: extractDocsExampleSource(page, docsRoot) }));
 mkdirSync(snapshotRoot, { recursive: true });

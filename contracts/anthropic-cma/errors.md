@@ -101,7 +101,7 @@ Admission failures add a stable code from `CMA_ADMISSION_CODES`:
 | Code | Condition |
 | --- | --- |
 | `missing_anthropic_version` | compatibility caller omitted the version header |
-| `unsupported_anthropic_version` | version present, not `2023-06-01` |
+| `unsupported_anthropic_version` | version present, not `2026-10-21` or `2023-06-01` |
 | `missing_anthropic_beta` | compatibility caller omitted the beta header |
 | `malformed_anthropic_beta` | beta is not comma-separated identifiers |
 | `unsupported_anthropic_beta` | beta does not match the resource family |

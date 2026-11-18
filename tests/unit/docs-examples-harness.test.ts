@@ -1,12 +1,12 @@
 import { createHash } from 'node:crypto';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { extractTypeScriptSnippets, selectTypeScriptSnippets } from '../conformance/docs-examples/extract.js';
 import { renderDocsExampleScript } from '../conformance/docs-examples/harness.js';
 import { docsExamplePages, getDocsExamplePage, type DocsExamplePage } from '../conformance/docs-examples/manifest.js';
-import { loadDocsExampleSource } from '../conformance/docs-examples/source.js';
+import { loadDocsExampleSource, officialDocsRoot } from '../conformance/docs-examples/source.js';
 
 const temporaryRoots: string[] = [];
 const page: DocsExamplePage = { id: 'unit-example', doc: 'example.md', status: 'enabled' };
@@ -54,8 +54,12 @@ describe('documentation example snapshots', () => {
     expect(loadDocsExampleSource(page, options)).toEqual({ text: 'console.log("local fixture");', hash: options.hash });
   });
 
-  it('refuses to run without local docs rather than silently substituting examples', () => {
-    expect(() => loadDocsExampleSource(page, { docsRoot: '' })).toThrow('CMA_DOCS_DIR is required');
+  it('defaults to the pinned official-docs snapshot when no docs root is configured', () => {
+    // With no docsRoot and no CMA_DOCS_DIR the loader reads the committed
+    // snapshot rather than refusing — the suite must always run, not skip.
+    expect(existsSync(join(officialDocsRoot, 'onboarding.md'))).toBe(true);
+    expect(existsSync(join(officialDocsRoot, 'tools.md'))).toBe(true);
+    expect(existsSync(join(officialDocsRoot, 'permission-policies.md'))).toBe(true);
   });
 
   it('detects a deliberately changed snapshot and explains how to review and update it', () => {
@@ -88,7 +92,7 @@ describe('documentation example snapshots', () => {
 
   it('rejects documentation paths outside the configured root', () => {
     const options = fixture();
-    expect(() => loadDocsExampleSource({ ...page, doc: '../outside.md' }, options)).toThrow('escapes CMA_DOCS_DIR');
+    expect(() => loadDocsExampleSource({ ...page, doc: '../outside.md' }, options)).toThrow('escapes the docs root');
   });
 });
 
@@ -151,7 +155,7 @@ describe('documentation example script generation', () => {
   it('enables exactly the initial three pages and rejects unknown or pending entries', () => {
     expect(docsExamplePages.filter((entry) => entry.status === 'enabled').map((entry) => entry.id))
       .toEqual(['console-build', 'tools', 'permission-policies']);
-    expect(getDocsExamplePage('tools').doc).toBe('定义您的智能体/工具.md');
+    expect(getDocsExamplePage('tools').doc).toBe('tools.md');
     expect(() => getDocsExamplePage('not-a-page')).toThrow('Unknown');
     expect(() => getDocsExamplePage('quickstart')).toThrow('not enabled');
     expect(new Set(docsExamplePages.map((entry) => entry.id)).size).toBe(docsExamplePages.length);

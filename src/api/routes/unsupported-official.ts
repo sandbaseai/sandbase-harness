@@ -34,7 +34,9 @@ export function unsupportedOfficialRoutes(): Hono {
   app.post('/user_profiles', profiles);
   app.get('/user_profiles/:id', profiles);
   app.post('/user_profiles/:id', profiles);
+  app.delete('/user_profiles/:id', profiles);
   app.post('/user_profiles/:id/enrollment_url', profiles);
+  app.post('/user_profiles/:id/action_urls', profiles);
 
   app.get('/sessions/:id/threads', threads);
   app.get('/sessions/:id/threads/:threadId', threads);

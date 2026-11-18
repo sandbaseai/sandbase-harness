@@ -60,6 +60,95 @@ describe('scheduled deployment runner', () => {
     expect(schedule.last_run_at).toBe('2026-07-23T10:01:00.000Z');
     expect(schedule.next_run_at).toBe('2026-07-23T10:05:00.000Z');
   });
+
+  function insertScheduleOnEnvironment(id: string, agentId: string, environmentId: string): void {
+    db.prepare(
+      `INSERT INTO scheduled_deployments (
+        id, name, agent_id, environment_id, cron, payload, status, next_run_at, initial_events, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      id,
+      agentId,
+      environmentId,
+      '0 * * * *',
+      JSON.stringify({ title: `${id} session` }),
+      'active',
+      '2026-07-23T10:00:00.000Z',
+      JSON.stringify([{ type: 'user.message', content: [{ type: 'text', text: 'run' }] }]),
+      '2026-07-23T09:00:00.000Z',
+      '2026-07-23T09:00:00.000Z',
+    );
+  }
+
+  function insertAgentWithUrlMcpServer(id: string, url: string): void {
+    db.prepare(`INSERT INTO agents (id, name, definition) VALUES (?, ?, ?)`).run(
+      id,
+      id,
+      JSON.stringify({
+        name: id,
+        model: 'default',
+        mcp_servers: [{ type: 'url', name: 'docs', url }],
+        // Every declared url server needs a matching mcp_toolset or the agent
+        // is refused on the unrelated "cannot call it" rule before admission.
+        tools: [{ type: 'mcp_toolset', mcp_server_name: 'docs', configs: [] }],
+      }),
+    );
+  }
+
+  it('records mcp_egress_blocked_error and pauses when the agent MCP server is outside allowed_hosts', async () => {
+    // The published deployment-run error vocabulary names the condition the
+    // session create refuses: an MCP `url` server the Environment's
+    // allowed_hosts does not cover is `mcp_egress_blocked_error`, not
+    // `unknown_error`. The run records it and the deployment auto-pauses with
+    // paused_reason.error mirroring it — a classified refusal, not a generic
+    // failure an operator would have to read the message to recognize.
+    db.exec(
+      `INSERT INTO environments (id, name, config) VALUES ('env_limited', 'Limited', '{"network":{"type":"limited","allowed_hosts":["api.example.com"]}}')`,
+    );
+    insertAgentWithUrlMcpServer('agent_mcp', 'https://mcp.evil.com/sse');
+    insertScheduleOnEnvironment('sched_egress', 'agent_mcp', 'env_limited');
+
+    const runs = await runDueScheduledDeployments(db, new SessionManager(db), {
+      now: new Date('2026-07-23T10:30:00.000Z'),
+      random: () => 0,
+    });
+
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({
+      schedule_id: 'sched_egress',
+      status: 'failed',
+      session_id: null,
+      error_type: 'mcp_egress_blocked_error',
+    });
+    expect(runs[0].error).toContain('allowed_hosts');
+
+    const schedule = db
+      .prepare('SELECT status, paused_reason FROM scheduled_deployments WHERE id = ?')
+      .get('sched_egress') as { status: string; paused_reason: string };
+    expect(schedule.status).toBe('paused');
+    expect(JSON.parse(schedule.paused_reason)).toEqual({
+      type: 'error',
+      error: expect.objectContaining({ type: 'mcp_egress_blocked_error' }),
+    });
+  });
+
+  it('creates the session when the url server host is covered by allowed_hosts', async () => {
+    db.exec(
+      `INSERT INTO environments (id, name, config) VALUES ('env_limited', 'Limited', '{"network":{"type":"limited","allowed_hosts":["mcp.example.com"]}}')`,
+    );
+    insertAgentWithUrlMcpServer('agent_mcp_ok', 'https://mcp.example.com/sse');
+    insertScheduleOnEnvironment('sched_covered', 'agent_mcp_ok', 'env_limited');
+
+    const runs = await runDueScheduledDeployments(db, new SessionManager(db), {
+      now: new Date('2026-07-23T10:30:00.000Z'),
+      random: () => 0,
+    });
+
+    expect(runs).toHaveLength(1);
+    expect(runs[0]).toMatchObject({ schedule_id: 'sched_covered', status: 'created_session', error_type: null });
+    expect(db.prepare('SELECT status FROM scheduled_deployments WHERE id = ?').get('sched_covered')).toMatchObject({ status: 'active' });
+  });
 });
 
 describe('deployment run jitter', () => {

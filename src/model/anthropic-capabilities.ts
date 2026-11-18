@@ -14,6 +14,10 @@
  *   page is the authority and the lists are not uniform: Opus 4.6 and Sonnet
  *   4.6 accept `max` but not `xhigh`, Opus 4.5 tops out at `high`, and
  *   `mythos-preview` skips `xhigh`.
+ * - `effortDefault` — the level the published service resolves at save time
+ *   when the caller omits `effort`. The published effort page fixes the rule:
+ *   `medium` on Claude Opus 5.5 and Claude Haiku 5.5, `high` on every other
+ *   model that accepts effort, `undefined` on a model with no effort support.
  * - `fastMode` — the model honours `speed: 'fast'`. The published fast-mode
  *   page lists only Opus 5.5, Opus 5, and Opus 4.8; requests for Opus 4.7
  *   error and requests for Opus 4.6 silently run at standard speed, so both
@@ -37,6 +41,12 @@ export interface AnthropicModelCapabilities {
   adaptiveThinking: boolean;
   /** Accepted `model.effort` levels; empty means effort is unsupported. */
   effortLevels: readonly ModelEffortLevel[];
+  /**
+   * The level the published service resolves when a definition omits `effort`.
+   * `undefined` means the model takes no effort at all, so an omitted `effort`
+   * stays omitted rather than being filled with a level it cannot take.
+   */
+  effortDefault?: ModelEffortLevel;
   /** `speed: 'fast'` may be sent. */
   fastMode: boolean;
   /**
@@ -59,21 +69,28 @@ interface TableEntry {
 
 const TABLE: readonly TableEntry[] = [
   // 5-generation: adaptive thinking, all five effort levels. Opus 5.x also
-  // supports fast mode (fast-mode supported-models list).
-  { prefix: 'claude-fable-5', capabilities: { adaptiveThinking: true, effortLevels: ALL_EFFORT_LEVELS, fastMode: false, contextWindow: 200_000 } },
-  { prefix: 'claude-mythos-5', capabilities: { adaptiveThinking: true, effortLevels: ALL_EFFORT_LEVELS, fastMode: false, contextWindow: 200_000 } },
-  { prefix: 'claude-mythos-preview', capabilities: { adaptiveThinking: true, effortLevels: NO_XHIGH, fastMode: false, contextWindow: 200_000 } },
-  { prefix: 'claude-opus-5', capabilities: { adaptiveThinking: true, effortLevels: ALL_EFFORT_LEVELS, fastMode: true, contextWindow: 200_000 } },
-  { prefix: 'claude-sonnet-5', capabilities: { adaptiveThinking: true, effortLevels: ALL_EFFORT_LEVELS, fastMode: false, contextWindow: 200_000 } },
+  // supports fast mode (fast-mode supported-models list). The published
+  // effort page gives every 5-generation model except Opus 5.5 and Haiku 5.5
+  // a `high` default; those two default to `medium`.
+  { prefix: 'claude-fable-5', capabilities: { adaptiveThinking: true, effortLevels: ALL_EFFORT_LEVELS, effortDefault: 'high', fastMode: false, contextWindow: 200_000 } },
+  { prefix: 'claude-mythos-5', capabilities: { adaptiveThinking: true, effortLevels: ALL_EFFORT_LEVELS, effortDefault: 'high', fastMode: false, contextWindow: 200_000 } },
+  { prefix: 'claude-mythos-preview', capabilities: { adaptiveThinking: true, effortLevels: NO_XHIGH, effortDefault: 'high', fastMode: false, contextWindow: 200_000 } },
+  // Opus 5.5 must precede Opus 5 — an `includes` lookup would otherwise let
+  // the family entry shadow it and hand back the wrong default.
+  { prefix: 'claude-opus-5-5', capabilities: { adaptiveThinking: true, effortLevels: ALL_EFFORT_LEVELS, effortDefault: 'medium', fastMode: true, contextWindow: 200_000 } },
+  { prefix: 'claude-opus-5', capabilities: { adaptiveThinking: true, effortLevels: ALL_EFFORT_LEVELS, effortDefault: 'high', fastMode: true, contextWindow: 200_000 } },
+  { prefix: 'claude-sonnet-5', capabilities: { adaptiveThinking: true, effortLevels: ALL_EFFORT_LEVELS, effortDefault: 'high', fastMode: false, contextWindow: 200_000 } },
+  { prefix: 'claude-haiku-5-5', capabilities: { adaptiveThinking: true, effortLevels: ALL_EFFORT_LEVELS, effortDefault: 'medium', fastMode: false, contextWindow: 200_000 } },
   // 4.x generation. Opus 4.8 supports fast mode; Opus 4.7 errors on it and
   // Opus 4.6 silently degrades — both treated as unsupported here. Opus/Sonnet
   // 4.6 accept `max` but not `xhigh`; Opus 4.5 accepts effort only up to
-  // `high` and no adaptive thinking; the rest take no effort at all.
-  { prefix: 'claude-opus-4-8', capabilities: { adaptiveThinking: true, effortLevels: ALL_EFFORT_LEVELS, fastMode: true, contextWindow: 200_000 } },
-  { prefix: 'claude-opus-4-7', capabilities: { adaptiveThinking: true, effortLevels: ALL_EFFORT_LEVELS, fastMode: false, contextWindow: 200_000 } },
-  { prefix: 'claude-opus-4-6', capabilities: { adaptiveThinking: true, effortLevels: NO_XHIGH, fastMode: false, contextWindow: 200_000 } },
-  { prefix: 'claude-sonnet-4-6', capabilities: { adaptiveThinking: true, effortLevels: NO_XHIGH, fastMode: false, contextWindow: 200_000 } },
-  { prefix: 'claude-opus-4-5', capabilities: { adaptiveThinking: false, effortLevels: UP_TO_HIGH, fastMode: false, contextWindow: 200_000 } },
+  // `high` and no adaptive thinking; the rest take no effort at all. Every
+  // 4.x model that accepts effort defaults to `high`.
+  { prefix: 'claude-opus-4-8', capabilities: { adaptiveThinking: true, effortLevels: ALL_EFFORT_LEVELS, effortDefault: 'high', fastMode: true, contextWindow: 200_000 } },
+  { prefix: 'claude-opus-4-7', capabilities: { adaptiveThinking: true, effortLevels: ALL_EFFORT_LEVELS, effortDefault: 'high', fastMode: false, contextWindow: 200_000 } },
+  { prefix: 'claude-opus-4-6', capabilities: { adaptiveThinking: true, effortLevels: NO_XHIGH, effortDefault: 'high', fastMode: false, contextWindow: 200_000 } },
+  { prefix: 'claude-sonnet-4-6', capabilities: { adaptiveThinking: true, effortLevels: NO_XHIGH, effortDefault: 'high', fastMode: false, contextWindow: 200_000 } },
+  { prefix: 'claude-opus-4-5', capabilities: { adaptiveThinking: false, effortLevels: UP_TO_HIGH, effortDefault: 'high', fastMode: false, contextWindow: 200_000 } },
   { prefix: 'claude-sonnet-4-5', capabilities: { adaptiveThinking: false, effortLevels: NO_EFFORT, fastMode: false, contextWindow: 200_000 } },
   { prefix: 'claude-haiku-4-5', capabilities: { adaptiveThinking: false, effortLevels: NO_EFFORT, fastMode: false, contextWindow: 200_000 } },
   { prefix: 'claude-opus-4-1', capabilities: { adaptiveThinking: false, effortLevels: NO_EFFORT, fastMode: false, contextWindow: 200_000 } },

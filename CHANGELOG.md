@@ -4,6 +4,20 @@
 
 ### Added
 
+- An agent definition that omits `model.effort` is now stored with the
+  model's documented save-time default instead of leaving the field to the
+  runtime/provider fallback. The per-model defaults come from the published
+  effort page — `medium` on Claude Opus 5.5 and Claude Haiku 5.5, `high` on
+  every other effort-capable model — recorded in the capability table
+  (`src/model/anthropic-capabilities.ts` `effortDefault`), so the stored
+  profile is self-describing and the agent read, version read, and frozen
+  session snapshot all return the level the runtime executes. An explicit
+  `effort` always wins; a model the table does not know keeps `effort`
+  absent rather than inventing a level, and a no-effort model (Haiku 4.5)
+  stores none. The update path follows the published exception: an
+  unchanged model `id` keeps its stored effort on an omitted-effort update,
+  while a changed `id` resets to the new model's default.
+
 - Self-hosted environments now execute built-in `agent_toolset` calls on the
   environment's workers — the published "your integration provides
   `agent_toolset` results" split. A non-confirmation-gated builtin call on a
@@ -94,6 +108,63 @@
   package-installation, declarative-apply, session CLI, and snapshot tasks.
 
 ### Fixed
+
+- HTTPS environment credentials inside CONNECT tunnels are now a recorded
+  decision rather than an open gap: substitution happens on the proxy's
+  plain-HTTP forward path, and the CONNECT gate already refuses a tunnel
+  whose target a credential's `allowed_hosts` does not cover — so a
+  `__cred_<id>__` token inside TLS can only ever leave toward a covered host
+  and a real secret never reaches an uncovered one on the wire. MITM and
+  SNI-gating were evaluated and set aside: MITM substitutes on some HTTPS
+  clients only at the cost of confidentiality on all of them, and SNI-gating
+  re-checks the host the CONNECT gate already names. `credentials.md` §4/§5
+  now records the decision and its reasoning.
+
+- A `limited` network policy now installs an egress boundary on every shipped
+  backend, each reported at the strength it actually applies. Kubernetes
+  provisions a per-session `socat` relay Pod fronted by a Service and a
+  `NetworkPolicy` that pins the sandbox Pod's egress to DNS plus that relay —
+  enforced by the CNI rather than advisory. Self-hosted binds the same
+  `EgressProxy` on every interface and rides its variables inside each work
+  item's `env`, so a remote worker that honours proxy variables routes
+  through the allowlist — reported `best_effort`, never `enforced`, because a
+  worker that ignores the variables egresses freely. A cluster that refuses
+  the relay, Service, or NetworkPolicy fails provisioning rather than
+  starting a session under a boundary it cannot honour.
+
+- CMA admission now accepts the `anthropic-version` values official clients
+  actually send: `2026-10-21` (sent by `@anthropic-ai/sdk` 1.x and shown in
+  every published curl example) and `2023-06-01` (sent by 0.x releases).
+  Admission stays a closed list — any other value is still refused with
+  `unsupported_anthropic_version` rather than pattern-matched. The
+  first-party SDK now emits `2026-10-21`, the value the service documents.
+  Previously every official-SDK 1.x request failed admission with
+  `unsupported_anthropic_version`.
+
+- The two `user_profiles` routes the official SDK added in 1.8.0 —
+  `DELETE /v1/user_profiles/{id}` and
+  `POST /v1/user_profiles/{id}/action_urls` — now reach the mounted
+  `unsupported_capability` refusal alongside the rest of the profile family
+  instead of falling through to a `404`.
+
+- A `pending` or `running` dream now fails with the published
+  `input_memory_store_unavailable` when its input memory store is archived or
+  deleted underneath it, and with `input_session_unavailable` when an input
+  session is deleted — the two classified causes in the published Errors
+  table. The check runs on every reconcile and on a swept `pending` restart;
+  the input rows stay ordinary resources rather than being held by the dream.
+  Previously an input lost mid-run surfaced only as an unclassified
+  `internal_error` or a stall.
+
+- A scheduled deployment whose session create is refused because the agent
+  declares an MCP `url` server the Environment's `allowed_hosts` does not
+  cover now records the run with the published `mcp_egress_blocked_error`
+  error type and auto-pauses with `paused_reason.error` mirroring it, instead
+  of reporting `unknown_error`. The thrown
+  `mcp_server_outside_allowed_hosts` admission code is mapped onto the
+  published vocabulary in the scheduler's catch; unmapped causes still report
+  `unknown_error` honestly. The non-deployment session create path is
+  unchanged — the same refusal still answers `400` before a row exists.
 
 - MiniMax M3 and M3.1 Flash preserve `reasoning_content` through streaming and
   non-streaming tool history. Session turns, approvals and custom tool results
@@ -205,9 +276,10 @@
   remain ineligible for approval or execution.
 
 - Official TypeScript SDK conformance is pinned to `@anthropic-ai/sdk`
-  `0.132.1`. The route inventory remains 110 method/path pairs, with 90
-  resource mounts and 20 explicit refusals; the stream-first reconnect and
-  quickstart workflows are revalidated against this version.
+  `1.8.0`, up from `0.132.1`. The upgrade added two `user_profiles` routes
+  (now mounted refusals) and changed the `anthropic-version` the SDK sends
+  to `2026-10-21` (now admitted alongside `2023-06-01`). The stream-first
+  reconnect and quickstart workflows are revalidated against this version.
 
 - `file` resources are now refused at session admission on `self_hosted`
   environments, matching the published contract ("自托管沙箱仅支持

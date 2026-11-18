@@ -1,5 +1,20 @@
 [
   {
+    "id": "unsupported-delete-user-profiles-id",
+    "group": "Unsupported official capabilities",
+    "title": "Unsupported official operation",
+    "method": "DELETE",
+    "path": "/v1/user_profiles/{id}",
+    "summary": "Deliberately refused after authentication, throttling, and compatibility-header admission; hosted user profile management is outside the single-tenant runtime scope.",
+    "response": [
+      {
+        "name": "error",
+        "type": "object",
+        "description": "HTTP 400 unsupported_capability with a capability id, reason, and docs/api-matrix.md#unsupported-official-routes reference."
+      }
+    ]
+  },
+  {
     "id": "unsupported-get-sessions-id-threads",
     "group": "Unsupported official capabilities",
     "title": "Unsupported official operation",
@@ -291,6 +306,21 @@
     "method": "POST",
     "path": "/v1/user_profiles/{id}/enrollment_url",
     "summary": "Deliberately refused after authentication, throttling, and compatibility-header admission; no resource operation is executed.",
+    "response": [
+      {
+        "name": "error",
+        "type": "object",
+        "description": "HTTP 400 unsupported_capability with a capability id, reason, and docs/api-matrix.md#unsupported-official-routes reference."
+      }
+    ]
+  },
+  {
+    "id": "unsupported-post-user-profiles-id-action-urls",
+    "group": "Unsupported official capabilities",
+    "title": "Unsupported official operation",
+    "method": "POST",
+    "path": "/v1/user_profiles/{id}/action_urls",
+    "summary": "Deliberately refused after authentication, throttling, and compatibility-header admission; hosted user profile management is outside the single-tenant runtime scope.",
     "response": [
       {
         "name": "error",

@@ -13,6 +13,7 @@
  */
 
 import { nanoid } from 'nanoid';
+import { networkInterfaces } from 'node:os';
 import type { Database } from '@/core/db/database.js';
 import { SESSION_TRANSITIONS } from '@/types/session.js';
 import type { SessionWorkQueue } from './session-work-queue.js';
@@ -21,9 +22,15 @@ import {
   type SandboxProvider,
   type SandboxInstance,
   type EnvironmentConfig,
+  type EgressSubstitution,
   type ExecOptions,
   type ExecResult,
 } from '@/types/sandbox.js';
+import { EgressProxy } from '@/core/net/egress-proxy.js';
+import {
+  environmentEgressAllowlist,
+  environmentNetworkPolicyOf,
+} from '@/core/config/environment-network.js';
 
 export type WorkItemKind = 'exec' | 'write' | 'read' | 'list' | 'custom_tool' | 'tool_call';
 
@@ -1124,10 +1131,13 @@ export class SelfHostedSandboxProvider implements SandboxProvider {
     hostFilesystem: false,
     // The work-item protocol carries no resource-limit fields today.
     resourceLimits: false,
-    // The worker runs on operator infrastructure; whether it can bound egress
-    // is outside this process's knowledge, so a `limited` policy reports the
-    // gap rather than claiming the declared limit holds.
-    networkPolicyEnforcement: 'none',
+    // A `limited` policy installs the same per-session `EgressProxy` the local
+    // provider uses, bound to loopback, and injects its variables into every
+    // work item's `env`. Enforcement is advisory — a worker that ignores proxy
+    // variables egresses freely on its own network — so the provider reports
+    // `best_effort`, never `enforced`: the boundary is what the environment
+    // reaches through, not a wall the worker is confined behind.
+    networkPolicyEnforcement: 'best_effort',
   });
 
   constructor(private readonly queue: WorkQueue, private readonly sessionQueue?: SessionWorkQueue) {}
@@ -1137,7 +1147,17 @@ export class SelfHostedSandboxProvider implements SandboxProvider {
     // earns its claim here rather than at the first enqueue: a worker polling
     // `work/poll` is handed the session's claim as soon as it could serve work.
     this.sessionQueue?.ensure(sessionId);
-    return new SelfHostedSandboxInstance(sessionId, this.queue, (config.timeout ?? 300) * 1000, this.sessionQueue);
+    const policy = environmentNetworkPolicyOf(config);
+    // The proxy binds every interface, like the docker boundary, because a
+    // self-hosted worker is remote by definition — a loopback listener would
+    // be reachable only from the runtime host itself. Every session gets one,
+    // not only `limited` ones: the proxy is also the credential-substitution
+    // boundary, and a session without a declared policy can still carry vault
+    // credentials that must never reach a work item's `env` as plaintext.
+    const egress = await EgressProxy.listen('0.0.0.0', {
+      allowedHosts: policy?.type === 'limited' ? environmentEgressAllowlist(policy) : null,
+    });
+    return new SelfHostedSandboxInstance(sessionId, this.queue, (config.timeout ?? 300) * 1000, this.sessionQueue, egress);
   }
 }
 
@@ -1147,12 +1167,47 @@ class SelfHostedSandboxInstance implements SandboxInstance {
     private readonly queue: WorkQueue,
     private readonly timeoutMs: number,
     private readonly sessionQueue?: SessionWorkQueue,
+    private readonly egress?: EgressProxy,
   ) {}
 
+  /**
+   * The proxy block a runtime-spawned session process (stdio MCP servers)
+   * receives, so its egress crosses the same boundary the session's work
+   * items do.
+   */
+  get egressEnvironment(): Record<string, string> | undefined {
+    return this.egress?.environment();
+  }
+
+  /** The proxy is the session's substitution boundary; it keeps the table. */
+  configureEgressSubstitutions(substitutions: readonly EgressSubstitution[]): void {
+    this.egress?.addSubstitutions(substitutions);
+  }
+
   async execute(command: string, options?: ExecOptions): Promise<ExecResult> {
-    const id = this.queue.enqueue(this.sessionId, 'exec', { command, cwd: options?.cwd, env: options?.env });
+    // The proxy env rides the item's `env` so a worker-side process that
+    // honours proxy variables routes through the boundary; a worker that
+    // ignores them egresses freely, which is why the provider reports
+    // `best_effort` rather than claiming enforcement.
+    const id = this.queue.enqueue(this.sessionId, 'exec', {
+      command,
+      cwd: options?.cwd,
+      env: { ...this.workItemProxyEnvironment(), ...options?.env },
+    });
     const result = (await this.queue.await(id, { timeoutMs: options?.timeout ?? this.timeoutMs })) as ExecResult;
     return result;
+  }
+
+  /**
+   * The proxy env a remote worker honours: the boundary's variables, with the
+   * advertised host pointing at an address the worker can reach — the
+   * runtime's outward IPv4, or `MANAGED_AGENTS_SELF_HOSTED_PROXY_HOST` when
+   * the deployment knows its own reachable name better than an interface
+   * guess does (a NAT'd host, a name behind a tunnel, an IPv6-only site).
+   */
+  private workItemProxyEnvironment(): Record<string, string> | undefined {
+    if (!this.egress) return undefined;
+    return this.egress.environment(selfHostedProxyAdvertisedHost());
   }
 
   async writeFile(path: string, content: string | Buffer): Promise<void> {
@@ -1222,6 +1277,7 @@ class SelfHostedSandboxInstance implements SandboxInstance {
     // The session-level claim ends with the session too: it is never handed out
     // again, and the credential bound to it is revoked.
     this.sessionQueue?.stopForSession(this.sessionId);
+    await this.egress?.close();
   }
 }
 
@@ -1246,6 +1302,28 @@ interface RawWorkItem {
   metadata: string | null;
   heartbeat_at: string | null;
   work_row_id?: number;
+}
+
+/**
+ * The address a remote worker's proxy env should resolve the boundary at.
+ *
+ * `MANAGED_AGENTS_SELF_HOSTED_PROXY_HOST` wins when the deployment knows its
+ * own reachable name better than a guessed interface does — a NAT'd host, a
+ * tunnel endpoint, an IPv6-only site. Otherwise the runtime's first
+ * non-internal IPv4 is the honest best-effort answer: it is the address a
+ * worker on the same network already uses to reach this process's API, and
+ * loopback is deliberately skipped because a remote worker resolves it to
+ * itself, not to this host.
+ */
+function selfHostedProxyAdvertisedHost(): string {
+  const override = process.env.MANAGED_AGENTS_SELF_HOSTED_PROXY_HOST?.trim();
+  if (override) return override;
+  for (const addresses of Object.values(networkInterfaces())) {
+    for (const address of addresses ?? []) {
+      if (address.family === 'IPv4' && !address.internal) return address.address;
+    }
+  }
+  return '127.0.0.1';
 }
 
 function toWorkItem(r: RawWorkItem): WorkItem {

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { parse } from '@babel/parser';
 import type { DocsExamplePage, DocsExampleReplacement } from './manifest.js';
 import { loadDocsExampleSource, type DocsExampleSource } from './source.js';
+import { resolveSnippetSelections, type DocsExampleVerdict } from './manifest.js';
 import { startRuntimeHarness, type RunningRuntime } from '../support/runtime-server.js';
 import { startStubModelServer } from '../support/stub-model-server.js';
 
@@ -16,6 +17,12 @@ export interface DocsExampleRun {
   stderr: string;
   runtimeOutput: string;
   source: DocsExampleSource;
+  /**
+   * The verdict each selected snippet is asserted against, in selection order.
+   * A `deviation` run must NOT exit cleanly — the runtime is expected to
+   * refuse or differ in the way the named contract §4 row records.
+   */
+  verdicts: DocsExampleVerdict[];
 }
 
 export async function runDocsExample(page: DocsExamplePage): Promise<DocsExampleRun> {
@@ -31,7 +38,12 @@ export async function runDocsExample(page: DocsExamplePage): Promise<DocsExample
     writeFileSync(scriptPath, script, 'utf8');
     runtime = await startRuntimeHarness({ modelBaseUrl: stub.baseUrl, model: 'claude-opus-5' });
     const result = await executeScript(scriptPath, runtime.baseUrl);
-    return { ...result, runtimeOutput: runtime.output(), source };
+    return {
+      ...result,
+      runtimeOutput: runtime.output(),
+      source,
+      verdicts: resolveSnippetSelections(page).map((selection) => selection.verdict),
+    };
   } finally {
     try {
       if (runtime) await runtime.stop();
@@ -41,6 +53,34 @@ export async function runDocsExample(page: DocsExamplePage): Promise<DocsExample
       } finally {
         rmSync(scriptRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
       }
+    }
+  }
+}
+
+/**
+ * Assert a docs-example run against its declared verdicts.
+ *
+ * A `conforms` run must exit cleanly — the runtime reproduced the published
+ * call. A `deviation` run must NOT exit cleanly: the runtime is expected to
+ * refuse or diverge in exactly the way the named contract §4 row records, so
+ * a clean exit would mean the recorded deviation no longer holds and the
+ * contract row is stale. The verdict's `contract` pointer is included in the
+ * failure so a stale deviation names the row to re-check.
+ */
+export function assertDocsExampleRun(run: DocsExampleRun): void {
+  const context = `${run.stdout}\n${run.stderr}\n--- runtime ---\n${run.runtimeOutput}`;
+  for (const verdict of run.verdicts) {
+    if (verdict.kind === 'deviation') {
+      if (run.code === 0) {
+        throw new Error(
+          `Expected a deviation (${verdict.contract}) but the snippet ran cleanly.\n` +
+          `The runtime now conforms — re-check the §4 row and flip the verdict to 'conforms'.\n${context}`,
+        );
+      }
+      continue;
+    }
+    if (run.code !== 0) {
+      throw new Error(`Docs example failed but is asserted as conformance.\n${context}`);
     }
   }
 }
@@ -105,7 +145,7 @@ function applyReplacements(source: string, replacements: DocsExampleReplacement[
   return result;
 }
 
-async function executeScript(scriptPath: string, baseUrl: string): Promise<Omit<DocsExampleRun, 'runtimeOutput' | 'source'>> {
+async function executeScript(scriptPath: string, baseUrl: string): Promise<Pick<DocsExampleRun, 'code' | 'stdout' | 'stderr'>> {
   const {
     ANTHROPIC_API_KEY: _anthropicKey,
     ANTHROPIC_AUTH_TOKEN: _anthropicToken,

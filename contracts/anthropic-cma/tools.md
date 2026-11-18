@@ -30,7 +30,12 @@ auto-permission-policy: supported
 - A built-in tool is either executable by the runtime or it is not. A runtime
   must not accept a tool configuration it cannot honour.
 - `web_fetch` and `web_search` accept a domain policy: `allowed_domains` or
-  `blocked_domains`, exactly one of the two.
+  `blocked_domains`, exactly one of the two. Each list holds 1–64 domains of
+  1–255 characters; duplicates are refused. `web_fetch` also accepts a
+  positive-integer `max_content_tokens` cap on the fetched content it returns;
+  `web_search` also accepts a `user_location` object (`type`, `country`,
+  `timezone`) localizing its results. Each setting is refused on the other
+  tool's entry.
 - Domain grammar: plain ASCII hostnames only. No IP addresses, ports,
   wildcards, scheme prefixes, credentials, or whitespace. `localhost` and the
   `.localhost` / `.local` / `.internal` / `.localdomain` / `.invalid` suffixes
@@ -138,6 +143,20 @@ Domain policy (`web-tool-policy.ts`):
   registry suffixes, and label-boundary hyphen rules.
 - `web_fetch` refuses a path; `web_search` permits a path suffix but rejects
   `? # $ , | ^ !` and an empty path.
+- The per-tool settings are bound to their own entry: `max_content_tokens` is a
+  positive integer accepted on `web_fetch` alone and enforced as a
+  chars-per-token budget over the extracted text, and `user_location` is an
+  object of string fields (`type`, `country`, `timezone`) accepted on
+  `web_search` alone — each is refused on the other tool's entry, matching the
+  published binding. Of the `user_location` members only `country` is mapped
+  onto a provider request today (`country` on the Tavily body; Keenable names
+  no country preference); `type` and `timezone` are validated and stored but
+  sent to no shipped adapter, and a provider-dependent member cannot be
+  checked against a live upstream — a `country` a provider does not support
+  or a `timezone` that is not an IANA name is accepted at write time, where
+  the published service would refuse it. That is the *executable* boundary
+  the published validation table records, and this runtime deliberately does
+  not imitate the refusal: it would be a guess dressed as a check.
 - Error message paths point at `tools.<i>.configs.<j>.allowed_domains.<k>` so a
   caller can find the offending entry in a nested toolset.
 - The `allowed_domains ⊆ allowed_hosts` admission runs at session create and
@@ -303,6 +322,7 @@ client loop reads — `evaluated_permission` and `evaluation` included.
 | `web_search` provider | The published service runs search against Anthropic-operated infrastructure; SandBase runs it against the provider an operator configures in Settings. With none configured, a `configs` entry that *names* `web_search` still fails before a session is persisted, and a bare `agent_toolset_20260401`'s implicit enable is accepted but never offered to the model — the refusal semantics are unchanged, only the boundary moved from "never" to "until configured". |
 | `web_fetch` content types | Only text-like content is converted. An image, PDF, or other binary response is reported as its media type and size instead of being inlined, so the model is told what it did not receive. |
 | `web_fetch` content budget | `max_content_tokens` is enforced through a chars-per-token estimate, and the truncation marker says so. The published contract describes a token budget without fixing the unit. |
+| `web_search` `user_location` | Accepted and validated on `web_search` entries only (refused on `web_fetch` like the published binding), and `country` is the one member a shipped adapter maps — Tavily's `country` request field. `type` and `timezone` are stored and echoed but reach no provider request, and the published provider-side refusals (an unsupported `country`, a non-IANA `timezone`) are not imitated: they depend on the upstream provider this runtime does not contact, so the field is validated structurally rather than refused on a guess. |
 | Overflow threshold override | The default is the published 100,000 characters. `loop_engine.options.tool_result_max_chars` is a local extension that lets an operator bound it (1,000–10,000,000); the published contract fixes the threshold and defines no override. |
 | Overflow file location | `/mnt/session/tool_outputs`. The published contract states "a sandbox file" without fixing the directory. |
 | Per-tool config shape | SandBase accepts named per-tool config blocks in a toolset. Field names inside the web policy follow the published ones. |
@@ -327,6 +347,14 @@ client loop reads — `evaluated_permission` and `evaluation` included.
   reach `loop_engine.options`, so an agent cannot raise its own result budget
   — and the default is the published value so an untouched deployment
   conforms.
+- `user_location` is validated but only `country` is executed, because that is
+  the member a shipped adapter speaks: the provider-neutral request carries
+  the whole object, Tavily maps `country`, and no adapter has a `type` or
+  `timezone` parameter to send. The published provider-side refusals are not
+  copied either — whether a `country` is supported and whether a `timezone`
+  is an IANA name are answers only the search provider knows, so refusing
+  them at write would be a guess dressed as a check, the same rule
+  `web-tool-policy.ts` states for every provider-dependent member.
 - A fixed overflow directory makes retrieval predictable for a follow-up `read`
   call without the model having to parse a path out of prose.
 
@@ -347,7 +375,9 @@ client loop reads — `evaluated_permission` and `evaluation` included.
   acceptance and refusal, `api_key` managed-secret storage and masking,
   adapter availability, and `searchProviderFromSettings`'s fail-safe returns.
 - `tests/unit/web-tool-policy.test.ts` — 46 cases covering the domain grammar,
-  exclusivity, empty-list rejection, path rules, and error paths.
+  exclusivity, empty-list rejection, path rules, the per-tool settings
+  bindings (`max_content_tokens` refused on `web_search`, `user_location`
+  refused on `web_fetch`, each setting's own shape checks), and error paths.
 - `tests/unit/environment-network.test.ts` — the `allowed_domains ⊆
   allowed_hosts` admission: coverage by exact host and wildcard, the published
   asymmetry, the path-suffix reduction, the disabled/`blocked_domains` skips,

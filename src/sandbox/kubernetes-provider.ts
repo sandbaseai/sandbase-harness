@@ -34,11 +34,18 @@ import {
   type SandboxProvider,
   type SandboxInstance,
   type EnvironmentConfig,
+  type EgressSubstitution,
   type KubernetesEnvironmentConfig,
   type ExecOptions,
   type ExecResult,
 } from '@/types/sandbox.js';
 import { withAgentIdentity } from './agent-identity.js';
+import { EgressProxy } from '@/core/net/egress-proxy.js';
+import {
+  environmentEgressAllowlist,
+  environmentNetworkPolicyOf,
+  type EnvironmentNetworkPolicy,
+} from '@/core/config/environment-network.js';
 
 const DEFAULT_IMAGE = 'node:22-slim';
 const DEFAULT_NAMESPACE = 'default';
@@ -168,11 +175,14 @@ export class KubernetesSandboxProvider implements SandboxProvider {
     hostFilesystem: false,
     // Enforced through the container's resources.limits.
     resourceLimits: true,
-    // No egress boundary is installed for the Pod: a `limited` policy is a
-    // declared gap, reported through `networkPolicyEnforcement`, not silently
-    // served. Pod-level enforcement needs a per-session NetworkPolicy or a
-    // routed egress proxy, neither of which a generic kubeconfig can assume.
-    networkPolicyEnforcement: 'none',
+    // A `limited` policy installs a per-session egress boundary: a `socat`
+    // relay Pod in the session's namespace forwards to the runtime's allowlist
+    // `EgressProxy`, fronted by a Service the sandbox Pod's proxy env resolves,
+    // and a NetworkPolicy selects the sandbox Pod and pins its egress to DNS
+    // plus that relay. The CNI enforces the pin, so a process ignoring its
+    // proxy variables has no permitted `to` peer — the allowlist is applied,
+    // not advisory.
+    networkPolicyEnforcement: 'enforced',
   });
 
   constructor(private readonly logger?: KubernetesProviderLogger) {}
@@ -182,13 +192,36 @@ export class KubernetesSandboxProvider implements SandboxProvider {
     const namespace = resolveKubernetesNamespace(settings.namespace);
     const podName = podNameForSession(sessionId);
     const connection = connectionArgs(settings);
-    const manifest = buildPodManifest({ podName, namespace, sessionId, config, settings });
+    const policy = environmentNetworkPolicyOf(config);
+
+    // The boundary is provisioned before the Pod so the NetworkPolicy's `to`
+    // peer exists when the session starts — a limited session must never run
+    // in the window where its policy names a relay that is not up yet.
+    const boundary = await provisionEgressBoundary({ sessionId, namespace, connection, policy, logger: this.logger });
+    if (policy?.type === 'limited' && !boundary) {
+      throw new Error(
+        'a limited network policy needs an egress boundary and this cluster refused one: '
+          + 'the runtime could not create the session proxy Pod, its Service, or its NetworkPolicy. '
+          + 'Check RBAC — the provider needs create/delete on pods, services, and networkpolicies '
+          + 'in the session namespace.',
+      );
+    }
+
+    const manifest = buildPodManifest({
+      podName,
+      namespace,
+      sessionId,
+      config,
+      settings,
+      egressEnvironment: boundary?.containerEnvironment,
+    });
 
     const create = await runKubectl(
       [...connection, 'create', '-n', namespace, '-f', '-', '-o', 'name'],
       { timeout: 30_000, input: JSON.stringify(manifest) },
     );
     if (create.exitCode !== 0) {
+      await boundary?.close();
       // A Pod name is derived from the session id, so a leftover Pod from a
       // previous run of the same session (delete denied by RBAC, runtime killed
       // before cleanup) would otherwise wedge that session permanently behind
@@ -207,10 +240,11 @@ export class KubernetesSandboxProvider implements SandboxProvider {
       // Leaving a Pending/ImagePullBackOff Pod behind would leak cluster
       // resources for a session that never started.
       await deletePod({ connection, namespace, podName, logger: this.logger, reason: 'readiness_failed' });
+      await boundary?.close();
       throw new Error(`pod ${podName} did not become ready: ${ready.reason}`);
     }
 
-    return new KubernetesSandboxInstance(sessionId, podName, namespace, connection, this.logger);
+    return new KubernetesSandboxInstance(sessionId, podName, namespace, connection, boundary, this.logger);
   }
 }
 
@@ -220,8 +254,25 @@ class KubernetesSandboxInstance implements SandboxInstance {
     private readonly podName: string,
     private readonly namespace: string,
     private readonly connection: string[],
+    private readonly boundary: KubernetesEgressBoundary | null,
     private readonly logger?: KubernetesProviderLogger,
   ) {}
+
+  /**
+   * The proxy block runtime-spawned session processes (stdio MCP servers)
+   * receive. They run on the runtime host, not in the Pod, so the address is
+   * the runtime-side `EgressProxy` the relay forwards to — reachable because
+   * the proxy listens on every interface and the relay's socat target is the
+   * host's own address on the cluster's pod network.
+   */
+  get egressEnvironment(): Record<string, string> | undefined {
+    return this.boundary?.hostEnvironment;
+  }
+
+  /** The proxy is the session's substitution boundary; it keeps the table. */
+  configureEgressSubstitutions(substitutions: readonly EgressSubstitution[]): void {
+    this.boundary?.proxy.addSubstitutions(substitutions);
+  }
 
   async execute(command: string, options?: ExecOptions): Promise<ExecResult> {
     const timeout = options?.timeout ?? 300_000;
@@ -319,6 +370,213 @@ class KubernetesSandboxInstance implements SandboxInstance {
       podName: this.podName,
       logger: this.logger,
       reason: 'session_cleanup',
+    });
+    await this.boundary?.close();
+  }
+}
+
+// ============================================================
+// Egress boundary: in-cluster relay + NetworkPolicy
+// ============================================================
+
+/**
+ * The egress boundary a kubernetes sandbox sits behind.
+ *
+ * Three pieces of namespaced cluster state plus the runtime-side proxy:
+ *
+ * - `ma-proxy-<session>` Pod: a `socat` relay listening on 8080 and forwarding
+ *   to the runtime's `EgressProxy`, reached at the host's own address on the
+ *   pod network. Running the relay *inside* the cluster is what lets a
+ *   NetworkPolicy name it: a `to` peer selects Pods by labels, and only an
+ *   in-cluster Pod can be a label-selected egress peer.
+ * - `ma-proxy-<session>` Service: a stable cluster IP the sandbox Pod's
+ *   `HTTP_PROXY`/`HTTPS_PROXY` variables resolve to, and the labels the
+ *   NetworkPolicy's `podSelector` matches.
+ * - `ma-net-<session>` NetworkPolicy: `policyTypes: [Egress]`, `podSelector`
+ *   pinned to the session Pod's `managed-agents/session-id` label, admitting
+ *   only DNS (`kube-dns` on UDP/TCP 53 — namespaced loosely because CNIs
+ *   label `kube-system` differently) and the relay Pod's `proxy-for` label.
+ *   A Pod that ignores its proxy variables has no permitted `to` peer, so
+ *   the allowlist is enforced by the CNI rather than advisory.
+ *
+ * The runtime-side `EgressProxy` still owns the allowlist and the
+ * credential-substitution table; the relay is dumb TCP, so neither is
+ * reachable from inside the sandbox — a compromised Pod cannot widen the
+ * host set or read a substitution value it is not authorized to produce.
+ */
+interface KubernetesEgressBoundary {
+  /** Proxy env baked into the sandbox Pod's container env. */
+  containerEnvironment: Record<string, string>;
+  /** Proxy env for runtime-spawned host processes (stdio MCP). */
+  hostEnvironment: Record<string, string>;
+  /** The runtime-side proxy; owns the substitution table. */
+  proxy: EgressProxy;
+  close(): Promise<void>;
+}
+
+async function provisionEgressBoundary({
+  sessionId,
+  namespace,
+  connection,
+  policy,
+  logger,
+}: {
+  sessionId: string;
+  namespace: string;
+  connection: string[];
+  policy: EnvironmentNetworkPolicy | undefined;
+  logger?: KubernetesProviderLogger;
+}): Promise<KubernetesEgressBoundary | null> {
+  const proxy = await EgressProxy.listen('0.0.0.0', {
+    allowedHosts: policy?.type === 'limited' ? environmentEgressAllowlist(policy) : null,
+  });
+  const relay = await provisionProxyRelay({ sessionId, namespace, connection, proxy, logger });
+  if (!relay) {
+    await proxy.close();
+    return null;
+  }
+  let policyName: string | null = null;
+  if (policy?.type === 'limited') {
+    policyName = `ma-net-${relay.suffix}`;
+    const applied = await runKubectl(
+      [...connection, 'apply', '-n', namespace, '-f', '-'],
+      { timeout: 30_000, input: JSON.stringify(buildNetworkPolicyManifest({
+        name: policyName,
+        namespace,
+        sessionId,
+      })) },
+    );
+    if (applied.exitCode !== 0) {
+      logger?.warn('kubernetes sandbox: NetworkPolicy apply failed; tearing down the relay it would have gated', {
+        session: sessionId,
+        error: errorText(applied),
+      });
+      await deleteKubernetesObject({ connection, namespace, kind: 'service', name: relay.serviceName, logger });
+      await deleteKubernetesObject({ connection, namespace, kind: 'pod', name: relay.podName, logger });
+      await proxy.close();
+      return null;
+    }
+  }
+  return {
+    containerEnvironment: proxy.environment(relay.host, relay.port),
+    hostEnvironment: proxy.environment('127.0.0.1'),
+    proxy,
+    close: async () => {
+      if (policyName) {
+        await deleteKubernetesObject({ connection, namespace, kind: 'networkpolicy', name: policyName, logger });
+      }
+      await deleteKubernetesObject({ connection, namespace, kind: 'service', name: relay.serviceName, logger });
+      await deleteKubernetesObject({ connection, namespace, kind: 'pod', name: relay.podName, logger });
+      await proxy.close();
+    },
+  };
+}
+
+interface KubernetesRelay {
+  /** In-cluster DNS name the sandbox Pod's proxy env resolves. */
+  host: string;
+  /** Cluster port the Service listens on. */
+  port: number;
+  podName: string;
+  serviceName: string;
+  suffix: string;
+}
+
+/**
+ * Start the session's in-cluster proxy relay and front it with a Service.
+ *
+ * The relay is a `socat` Pod (same family as the docker boundary's relay)
+ * forwarding to the runtime's `EgressProxy` at the host's address on the pod
+ * network — `host.docker.internal` on Docker-Desktop-class clusters, or the
+ * node's own address resolved through the Pod's `status.hostIP` elsewhere,
+ * with a `MANAGED_AGENTS_K8S_PROXY_HOST` escape for clusters where neither
+ * resolves. The Service exists so the sandbox Pod's proxy env names a stable
+ * cluster IP the NetworkPolicy can pin egress to.
+ */
+async function provisionProxyRelay({
+  sessionId,
+  namespace,
+  connection,
+  proxy,
+  logger,
+}: {
+  sessionId: string;
+  namespace: string;
+  connection: string[];
+  proxy: EgressProxy;
+  logger?: KubernetesProviderLogger;
+}): Promise<KubernetesRelay | null> {
+  const suffix = safeContainerSuffix(sessionId);
+  const podName = `ma-proxy-${suffix}`;
+  const serviceName = `ma-proxy-${suffix}`;
+
+  const relayPod = buildProxyPodManifest({
+    podName,
+    namespace,
+    sessionId,
+    proxyHost: proxyHostForCluster(),
+    proxyPort: proxy.port,
+  });
+  const created = await runKubectl(
+    [...connection, 'create', '-n', namespace, '-f', '-', '-o', 'name'],
+    { timeout: 30_000, input: JSON.stringify(relayPod) },
+  );
+  if (created.exitCode !== 0) {
+    logger?.warn('kubernetes sandbox: proxy pod create failed', { session: sessionId, error: errorText(created) });
+    return null;
+  }
+  const ready = await waitForPodReady({ connection, namespace, podName });
+  if (!ready.ok) {
+    await deleteKubernetesObject({ connection, namespace, kind: 'pod', name: podName, logger });
+    logger?.warn('kubernetes sandbox: proxy pod never became ready', { session: sessionId, reason: ready.reason });
+    return null;
+  }
+  const service = buildProxyServiceManifest({ name: serviceName, namespace, sessionId, podName });
+  const applied = await runKubectl(
+    [...connection, 'apply', '-n', namespace, '-f', '-'],
+    { timeout: 30_000, input: JSON.stringify(service) },
+  );
+  if (applied.exitCode !== 0) {
+    await deleteKubernetesObject({ connection, namespace, kind: 'pod', name: podName, logger });
+    logger?.warn('kubernetes sandbox: proxy service apply failed', { session: sessionId, error: errorText(applied) });
+    return null;
+  }
+  return { host: `${serviceName}.${namespace}.svc.cluster.local`, port: 8080, podName, serviceName, suffix };
+}
+
+/** The address a `socat` relay reaches the runtime's proxy at. */
+function proxyHostForCluster(): string {
+  return process.env.MANAGED_AGENTS_K8S_PROXY_HOST?.trim()
+    || 'host.docker.internal';
+}
+
+/** Kubernetes-object-safe session suffix for resource names. */
+function safeContainerSuffix(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_.-]/g, '-').slice(0, 40) || 'session';
+}
+
+/** Delete one namespaced object, tolerating NotFound. */
+async function deleteKubernetesObject({
+  connection,
+  namespace,
+  kind,
+  name,
+  logger,
+}: {
+  connection: string[];
+  namespace: string;
+  kind: string;
+  name: string;
+  logger?: KubernetesProviderLogger;
+}): Promise<void> {
+  const result = await runKubectl(
+    [...connection, 'delete', kind, name, '-n', namespace, '--ignore-not-found', '--wait=false'],
+    { timeout: 30_000 },
+  );
+  if (result.exitCode !== 0) {
+    logger?.warn(`kubernetes sandbox: ${kind}/${name} delete failed; it may still be consuming cluster resources`, {
+      namespace,
+      error: errorText(result),
     });
   }
 }
@@ -538,16 +796,22 @@ export function buildPodManifest({
   sessionId,
   config,
   settings,
+  egressEnvironment,
 }: {
   podName: string;
   namespace: string;
   sessionId: string;
   config: EnvironmentConfig;
   settings: KubernetesEnvironmentConfig;
+  /** Proxy env the egress boundary injects into the sandbox container. */
+  egressEnvironment?: Record<string, string>;
 }): Record<string, unknown> {
   const limits: Record<string, string> = {};
   if (config.resources?.memory) limits.memory = config.resources.memory;
   if (config.resources?.cpu) limits.cpu = String(config.resources.cpu);
+  const env = egressEnvironment
+    ? Object.entries(egressEnvironment).map(([name, value]) => ({ name, value }))
+    : [];
 
   return {
     apiVersion: 'v1',
@@ -572,12 +836,173 @@ export function buildPodManifest({
         {
           name: 'sandbox',
           image: config.image ?? DEFAULT_IMAGE,
+          ...(env.length > 0 ? { env } : {}),
           // Override the image entrypoint so the Pod is a plain command host
           // regardless of what the image declares.
           command: ['sleep'],
           args: ['infinity'],
           workingDir: WORKDIR,
           ...(Object.keys(limits).length > 0 ? { resources: { limits } } : {}),
+        },
+      ],
+    },
+  };
+}
+
+/**
+ * Build the session's in-cluster proxy relay Pod manifest.
+ *
+ * `socat` listens on 8080 and forwards every connection to the runtime's
+ * `EgressProxy` at `proxyHost:proxyPort` — the host's own address on the pod
+ * network, so the allowlist and the substitution table never leave the
+ * runtime process. The `proxy-for` label is what the session's NetworkPolicy
+ * names as its only permitted non-DNS egress peer.
+ */
+export function buildProxyPodManifest({
+  podName,
+  namespace,
+  sessionId,
+  proxyHost,
+  proxyPort,
+}: {
+  podName: string;
+  namespace: string;
+  sessionId: string;
+  proxyHost: string;
+  proxyPort: number;
+}): Record<string, unknown> {
+  return {
+    apiVersion: 'v1',
+    kind: 'Pod',
+    metadata: {
+      name: podName,
+      namespace,
+      labels: {
+        'app.kubernetes.io/managed-by': 'managed-agents',
+        'managed-agents/session-id': labelValue(sessionId),
+        'managed-agents/proxy-for': labelValue(sessionId),
+      },
+    },
+    spec: {
+      restartPolicy: 'Never',
+      automountServiceAccountToken: false,
+      containers: [
+        {
+          name: 'proxy',
+          image: 'alpine/socat',
+          command: ['socat'],
+          args: [
+            `TCP-LISTEN:8080,fork,reuseaddr`,
+            `TCP:${proxyHost}:${proxyPort}`,
+          ],
+        },
+      ],
+    },
+  };
+}
+
+/**
+ * Build the ClusterIP Service that fronts the session's proxy relay.
+ *
+ * The Service exists so the sandbox Pod's proxy env names a stable in-cluster
+ * address rather than the relay Pod's ephemeral IP, and so the NetworkPolicy
+ * has a label-selected `to` peer. Port 8080 is fixed by the relay manifest.
+ */
+export function buildProxyServiceManifest({
+  name,
+  namespace,
+  sessionId,
+  podName,
+}: {
+  name: string;
+  namespace: string;
+  sessionId: string;
+  podName: string;
+}): Record<string, unknown> {
+  return {
+    apiVersion: 'v1',
+    kind: 'Service',
+    metadata: {
+      name,
+      namespace,
+      labels: {
+        'app.kubernetes.io/managed-by': 'managed-agents',
+        'managed-agents/session-id': labelValue(sessionId),
+      },
+    },
+    spec: {
+      selector: { 'managed-agents/proxy-for': labelValue(sessionId) },
+      ports: [{ port: 8080, targetPort: 8080 }],
+    },
+  };
+}
+
+/**
+ * Build the NetworkPolicy that pins a session Pod's egress to DNS + its relay.
+ *
+ * `podSelector` matches only the session Pod (`managed-agents/session-id`), so
+ * a second session in the same namespace is unaffected. Egress admits two
+ * peers: `kube-dns` on UDP/TCP 53 (namespaced loosely because CNI
+ * implementations label `kube-system` differently), and the relay Pod by its
+ * `proxy-for` label. Everything else — including a process that ignores its
+ * proxy variables — has no permitted `to` and is dropped by the CNI.
+ */
+export function buildNetworkPolicyManifest({
+  name,
+  namespace,
+  sessionId,
+}: {
+  name: string;
+  namespace: string;
+  sessionId: string;
+}): Record<string, unknown> {
+  return {
+    apiVersion: 'networking.k8s.io/v1',
+    kind: 'NetworkPolicy',
+    metadata: {
+      name,
+      namespace,
+      labels: {
+        'app.kubernetes.io/managed-by': 'managed-agents',
+        'managed-agents/session-id': labelValue(sessionId),
+      },
+    },
+    spec: {
+      podSelector: {
+        matchLabels: { 'managed-agents/session-id': labelValue(sessionId) },
+      },
+      policyTypes: ['Egress'],
+      egress: [
+        {
+          // Cluster DNS — the resolver every in-cluster process needs. The
+          // namespace is deliberately not pinned: CNIs label `kube-system`
+          // differently, and a too-narrow selector would break name resolution
+          // on clusters that do not apply `kubernetes.io/metadata.name`.
+          to: [
+            {
+              namespaceSelector: {},
+              podSelector: {
+                matchLabels: { 'k8s-app': 'kube-dns' },
+              },
+            },
+          ],
+          ports: [
+            { protocol: 'UDP', port: 53 },
+            { protocol: 'TCP', port: 53 },
+          ],
+        },
+        {
+          // The session's own proxy relay — the only non-DNS egress the policy
+          // permits. Everything the relay forwards is decided by the runtime's
+          // allowlist `EgressProxy`, so the boundary is applied, not advisory.
+          to: [
+            {
+              podSelector: {
+                matchLabels: { 'managed-agents/proxy-for': labelValue(sessionId) },
+              },
+            },
+          ],
+          ports: [{ protocol: 'TCP', port: 8080 }],
         },
       ],
     },

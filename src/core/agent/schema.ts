@@ -7,7 +7,8 @@
 
 import { z } from 'zod';
 import { BUILTIN_TOOL_NAMES } from '@/core/capabilities/registry.js';
-import { modelCapabilityRejection, normalizeModelField } from '@/core/agent/model-object.js';
+import { modelCapabilityRejection, normalizeModelField, type ModelEffortLevel } from '@/core/agent/model-object.js';
+import { anthropicModelCapabilities } from '@/model/anthropic-capabilities.js';
 import {
   validateWebToolConfigs,
   webToolPolicyFieldsSchema,
@@ -522,6 +523,20 @@ export function validateAgentDefinition(input: unknown): ValidationResult {
  * the object form it is authoritative: the profile is derived from that object,
  * and a `model_config` sent beside it is ignored rather than merged.
  */
+/**
+ * The level the published service resolves when a definition omits `effort`.
+ *
+ * Backed by the published effort page: `medium` on Claude Opus 5.5 and Claude
+ * Haiku 5.5, `high` on every other model that accepts effort, and `undefined`
+ * on a model with no effort support or one the capability table does not know.
+ * An `undefined` return means "do not invent a level" — the stored profile
+ * keeps `effort` absent rather than writing a guess, which is the honest
+ * answer for a model this runtime cannot name a default for.
+ */
+function modelEffortDefault(modelId: string): ModelEffortLevel | undefined {
+  return anthropicModelCapabilities(modelId)?.effortDefault;
+}
+
 function normalizeModelConfig(profile: {
   id: string;
   speed: AgentModelSpeed;
@@ -533,7 +548,14 @@ function normalizeModelConfig(profile: {
     // Parsed and validated before this point so an unsupported level fails
     // loudly, then carried through so the value survives a read-back — and, on
     // Anthropic provider models that support the level, reaches the request.
-    ...(profile.effort ? { effort: profile.effort } : {}),
+    // An omitted level falls back to the model's documented save-time default
+    // so the stored definition is self-describing rather than inheriting
+    // whatever the runtime/provider happens to fall back to. An explicit value
+    // always wins; a model the capability table does not cover keeps the field
+    // absent rather than guessing a default.
+    ...(profile.effort
+      ? { effort: profile.effort }
+      : modelEffortDefault(profile.id) ? { effort: modelEffortDefault(profile.id) } : {}),
   };
 }
 
@@ -541,19 +563,18 @@ function normalizeAgentDefinition(data: z.infer<typeof agentDefinitionSchema>): 
   const normalizedTools = normalizeCustomToolsets(data.tools);
 
   if (typeof data.model === 'string') {
+    const modelId = data.model_config?.id ?? data.model;
     return {
       ...data,
       model: data.model,
       ...(normalizedTools ? { tools: normalizedTools } : {}),
-      ...(data.model_config
-        ? {
-            model_config: normalizeModelConfig({
-              id: data.model_config.id ?? data.model,
-              speed: data.model_config.speed,
-              ...(data.model_config.effort ? { effort: data.model_config.effort } : {}),
-            }),
-          }
-        : {}),
+      // A bare `model` string with no `model_config` still resolves the
+      // save-time effort default so the stored definition is self-describing.
+      model_config: normalizeModelConfig({
+        id: modelId,
+        speed: data.model_config?.speed ?? 'standard',
+        effort: data.model_config?.effort,
+      }),
     } as AgentDefinition;
   }
 

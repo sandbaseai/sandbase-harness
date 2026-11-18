@@ -8,8 +8,22 @@
  * sends a beta the server no longer recognizes.
  */
 
-/** The only supported `anthropic-version` value. */
-export const CMA_ANTHROPIC_VERSION = '2023-06-01';
+/**
+ * The `anthropic-version` values admitted on a canonical `/v1` request.
+ *
+ * The managed-agents contract publishes `2026-10-21`: it is the version every
+ * official-docs example sends and the version the official SDK sends from
+ * 1.x on. `2023-06-01` stays admitted because it is the value the 0.x SDK line
+ * sent — the version the earlier pin of this contract recorded — and a
+ * caller on that SDK line is still a legitimate CMA client; refusing it would
+ * be an upgrade trap the published contract does not describe.
+ */
+export const CMA_ANTHROPIC_VERSION = '2026-10-21';
+export const CMA_LEGACY_ANTHROPIC_VERSION = '2023-06-01';
+export const CMA_ADMITTED_ANTHROPIC_VERSIONS: readonly string[] = [
+  CMA_ANTHROPIC_VERSION,
+  CMA_LEGACY_ANTHROPIC_VERSION,
+];
 
 /** `anthropic-beta` for every canonical resource except memory stores. */
 export const CMA_MANAGED_AGENTS_BETA = 'managed-agents-2026-04-01';

@@ -14,8 +14,12 @@ extension-namespace-exclusion: supported
 
 ## 1. Official definition
 
-- Ordinary Managed Agents requests carry both `anthropic-version: 2023-06-01`
-  and `anthropic-beta: managed-agents-2026-04-01`.
+- Ordinary Managed Agents requests carry `anthropic-version` and
+  `anthropic-beta: managed-agents-2026-04-01`. The published value of the
+  version header is `2026-10-21` — the value every official-docs example
+  sends and the value the official SDK sends from 1.x on. `2023-06-01` is the
+  value the 0.x SDK line sent, and a caller on that line is still a
+  legitimate CMA client.
 - Memory store endpoints switch the beta to `agent-memory-2026-07-22`. The two
   beta values are mutually exclusive: a request carrying both is not a request
   in either surface.
@@ -35,7 +39,7 @@ them is a local caller and falls back to the local API contract.
 | --- | --- |
 | no `x-api-key`, no `anthropic-version`, no `anthropic-beta` | not a CMA request; local contract applies |
 | any compatibility header present, `anthropic-version` missing | 400 `missing_anthropic_version` |
-| `anthropic-version` present and not `2023-06-01` | 400 `unsupported_anthropic_version` |
+| `anthropic-version` present and not `2026-10-21` or `2023-06-01` | 400 `unsupported_anthropic_version` |
 | any compatibility header present, `anthropic-beta` missing | 400 `missing_anthropic_beta` |
 | `anthropic-beta` not comma-separated non-empty identifiers | 400 `malformed_anthropic_beta` |
 | both `managed-agents-2026-04-01` and `agent-memory-2026-07-22` on a memory-store path | 400 `conflicting_memory_store_beta` |
@@ -68,6 +72,7 @@ request that omits them entirely, as described in §4.
 | Header-free local path | A request carrying none of the three compatibility headers is treated as a local caller and is not admission-checked. The published contract has no header-free path. This is a deliberate **local-first extension** and the reason `compatibility-header-admission` stays `partial`; a request that carries any compatibility header is still admitted by the published beta and version rules. |
 | Error code naming | SandBase returns its own stable `code` values for each admission failure. The published contract documents the header requirement, not SandBase's code strings. |
 | Admission trigger | SandBase engages admission on the presence of `x-api-key` alone, without requiring a beta header first. The published contract does not define this intermediate state. |
+| Version set | Two `anthropic-version` values are admitted: `2026-10-21` (the published value — every official-docs example and the 1.x SDK send it) and `2023-06-01` (the 0.x SDK line's value, which the earlier revision of this contract pinned as the only one). Anything else is still `unsupported_anthropic_version` — an unlisted version is refused rather than pattern-matched, because a version is a claim about the whole request shape, not a date to compare. |
 
 ## 5. Reason for the difference
 
@@ -81,6 +86,12 @@ request that omits them entirely, as described in §4.
 - Admission triggers on any compatibility header so a client that sends
   `x-api-key` and forgets the beta pair is told exactly which header is
   missing, rather than silently falling through to the local contract.
+- Two versions are admitted rather than one because the version header names
+  the contract the client was built against, and both values name a real one:
+  the official SDK line carried `2023-06-01` through 0.x and moved to
+  `2026-10-21` at 1.x, the same value the published examples use. Refusing
+  either would reject a client this contract exists to serve, while admitting
+  a *third* value would be accepting a version nobody published.
 
 ## 6. Corresponding tests
 
