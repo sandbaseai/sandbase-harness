@@ -226,7 +226,7 @@ describe('API authentication', () => {
           'anthropic-version': '2024-01-01',
           'anthropic-beta': 'managed-agents-2026-04-01',
         },
-        'Unsupported anthropic-version. Expected "2023-06-01".',
+        'Unsupported anthropic-version. Expected "2026-10-21".',
         'unsupported_anthropic_version',
       ],
       [

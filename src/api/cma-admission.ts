@@ -9,6 +9,7 @@
 
 import type { Context, MiddlewareHandler } from 'hono';
 import {
+  CMA_ADMITTED_ANTHROPIC_VERSIONS,
   CMA_AGENT_MEMORY_BETA,
   CMA_ANTHROPIC_VERSION,
   CMA_MANAGED_AGENTS_BETA,
@@ -55,7 +56,7 @@ export function createCmaRequestAdmissionMiddleware(): MiddlewareHandler {
     if (!version) {
       return invalidRequest(c, CMA_ADMISSION_CODES.missingVersion, 'Missing required header: anthropic-version.');
     }
-    if (version !== CMA_ANTHROPIC_VERSION) {
+    if (!CMA_ADMITTED_ANTHROPIC_VERSIONS.includes(version)) {
       return invalidRequest(
         c,
         CMA_ADMISSION_CODES.unsupportedVersion,

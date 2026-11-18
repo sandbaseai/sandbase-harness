@@ -19,7 +19,9 @@ it('projects model objects through both SDKs, versions, frozen snapshots and upd
     const official = new Anthropic({ baseURL, apiKey: 'test-key', authToken: null, maxRetries: 0 });
     const local = new ManagedAgentsClient({ baseUrl: baseURL });
     const bare = await official.beta.agents.create({ name: 'bare', model: 'claude-opus-5-5' });
-    expect(bare.model).toEqual({ id: 'claude-opus-5-5', speed: 'standard' });
+    // An omitted effort resolves to the model's documented save-time default —
+    // medium on Opus 5.5 — so the stored profile is self-describing on read.
+    expect(bare.model).toEqual({ id: 'claude-opus-5-5', speed: 'standard', effort: { type: 'medium' } });
     expect((await local.agents.update(bare.id, {})).version).toBe(1);
     const model = { id: 'claude-opus-5-5', effort: { type: 'high' as const }, speed: 'fast' as const };
     const agent = await official.beta.agents.create({ name: 'profile', model });

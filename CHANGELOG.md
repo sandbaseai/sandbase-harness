@@ -109,6 +109,21 @@
 
 ### Fixed
 
+- CMA admission now accepts the `anthropic-version` values official clients
+  actually send: `2026-10-21` (sent by `@anthropic-ai/sdk` 1.x and shown in
+  every published curl example) and `2023-06-01` (sent by 0.x releases).
+  Admission stays a closed list — any other value is still refused with
+  `unsupported_anthropic_version` rather than pattern-matched. The
+  first-party SDK now emits `2026-10-21`, the value the service documents.
+  Previously every official-SDK 1.x request failed admission with
+  `unsupported_anthropic_version`.
+
+- The two `user_profiles` routes the official SDK added in 1.8.0 —
+  `DELETE /v1/user_profiles/{id}` and
+  `POST /v1/user_profiles/{id}/action_urls` — now reach the mounted
+  `unsupported_capability` refusal alongside the rest of the profile family
+  instead of falling through to a `404`.
+
 - A `pending` or `running` dream now fails with the published
   `input_memory_store_unavailable` when its input memory store is archived or
   deleted underneath it, and with `input_session_unavailable` when an input
@@ -238,9 +253,10 @@
   remain ineligible for approval or execution.
 
 - Official TypeScript SDK conformance is pinned to `@anthropic-ai/sdk`
-  `0.132.1`. The route inventory remains 110 method/path pairs, with 90
-  resource mounts and 20 explicit refusals; the stream-first reconnect and
-  quickstart workflows are revalidated against this version.
+  `1.8.0`, up from `0.132.1`. The upgrade added two `user_profiles` routes
+  (now mounted refusals) and changed the `anthropic-version` the SDK sends
+  to `2026-10-21` (now admitted alongside `2023-06-01`). The stream-first
+  reconnect and quickstart workflows are revalidated against this version.
 
 - `file` resources are now refused at session admission on `self_hosted`
   environments, matching the published contract ("自托管沙箱仅支持

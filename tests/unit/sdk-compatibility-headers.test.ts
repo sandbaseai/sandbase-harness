@@ -14,7 +14,7 @@ import { betaForPath, withCompatibilityHeaders } from '@/sdk/headers.js';
 describe('SDK compatibility headers', () => {
   it('sends the version and the managed-agents beta on a canonical request', () => {
     expect(withCompatibilityHeaders('/v1/agents', {})).toEqual({
-      'anthropic-version': '2023-06-01',
+      'anthropic-version': '2026-10-21',
       'anthropic-beta': 'managed-agents-2026-04-01',
     });
   });
@@ -37,7 +37,7 @@ describe('SDK compatibility headers', () => {
       'anthropic-beta': 'custom-beta',
     });
     expect(headers['anthropic-beta']).toBe('custom-beta');
-    expect(headers['anthropic-version']).toBe('2023-06-01');
+    expect(headers['anthropic-version']).toBe('2026-10-21');
   });
 
   it('keeps unrelated caller headers untouched', () => {

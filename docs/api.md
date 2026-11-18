@@ -60,8 +60,12 @@ Requests using `x-api-key`, or either Anthropic compatibility header, are
 admitted before CMA route handlers run. They must include:
 
 ```text
-anthropic-version: 2023-06-01
+anthropic-version: 2026-10-21
 ```
+
+`2023-06-01` — the value the 0.x SDK line sent — is also admitted, so a caller
+on that line is still a legitimate CMA client. Any other version value is
+refused with `unsupported_anthropic_version`.
 
 Normal CMA resources require the managed-agents beta:
 
@@ -110,7 +114,7 @@ before discarding the response.
 The published SDK sends the canonical pair on every `/v1/...` request:
 
 ```text
-anthropic-version: 2023-06-01
+anthropic-version: 2026-10-21
 anthropic-beta: managed-agents-2026-04-01
 ```
 
@@ -205,7 +209,9 @@ resource response.
 | POST | `/v1/tunnels/{id}/certificates/{certificate_id}/archive` |
 | GET, POST | `/v1/user_profiles` |
 | GET, POST | `/v1/user_profiles/{id}` |
+| DELETE | `/v1/user_profiles/{id}` |
 | POST | `/v1/user_profiles/{id}/enrollment_url` |
+| POST | `/v1/user_profiles/{id}/action_urls` |
 | GET | `/v1/sessions/{id}/threads` |
 | GET | `/v1/sessions/{id}/threads/{thread_id}` |
 | GET | `/v1/sessions/{id}/threads/{thread_id}/events` |
@@ -627,7 +633,8 @@ caller-facing thinking field because the published model object defines none.
 
 Every agent response returns `model` as an object: `{"id": "claude-opus-5-5",
 "speed": "standard", "effort": {"type": "high"}}`. `id` and `speed` are always
-present; `effort` appears only when stored explicitly. This applies to CRUD,
+present; `effort` appears when stored explicitly or filled from the save-time
+default. This applies to CRUD,
 version reads, session snapshots, and `session.updated` events. Stored definitions
 and event history retain their internal string model and are projected on read.
 
@@ -638,9 +645,14 @@ compatibility extension, omitted for standard speed without explicit effort.
 Input still accepts a string or an object, including object-form effort, and
 an object `model` is authoritative over a sibling `model_config`.
 
-The official service resolves per-model effort defaults at save time. Harness
-still leaves omitted effort to deployment/provider configuration and does not
-invent a default in responses. Default resolution remains a tracked parity gap.
+The official service resolves per-model effort defaults at save time, and
+Harness mirrors that rule at write: an omitted `effort` on an effort-capable
+Anthropic-table model is stored as the documented default (`medium` on Opus 5.5
+and Haiku 5.5, `high` on the rest), so the saved profile is self-describing. An
+explicit value always wins, and a model the table does not know — or one that
+takes no effort — stores no invented level. On update, the published exception
+applies: an unchanged `id` keeps the stored level, a changed `id` resets to the
+new model's default.
 `extended` speed remains a local extension, and returned options on providers
 that do not execute them are configuration echoes rather than execution claims.
 
