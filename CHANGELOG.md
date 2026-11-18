@@ -4,6 +4,20 @@
 
 ### Added
 
+- An agent definition that omits `model.effort` is now stored with the
+  model's documented save-time default instead of leaving the field to the
+  runtime/provider fallback. The per-model defaults come from the published
+  effort page — `medium` on Claude Opus 5.5 and Claude Haiku 5.5, `high` on
+  every other effort-capable model — recorded in the capability table
+  (`src/model/anthropic-capabilities.ts` `effortDefault`), so the stored
+  profile is self-describing and the agent read, version read, and frozen
+  session snapshot all return the level the runtime executes. An explicit
+  `effort` always wins; a model the table does not know keeps `effort`
+  absent rather than inventing a level, and a no-effort model (Haiku 4.5)
+  stores none. The update path follows the published exception: an
+  unchanged model `id` keeps its stored effort on an omitted-effort update,
+  while a changed `id` resets to the new model's default.
+
 - Self-hosted environments now execute built-in `agent_toolset` calls on the
   environment's workers — the published "your integration provides
   `agent_toolset` results" split. A non-confirmation-gated builtin call on a

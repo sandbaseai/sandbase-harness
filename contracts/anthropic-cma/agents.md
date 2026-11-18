@@ -55,8 +55,9 @@ the model profile is `src/core/agent/model-object.ts`, and the routes are
   object-form `effort` when explicitly stored. This covers CRUD, versions,
   session snapshots and update events. `model_config` remains a local compatibility
   extension, omitted for standard speed without explicit effort. String readers
-  must migrate to `model.id`; Console and the local SDK do so. The official
-  save-time default effort remains a gap (see §4). On the Anthropic provider `effort` and `speed`
+  must migrate to `model.id`; Console and the local SDK do so. An omitted
+  `effort` is resolved to the model's documented default at save time (see §4),
+  so the stored profile is self-describing. On the Anthropic provider `effort` and `speed`
   are also executed: the level reaches the request as `output_config.effort`
   and `fast` as `speed` with the published `fast-mode-2026-02-01` beta, each
   gated by the model capability table in `src/model/anthropic-capabilities.ts`,
@@ -121,7 +122,7 @@ field the runtime cannot honour instead of dropping it.
 
 | Difference | Detail |
 | --- | --- |
-| Default `model.effort` | The response now uses the published object shape, including object-form effort when stored. The official service resolves per-model defaults at save time (the Opus 5.5 example returns `medium`). Harness leaves omitted effort to deployment/provider settings and omits it on reads; filling the response alone would misrepresent execution. A source-backed default table and save-time semantics remain in BACKLOG. `extended` speed and `model_config` are local extensions. |
+| Default `model.effort` | The save-time fill is implemented: a definition that omits `effort` is stored with the model's documented default (the published effort page fixes `medium` on Claude Opus 5.5 and Claude Haiku 5.5, `high` on every other effort-capable model), so the stored profile is self-describing and every read — the agent read, the version read, the frozen session snapshot — returns the level the runtime executes. An explicit `effort` always wins; a model the capability table does not know keeps `effort` absent rather than inventing a level, and a no-effort model (Haiku 4.5) stores none. The update path honours the published exception: an unchanged `id` keeps the stored effort on an omitted-effort update, a changed `id` resets to the new model's default. `extended` speed and `model_config` remain local extensions. |
 | `model.speed` | Executed on the Anthropic provider when the model supports it: `fast` is sent as `speed: "fast"` and the provider attaches the `fast-mode-2026-02-01` beta. The capability table (`src/model/anthropic-capabilities.ts`) holds the published fast-mode list — Opus 5.5, Opus 5, Opus 4.8 — and `fast` on a listed model that cannot take it is refused at create/update with `unsupported_model_speed` rather than stored and silently degraded. `standard` and the local `extended` produce no wire field. A model id the table does not know is accepted and sends nothing. |
 | `model.effort` | Parsed, validated, stored in the model profile, and returned by every read projection (agent, version, and session snapshot). On the Anthropic provider the level reaches the request as `output_config.effort` — capability-gated per level, because the published lists are not uniform (Opus 4.6 and Sonnet 4.6 take `max` but not `xhigh`; Opus 4.5 tops out at `high`; Haiku 4.5 takes no effort). A listed model refused its level fails create/update with `unsupported_model_effort` naming the allowed set; a level outside the published vocabulary is `invalid_model_effort`. Models outside the table, and every non-Anthropic provider, accept the field and send nothing. A deployment may also set `reasoning_effort` in its own model settings — operator-level, applying to the model rather than to an agent. |
 | `model.inference_geo` | Refused by name with `unsupported_model_field` when a well-formed pin is sent: this runtime has no inference-geography control, so accepting it would promise a pin it cannot hold. An unknown value is `invalid_inference_geo` first. |
@@ -137,6 +138,20 @@ field the runtime cannot honour instead of dropping it.
   pin would mean inventing semantics. Refusing it by name tells the caller the
   field was understood and cannot take effect, which is the only answer they can
   act on.
+- The save-time `effort` default is written onto the definition, not applied
+  at read or request time: the published service resolves per-model defaults
+  into the stored object, so filling at save makes the local definition
+  self-describing the same way — a session snapshot then carries the level the
+  runtime actually executes rather than whatever the provider happened to fall
+  back to. The table is sourced from the published effort page (`medium` on
+  Opus 5.5 and Haiku 5.5, `high` on every other effort-capable model); a model
+  that page does not cover is deliberately given no invented level, because a
+  stored default the docs do not name would be a guess dressed as the model's
+  own contract. The update path follows the published exception rather than
+  whole-object replacement for `effort` alone: an unchanged `id` keeps its
+  stored level, a changed `id` resets to the new model's default — the same
+  rule the official docs spell out, applied at the merge boundary where the
+  stored value is still in hand.
 - `effort` is executed on Anthropic and retained elsewhere rather than
   refused: the canonical request shape carries it, so a definition keeps the
   value even where it cannot take effect — a field that is stored and never
@@ -199,6 +214,11 @@ field the runtime cannot honour instead of dropping it.
   turn carries `output_config.effort`, `speed`, the fast-mode beta header, and
   adaptive thinking for a capable model; a listed model that takes none and an
   unknown model id both send none.
+- `tests/integration/agent-effort-default.test.ts` — the save-time default
+  fill: `medium` on Opus 5.5, `high` on a default-to-high model, explicit
+  `effort` winning, no invented level on an unknown or no-effort model, the
+  session snapshot carrying the filled level, and the update rule's
+  unchanged-id preserve / changed-id reset.
 - `tests/integration/agent-effort-echo.test.ts` — the two halves of
   stored-and-echoed on a provider with no effort parameter: an agent read, the
   version listing, a session's frozen snapshot, and the session list all

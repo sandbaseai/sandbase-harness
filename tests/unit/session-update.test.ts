@@ -18,9 +18,15 @@ const PROFILE: CostProfile = {
   active_hour_cents: 0,
 };
 
+// Stored the way the write path saves it: since the save-time effort fill, a
+// definition is persisted post-normalization, so a bare string `model` carries
+// the materialized `model_config`. Keeping the fixture in that shape is what
+// lets the "identical rewrite" case below exercise the no-change detector —
+// a raw, pre-normalization row would differ from every validated merge.
 const AGENT_DEFINITION: AgentDefinition = {
   name: 'test-agent',
   model: 'conformance-model',
+  model_config: { id: 'conformance-model', speed: 'standard' },
   system: 'You are a test agent.',
   tools: [
     {
