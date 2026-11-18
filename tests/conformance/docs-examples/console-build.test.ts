@@ -1,11 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import { runDocsExample } from './harness.js';
+import { describe, it } from 'vitest';
+import { assertDocsExampleRun, runDocsExample } from './harness.js';
 import { getDocsExamplePage } from './manifest.js';
 
-describe.skipIf(!process.env.CMA_DOCS_DIR?.trim())('official docs example: Console build (requires CMA_DOCS_DIR)', () => {
+describe('official docs example: Console build (pinned official-docs snapshot)', () => {
   it('creates a session through the official SDK', async () => {
     const run = await runDocsExample(getDocsExamplePage('console-build'));
-    expect(run.stderr, run.stdout).toBe('');
-    expect(run.code, `${run.stdout}\n${run.stderr}\n--- runtime ---\n${run.runtimeOutput}`).toBe(0);
+    assertDocsExampleRun(run);
   }, 180_000);
 });

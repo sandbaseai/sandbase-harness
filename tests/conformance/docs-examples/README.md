@@ -1,71 +1,86 @@
 # Official documentation examples
 
-This suite extracts the selected TypeScript snippets from a trusted local copy
-of the Claude Managed Agents documentation and runs them with the pinned official
-SDK against the real local Harness CLI. A local stub replaces the model provider;
-it does not replace API routes, agent storage, or environment/session creation.
+This suite extracts the selected TypeScript snippets from the pinned
+`contracts/anthropic-cma/official-docs/` snapshot — the same byte-pinned
+upstream the contract layer aligns against — and runs them with the pinned
+official SDK against the real local Harness CLI. A local stub replaces the
+model provider; it does not replace API routes, agent storage, or
+environment/session creation.
+
+Because the source is the committed snapshot, the suite is an honest oracle:
+it fails when upstream drifts (also caught by `npm run docs:crawl`) *and* when
+the runtime deviates from a snippet it claims to conform to.
 
 ## Prerequisites and execution
 
 Use Node.js 22 or later and install the repository dependencies with `npm ci`.
-Set `CMA_DOCS_DIR` to the documentation root, retaining the relative filenames
-listed in `manifest.ts`. The initial enabled pages are Console onboarding, tools,
-and permission policies. Only their first TypeScript example is selected;
-later examples are separate flows and remain outside this initial acceptance.
+No `CMA_DOCS_DIR` is required — the committed snapshot is the default docs
+root, so the suite always runs rather than silently skipping. Set
+`CMA_DOCS_DIR` only to drift-check the selected snippets against a live
+documentation checkout; the digest mismatch then names the changed page.
 
-```powershell
-$env:CMA_DOCS_DIR = 'C:\path\to\claude-managed-agents-docs'
-npm run test:docs-examples
-```
+The initial enabled pages are onboarding, tools, and permission policies.
+Only their selected TypeScript snippets run; the manifest records the index
+and the verdict for each.
 
 ```sh
-export CMA_DOCS_DIR=/path/to/claude-managed-agents-docs
 npm run test:docs-examples
 ```
 
-Success means three passing tests. Each selected example executes in a separate
-process against its own temporary runtime, database, stub model server, and local
-fixtures. The script timeout is 60 seconds. The harness captures script output and
-runtime logs for failures and stops its processes and removes temporary files on
-completion. No real model credentials, Docker daemon, or Kubernetes cluster are
-required. Run only documentation you trust: these snippets are executable code,
-and the local sandbox is not a security boundary.
+Success means the enabled pages' snippets all execute cleanly. Each selected
+example executes in a separate process against its own temporary runtime,
+database, stub model server, and local fixtures. The script timeout is 60
+seconds. The harness captures script output and runtime logs for failures and
+stops its processes and removes temporary files on completion. No real model
+credentials, Docker daemon, or Kubernetes cluster are required.
 
-## Digests, skips, and drift
+## Per-snippet verdicts
 
-Redistribution permission for the official documentation excerpts has not been
-verified. This repository therefore stores only SHA-256 digests, not the excerpts
-or a substitute copy. When `CMA_DOCS_DIR` is unset or blank, the three execution
-tests explicitly skip. A configured but missing or changed document fails rather
-than skipping. CI still runs the extraction, digest-drift, and script-generation
-unit tests using independently authored fixtures.
+Each selected snippet carries a verdict in `manifest.ts`:
 
-An example's digest covers the extracted, selected code before any replacement.
-Prose-only changes do not require a snapshot update. Changed code or a corrupted
-digest fails with the page id, expected/current digests, and a review instruction.
-Review the upstream changes and the selection/replacement rules before running:
+- **`conforms`** — the runtime is expected to reproduce the published
+  behaviour; the test asserts the documented call succeeds.
+- **`deviation`** — the runtime intentionally diverges, and the verdict names
+  the contract §4 row that records the difference. A deviation snippet asserts
+  the *recorded* difference, never upstream conformance — a deviation dressed
+  as conformance is exactly what this verdict exists to prevent.
+
+A bare `snippets: [0]` entry is shorthand for `{ index: 0, verdict:
+{ kind: 'conforms' } }`.
+
+## Digests and drift
+
+The committed `snapshots/<page>.sha256` files pin the extracted, selected
+snippet text from the `official-docs/` snapshot. Prose-only changes do not
+require a snapshot update. Changed code or a corrupted digest fails with the
+page id, expected/current digests, and a review instruction. When upstream
+drift is intentional, review the upstream changes and the
+selection/replacement rules, then run:
 
 ```sh
 npm run test:docs-examples:update-snapshots
 npm run test:docs-examples
 ```
 
-The update command requires `CMA_DOCS_DIR` and writes digests only. Do not update
-digests merely to make a failure disappear. To roll back an unintended refresh,
-restore the affected `.sha256` files with Git and rerun the suite.
+The update command reads the pinned snapshot (or `CMA_DOCS_DIR` when set for a
+re-baseline) and writes digests only. Do not update digests merely to make a
+failure disappear. To roll back an unintended refresh, restore the affected
+`.sha256` files with Git and rerun the suite.
 
 ## Scope and fixtures
 
-The manifest records snippet selection and explains every placeholder replacement.
-Replacements must not change SDK methods or request structures. The harness strips
-the SDK import/client constructor to point requests at the local runtime and
-disables ambient SDK authentication and retries. Local agent and environment
-fixtures replace illustrative ids in Console onboarding. Future file, repository,
-MCP, and webhook fixtures are deliberately unsupported until implemented.
+The manifest records snippet selection and explains every placeholder
+replacement. Replacements must not change SDK methods or request structures.
+The harness strips the SDK import/client constructor to point requests at the
+local runtime and disables ambient SDK authentication and retries. Local agent
+and environment fixtures replace illustrative ids in the onboarding example.
+Future file, repository, MCP, and webhook fixtures are deliberately
+unsupported until implemented.
 
-Model ids in the selected snippets are unchanged. The initial three pages use
-`claude-opus-5`, registered against the stub endpoint. A passing creation example
-does not prove tool execution, an approval lifecycle, or real model behavior.
+Model ids in the selected snippets are unchanged. The initial pages use the
+model ids the docs print (`claude-opus-5-5`), which the runtime accepts
+against the stub endpoint. A passing creation example does not prove tool
+execution, an approval lifecycle, or real model behavior.
 
 ## Live-model validation
 
@@ -83,15 +98,14 @@ node --import tsx scripts/docs-examples-live.mjs
 and `DOCS_EXAMPLES_LIVE_BASE_URL` points the provider at an
 Anthropic-compatible endpoint (relay, gateway, or proxy). A custom endpoint is
 recorded in the evidence file's environment line so the run cannot be mistaken
-for api.anthropic.com.
-Each page still gets its own temporary runtime and workspace, and the script
-writes a summary table to `docs/test-evidence/live-docs-examples-<date>.md` —
-one row per page with the exit code, duration, the session's usage buckets
-(including cache reads and writes, which is where a cache hit would show),
-final status, and stop_reason, plus the Node/SDK versions and runtime commit.
-The key, request bodies, and model reply text are never recorded, so the
-evidence file is safe to commit.
+for api.anthropic.com. Each page still gets its own temporary runtime and
+workspace, and the script writes a summary table to
+`docs/test-evidence/live-docs-examples-<date>.md` — one row per page with the
+exit code, duration, the session's usage buckets (including cache reads and
+writes, which is where a cache hit would show), final status, and stop_reason,
+plus the Node/SDK versions and runtime commit. The key, request bodies, and
+model reply text are never recorded, so the evidence file is safe to commit.
 
-Verification date: 2026-10-02. The broader release gate is
-`npm run release:check`; the documentation execution tests require the explicit
-local-documents setting described above.
+The broader release gate is `npm run release:check`; the documentation
+execution tests run in the required `npm test` path because their source is
+the committed snapshot.
