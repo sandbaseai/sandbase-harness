@@ -251,6 +251,47 @@ function createOutputStoreCopy(db: Database, inputStoreId: string, dreamId: stri
 }
 
 /**
+ * The published mid-run input check (`official-docs/dreams.md` "Errors").
+ *
+ * A dream's inputs were verified at create, but the rows are ordinary
+ * resources with no hold: an operator can archive or delete the input memory
+ * store and delete an input session while the dream is `pending` or `running`.
+ * The published vocabulary names both failures —
+ * `input_memory_store_unavailable` when the store went, and
+ * `input_session_unavailable` when a session did — and the check runs at every
+ * lifecycle decision point (create-adjacent start and every reconcile), so a
+ * dream that lost its inputs reports the published cause rather than
+ * `internal_error` or a stall.
+ *
+ * Deleted session ids stay recorded on the row's `inputs`, so the check reads
+ * the stored request, not the live transcript source.
+ */
+/** The `sessions` input's id list from the row's stored `inputs` JSON. */
+function sessionIdsFromInputs(rawInputs: string): string[] {
+  try {
+    const inputs = JSON.parse(rawInputs) as DreamInput[];
+    const sessionsInput = inputs.find((input): input is { type: 'sessions'; session_ids: string[] } => input.type === 'sessions');
+    return sessionsInput?.session_ids ?? [];
+  } catch {
+    return [];
+  }
+}
+
+function dreamInputUnavailable(deps: DreamRunnerDeps, parsed: ParsedDreamCreate): { type: string; message: string } | undefined {
+  const store = deps.db.prepare('SELECT 1 FROM memory_stores WHERE id = ? AND archived_at IS NULL').get(parsed.memoryStoreId);
+  if (!store) {
+    return { type: 'input_memory_store_unavailable', message: `Input memory store ${parsed.memoryStoreId} was archived or deleted` };
+  }
+  for (const sessionId of parsed.sessionIds) {
+    const session = deps.db.prepare('SELECT 1 FROM sessions WHERE id = ?').get(sessionId);
+    if (!session) {
+      return { type: 'input_session_unavailable', message: `Input session ${sessionId} was deleted` };
+    }
+  }
+  return undefined;
+}
+
+/**
  * Start a pending dream: create the output store (if any), the pipeline
  * session, and flip the row to running. A failure anywhere marks the dream
  * failed rather than leaving it parked — a job that cannot start is a failed
@@ -273,6 +314,12 @@ export async function startDream(deps: DreamRunnerDeps, dream: DreamRow): Promis
     ).run(type, message, dream.id);
     return deps.db.prepare('SELECT * FROM dreams WHERE id = ?').get(dream.id) as unknown as DreamRow;
   };
+
+  // The published mid-run check fires here too: a pending row restarted by the
+  // sweep may have lost an input between create and recovery, which is the same
+  // cause as losing one mid-run.
+  const unavailable = dreamInputUnavailable(deps, parsed);
+  if (unavailable) return fail(unavailable.type, unavailable.message);
 
   try {
     ensureDreamAgent(deps.db);
@@ -384,6 +431,21 @@ export async function syncDream(deps: DreamRunnerDeps, dream: DreamRow): Promise
     case 'retrying':
     case 'requires_action': {
       persistUsage();
+      // While the pipeline is still alive, a lost input is a published
+      // terminal cause — the run cannot produce the consolidation it was
+      // created for, and reconciling it reports why rather than waiting for
+      // the session to end on its own.
+      const parsed: ParsedDreamCreate = {
+        memoryStoreId: dream.input_store_id,
+        sessionIds: sessionIdsFromInputs(dream.inputs),
+        instructions: dream.instructions,
+        model: JSON.parse(dream.model) as DreamModelConfig,
+        outputBehavior: JSON.parse(dream.output_behavior) as ParsedDreamCreate['outputBehavior'],
+      };
+      const unavailable = dreamInputUnavailable(deps, parsed);
+      if (unavailable) {
+        return finish('failed', unavailable.type, unavailable.message);
+      }
       if (dream.status === 'pending') {
         deps.db.prepare(`UPDATE dreams SET status = 'running', updated_at = datetime('now') WHERE id = ?`).run(dream.id);
       }

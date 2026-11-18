@@ -114,7 +114,7 @@ session-budget: partial
 
 | Difference | Detail |
 | --- | --- |
-| Prices are local, not official | `list_cost` is computed from an operator-supplied `CostProfile`. SandBase never embeds vendor prices. With the default empty profile, no model is priced and a session cannot be budgeted at all. |
+| Prices are local, not official | `list_cost` is computed from an operator-supplied `CostProfile`. SandBase never embeds vendor prices. All three published consumption inputs are metered when the profile declares them — per-model token rates (with the published cache-read 0.1x / cache-write 1.25x multipliers when the profile lists no cache rates), `active_hour_cents` against the event-derived `active_seconds`, and `web_search_per_1000_cents` against the recorded `web_search_requests` — so the metered surface matches; only the rate source differs. With the default empty profile, no model is priced and a session cannot be budgeted at all. |
 | Unpriced model ⇒ no budget | A model the profile does not list makes the session unbudgetable (`model_not_budgetable`). The published contract has authoritative prices, so the case does not arise for it. |
 | `list_cost` withheld when incomplete | When any model used is unpriced, `usage.list_cost` is omitted rather than reported as a lower bound. Reporting a lower bound as a total would understate spend to a caller that is about to choose a new cap. |
 | `list_cost` rounding direction | The published rule rounds the **reported** figure to the nearest cent (±0.5¢ of the exact value enforcement uses). This runtime rounds it **up** — a reported `list_cost` never understates spend, while enforcement still compares the exact microcent total. The two agree on the unrounded enforcement; the divergence is only in the read direction, and round-up errs toward over-reporting rather than under-. |
@@ -129,9 +129,14 @@ session-budget: partial
   embedding a price table would make SandBase assert numbers it cannot verify.
   Making the profile operator-supplied means the spend number is traceable to a
   configuration the operator can inspect, and an *unpriceable* session fails
-  loudly instead of being metered against invented prices. This is the main
-  reason the entry is `partial` rather than `supported`: the mechanism matches,
-  the price source deliberately does not.
+  loudly instead of being metered against invented prices. The two non-token
+  inputs the published contract prices — session running time and web-search
+  requests — are metered from the same profile (`active_hour_cents`,
+  `web_search_per_1000_cents`), defaulting to a declared zero because this
+  runtime genuinely does not charge for them; a copied vendor rate would be a
+  true statement about nothing. This is the main reason the entry is `partial`
+  rather than `supported`: the mechanism and the metered surface match, the
+  price source deliberately does not.
 - **Withholding an incomplete total.** A partial cost is worse than none when the
   consumer is choosing a cap: it reads as "this is what you spent" and leads to a
   budget that is too low. Naming the unpriced models instead lets the operator fix

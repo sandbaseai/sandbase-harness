@@ -568,6 +568,77 @@ describe('dream recovery', () => {
       rmSync(idle.tmpDir, { recursive: true, force: true });
     }
   });
+
+  it('fails with input_memory_store_unavailable when the input store is archived mid-run', async () => {
+    // The published Errors table names this cause: the input store is an
+    // ordinary resource with no hold, so archiving it under a `running` dream
+    // is legal, and the reconcile must report the published type rather than
+    // leaving the dream running against a store it can no longer read.
+    const idle = harness({ executor: false });
+    try {
+      const storeId = `memstore_${nanoid(12)}`;
+      idle.db.prepare('INSERT INTO memory_stores (id, name, description, provider, config, metadata) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(storeId, 's', '', 'sqlite', '{}', '{}');
+      const session = idle.manager.create({ agent: 'agent_one' });
+      const created = await (await idle.app.request('/v1/dreams', {
+        method: 'POST', headers: HEADERS,
+        body: JSON.stringify({
+          inputs: [
+            { type: 'memory_store', memory_store_id: storeId },
+            { type: 'sessions', session_ids: [session.id] },
+          ],
+          model: 'm',
+        }),
+      })).json() as any;
+      expect(created.status).toBe('running');
+
+      const archived = await idle.app.request(`/v1/memory_stores/${storeId}/archive`, { method: 'POST', headers: HEADERS });
+      expect(archived.status).toBe(200);
+
+      const synced = await idle.app.request(`/v1/dreams/${created.id}`, { headers: HEADERS });
+      const body = await synced.json() as any;
+      expect(body.status).toBe('failed');
+      expect(body.error).toMatchObject({ type: 'input_memory_store_unavailable' });
+    } finally {
+      idle.db.close();
+      rmSync(idle.tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('fails with input_session_unavailable when an input session is deleted mid-run', async () => {
+    const idle = harness({ executor: false });
+    try {
+      const storeId = `memstore_${nanoid(12)}`;
+      idle.db.prepare('INSERT INTO memory_stores (id, name, description, provider, config, metadata) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(storeId, 's', '', 'sqlite', '{}', '{}');
+      const session = idle.manager.create({ agent: 'agent_one' });
+      const created = await (await idle.app.request('/v1/dreams', {
+        method: 'POST', headers: HEADERS,
+        body: JSON.stringify({
+          inputs: [
+            { type: 'memory_store', memory_store_id: storeId },
+            { type: 'sessions', session_ids: [session.id] },
+          ],
+          model: 'm',
+        }),
+      })).json() as any;
+      expect(created.status).toBe('running');
+
+      // The source session is idle (a create with no executor never runs a
+      // turn), so the delete route accepts it — exactly the mid-run removal the
+      // published cause names.
+      const deleted = await idle.app.request(`/v1/sessions/${session.id}`, { method: 'DELETE', headers: HEADERS });
+      expect(deleted.status).toBe(200);
+
+      const synced = await idle.app.request(`/v1/dreams/${created.id}`, { headers: HEADERS });
+      const body = await synced.json() as any;
+      expect(body.status).toBe('failed');
+      expect(body.error).toMatchObject({ type: 'input_session_unavailable' });
+    } finally {
+      idle.db.close();
+      rmSync(idle.tmpDir, { recursive: true, force: true });
+    }
+  });
 });
 
 describe('CMA admission on dreams', () => {

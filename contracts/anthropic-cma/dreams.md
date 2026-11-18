@@ -31,6 +31,13 @@ dreams: supported
   briefly after a cancel.
 - `GET /v1/dreams` lists newest-first and supports `limit` (default 20, max
   100), `page`, and `include_archived`. `GET /v1/dreams/{id}` retrieves one.
+- Failure classification: the published Errors table names
+  `input_memory_store_unavailable` (the input store archived or deleted after
+  create) and `input_session_unavailable` (an input session deleted after
+  create) alongside `timeout`, `internal_error`,
+  `memory_store_org_limit_exceeded`, and `input_memory_store_too_large`. The
+  guard applies to archiving the dream itself, not its inputs — the input rows
+  stay ordinary resources while a dream uses them.
 
 The published documentation as crawled 2026-11-17
 ([`official-docs/dreams.md`](./official-docs/dreams.md)) describes only these
@@ -92,6 +99,7 @@ implemented, but not part of the published definition.
 | Dream webhooks | No `dream.*` operation events are published; the lifecycle is observable through the resource itself and the session event stream. |
 | Console UI | None in this phase; dreams are reachable through the API and SDK only. |
 | Workspace scoping | Single-tenant runtime: the published "same workspace" checks are trivially satisfied — every store and session id resolves against the one local database. |
+| Mid-run input loss | The published Errors table's two classified causes are emitted: an input memory store archived or deleted under a `pending`/`running` dream fails it with `input_memory_store_unavailable`, and an input session deleted the same way fails it with `input_session_unavailable`. The check runs in `startDream` (so a swept `pending` row that lost its input between create and recovery reports it) and inside `syncDream` while the pipeline session is still alive; it is a reconcile-time check, not a hold — the input rows are ordinary resources and are not locked against archive/delete while a dream uses them. `timeout`, `internal_error`, `memory_store_org_limit_exceeded`, and `input_memory_store_too_large` are also emitted where the runtime can produce them (a `timed_out` session maps to `timeout`, unclassified failures to `internal_error`); the org-limit and size-limit members have no local producing surface — there is no org store cap and no pipeline size gate — rather than being misreported. |
 | Self-hosted surface | Upstream self-hosted mounts no dream routes at all (`official-docs/self-hosted/differences.md`). SandBase keeps `/v1/dreams` as a superset: the session-backed consolidation pipeline runs locally, so a workload using dreams works here and has no upstream self-hosted equivalent. |
 
 ## 5. Reason for the difference
@@ -112,6 +120,14 @@ implemented, but not part of the published definition.
   the dream table already carries the durable state, and both readers and the
   existing operations timer can converge it without a second scheduling
   system.
+- Input loss is a reconcile-time check rather than a hold on the input rows.
+  The published contract places the check on the dream ("the 400 guard applies
+  to archiving the dream itself, not its stores"), so the store and session
+  routes keep their ordinary semantics and the dream pays the cost of noticing:
+  an archive/delete that races a run reports the published `input_*_unavailable`
+  type at the next reconcile instead of either refusing the operator's request
+  on a row they did not know was a dream input, or stalling the dream on a
+  mount whose backing row is gone.
 - `output_behavior` (with `update_existing`) and the list filters are kept as
   accepted local extensions: they were added against an SDK surface ahead of
   the published doc, and a caller holding an SDK that already sends them sees
@@ -125,8 +141,11 @@ implemented, but not part of the published definition.
   and row projection.
 - `tests/integration/dreams.test.ts` — create/retrieve/list/cancel/archive over
   real HTTP, input-store copy semantics, session-id audit surface, validation
-  failures, state transitions, partial-output retention, and the
-  `update_existing` single-writer conflict.
+  failures, state transitions, partial-output retention, the
+  `update_existing` single-writer conflict, and the mid-run input-loss
+  classification: an archived input store fails the dream with
+  `input_memory_store_unavailable` and a deleted input session with
+  `input_session_unavailable`, both at reconcile.
 - `tests/conformance/official-route-coverage.test.ts` — the dreams routes are
   mounted and SDK-decodable rather than refused.
 

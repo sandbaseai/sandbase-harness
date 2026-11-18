@@ -109,6 +109,15 @@
 
 ### Fixed
 
+- A `pending` or `running` dream now fails with the published
+  `input_memory_store_unavailable` when its input memory store is archived or
+  deleted underneath it, and with `input_session_unavailable` when an input
+  session is deleted — the two classified causes in the published Errors
+  table. The check runs on every reconcile and on a swept `pending` restart;
+  the input rows stay ordinary resources rather than being held by the dream.
+  Previously an input lost mid-run surfaced only as an unclassified
+  `internal_error` or a stall.
+
 - A scheduled deployment whose session create is refused because the agent
   declares an MCP `url` server the Environment's `allowed_hosts` does not
   cover now records the run with the published `mcp_egress_blocked_error`
