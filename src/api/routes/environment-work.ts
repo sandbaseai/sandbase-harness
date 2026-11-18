@@ -3,26 +3,27 @@
  *
  * These are the wire routes the official SDK's self-hosted worker calls:
  *
- *   GET  /v1/environments/:id/work/poll                  long-poll → work item | 204
- *   POST /v1/environments/:id/work/:workId/ack           queued → starting
- *   POST /v1/environments/:id/work/:workId/heartbeat     renew the heartbeat lease
+ *   GET  /v1/environments/:id/work/poll                  long-poll → session claim | 204
+ *   POST /v1/environments/:id/work/:workId/ack           claimed → starting
+ *   POST /v1/environments/:id/work/:workId/heartbeat     renew the claim lease
  *   POST /v1/environments/:id/work/:workId               metadata merge patch
  *   POST /v1/environments/:id/work/:workId/stop          graceful/forced shutdown
  *   GET  /v1/environments/:id/work                       list, newest first, keyset cursor
  *   GET  /v1/environments/:id/work/stats                 queue counters
- *   GET  /v1/environments/:id/work/:workId               retrieve one item
+ *   GET  /v1/environments/:id/work/:workId               retrieve one claim
  *
- * The runtime's queue underneath is tool-call-shaped (`/v1/x/worker`), while
- * the published work item is session-scoped: `data` is always
- * `{type:'session', id}` because that is the only data variant this queue can
- * honestly produce — every local work item belongs to a session, and the
- * per-item tool payload stays on the local worker channel. The projection is
- * deliberately lossy in one direction only: `secret` is populated on poll
- * alone, and the five published states collapse onto the queue's claim /
- * accept / stop / terminal markers as documented on `projectWorkState`.
+ * The claim unit is a whole session: `data` is `{type:'session', id}` and the
+ * row it names is the session-scoped claim a worker holds for the session's
+ * life. The per-call tool items a session parks (`exec`/`tool_call`/
+ * `custom_tool`/`read`/`write`/`list`) are the work a held claim *contains* —
+ * they are drained under the claim on the local `/v1/x/worker` channel and on
+ * the session's event stream, never individually claimed on this wire. The
+ * projection is the published `BetaSelfHostedWork` shape; `secret` is populated
+ * on poll alone, and the five published states collapse onto the claim's
+ * markers as documented on `projectSessionClaimState`.
  *
  * Authentication is the published credential set, not the local one: the
- * bearer is an environment worker key (`mawk_...`), the per-session token
+ * bearer is an environment worker key (`mawk_...`), the per-claim token
  * carried inside a claimed item's `secret` (`mawt_...`), or a managed API
  * key. The global API-key middleware exempts this prefix (see auth.ts) so the
  * worker credentials reach this resolver; when no API keys are configured at
@@ -32,13 +33,13 @@
 
 import { Hono, type Context } from 'hono';
 import type { Database } from '@/core/db/database.js';
-import type { WorkItem, WorkQueue } from '@/sandbox/self-hosted-provider.js';
+import type { SessionWorkClaim, SessionWorkQueue } from '@/sandbox/session-work-queue.js';
 import { validateEnvironmentWorkerKey } from '@/core/auth/environment-worker-keys.js';
 import { issueSessionWorkToken, validateSessionWorkToken } from '@/core/auth/session-work-tokens.js';
 import { invalid, conflict, notFound } from './resource-utils.js';
 
 export interface EnvironmentWorkRouteDeps {
-  queue: WorkQueue;
+  queue: SessionWorkQueue;
   db: Database;
   /** Managed API keys, mirroring the global middleware's configuration. */
   apiKeys?: string[];
@@ -130,10 +131,10 @@ export function environmentWorkRoutes(deps: EnvironmentWorkRouteDeps): Hono {
   app.get('/environments/:id/work/poll', async (c) => {
     const auth = resolveWorkCredential(c, deps);
     if (auth instanceof Response) return auth;
-    // A claimed item's sessions_token is item authority, not queue
-    // authority: it operates the session's own items and can never pull a new
-    // claim — otherwise one leaked item credential could drain every session
-    // the environment holds.
+    // A claimed session's sessions_token is item authority, not queue
+    // authority: it operates the session the claim serves and can never pull a
+    // new claim — otherwise one leaked claim credential could drain every
+    // session the environment holds.
     if (auth.kind === 'session_token') {
       return c.json(
         { error: { type: 'authentication_error', message: 'A session work token cannot claim work.' } },
@@ -157,9 +158,9 @@ export function environmentWorkRoutes(deps: EnvironmentWorkRouteDeps): Hono {
 
     const deadline = Date.now() + blockMs;
     for (;;) {
-      const item = deps.queue.claim(workerId, undefined, environmentId, reclaim);
-      if (item) {
-        return c.json(toOfficialWork(item, environmentId, mintWorkSecret(c, deps.db, item, environmentId)));
+      const claim = deps.queue.claim(workerId, environmentId, reclaim);
+      if (claim) {
+        return c.json(toOfficialWork(claim, environmentId, mintWorkSecret(c, deps.db, claim, environmentId)));
       }
       const remaining = deadline - Date.now();
       if (remaining <= 0) return c.body(null, 204);
@@ -171,7 +172,7 @@ export function environmentWorkRoutes(deps: EnvironmentWorkRouteDeps): Hono {
     const scoped = requireItemScope(c, deps);
     if (scoped instanceof Response) return scoped;
     const workerId = c.req.header('Anthropic-Worker-ID')?.trim() || undefined;
-    const outcome = deps.queue.acceptScoped(scoped.workId, workerId);
+    const outcome = deps.queue.ack(scoped.workId, workerId);
     if (outcome === 'not_found') return notFound(c, 'work item not found');
     if (outcome === 'work_lease_lost') {
       return conflict(
@@ -193,9 +194,12 @@ export function environmentWorkRoutes(deps: EnvironmentWorkRouteDeps): Hono {
     // Absent means "no precondition"; the `? IS NULL` arm in the queue's
     // predicate is what keeps an unconditional heartbeat unconditional.
     const expected = c.req.query('expected_last_heartbeat');
-    const result = deps.queue.heartbeatScoped(scoped.workId, {
+    const desiredTtl = parseDesiredTtl(c.req.query('desired_ttl_seconds'));
+    if (desiredTtl instanceof Response) return desiredTtl;
+    const result = deps.queue.heartbeat(scoped.workId, {
       workerId,
       expectedLastHeartbeat: expected ?? null,
+      desiredTtlSeconds: desiredTtl,
     });
     if (result.outcome === 'not_found') return notFound(c, 'work item not found');
     if (result.outcome === 'precondition_failed') {
@@ -208,7 +212,7 @@ export function environmentWorkRoutes(deps: EnvironmentWorkRouteDeps): Hono {
             code: 'work_lease_precondition_failed',
             message: 'expected_last_heartbeat does not match the recorded heartbeat lease',
             details: {
-              current_state: heartbeatView(result.item, deps.queue, false),
+              current_state: heartbeatView(result.claim, deps.queue, false),
             },
           },
         },
@@ -222,9 +226,9 @@ export function environmentWorkRoutes(deps: EnvironmentWorkRouteDeps): Hono {
       // Not an error on this wire: the response's own fields are the shutdown
       // signal, and a runner that sees `stopping`/`stopped` or an unextended
       // lease finishes its teardown rather than retrying the beat.
-      return c.json(heartbeatView(result.item, deps.queue, false));
+      return c.json(heartbeatView(result.claim, deps.queue, false));
     }
-    return c.json(heartbeatView(result.item, deps.queue, true));
+    return c.json(heartbeatView(result.claim, deps.queue, true));
   });
 
   app.post('/environments/:id/work/:workId', async (c) => {
@@ -249,13 +253,13 @@ export function environmentWorkRoutes(deps: EnvironmentWorkRouteDeps): Hono {
   app.post('/environments/:id/work/:workId/stop', async (c) => {
     const scoped = requireItemScope(c, deps);
     if (scoped instanceof Response) return scoped;
-    // `force` selects graceful vs forced on the published wire; the queue's
-    // stop marker is already the immediate form — the holder learns from its
-    // next refused renewal and a result that still lands is recorded — so
-    // both values reach the same outcome here. The body is still read: a
-    // malformed payload or a non-boolean `force` is refused rather than
-    // silently becoming a valid stop.
+    // `force` is the real distinction on this wire: a graceful stop marks the
+    // claim `stopping` so the holder finishes or cancels its in-flight call and
+    // confirms, while `force: true` writes `stopped` at once. The body is read
+    // first because a malformed payload or a non-boolean `force` is refused
+    // rather than silently becoming a valid stop.
     const raw = await c.req.text();
+    let force = false;
     if (raw.trim()) {
       const body = (() => { try { return JSON.parse(raw); } catch { return null; } })();
       if (!body || typeof body !== 'object' || Array.isArray(body)) {
@@ -264,8 +268,9 @@ export function environmentWorkRoutes(deps: EnvironmentWorkRouteDeps): Hono {
       if (body.force !== undefined && typeof body.force !== 'boolean') {
         return invalid(c, 'force must be a boolean');
       }
+      force = body.force === true;
     }
-    const outcome = deps.queue.stopItem(scoped.workId);
+    const outcome = deps.queue.stop(scoped.workId, force);
     if (outcome === 'not_found') return notFound(c, 'work item not found');
     return c.json(toOfficialWork(deps.queue.get(scoped.workId)!, scoped.environmentId));
   });
@@ -279,75 +284,65 @@ export function environmentWorkRoutes(deps: EnvironmentWorkRouteDeps): Hono {
   return app;
 }
 
-/** The published `BetaSelfHostedWork` projection of a queue row. */
-export function toOfficialWork(item: WorkItem, environmentId: string, secret?: string) {
-  const state = projectWorkState(item);
+/** The published `BetaSelfHostedWork` projection of a session claim. */
+export function toOfficialWork(claim: SessionWorkClaim, environmentId: string, secret?: string) {
+  const state = projectSessionClaimState(claim);
   return {
     type: 'work',
-    id: item.id,
+    id: claim.id,
     environment_id: environmentId,
     state,
-    data: { type: 'session', id: item.sessionId },
-    // `created_at` is NOT NULL with a DB default; the optional field on the
-    // in-memory type overstates what a persisted row can carry.
-    created_at: iso(item.createdAt!),
-    acknowledged_at: item.acceptedAt ? iso(item.acceptedAt) : null,
-    started_at: item.acceptedAt ? iso(item.acceptedAt) : null,
-    latest_heartbeat_at: item.heartbeatAt ? iso(item.heartbeatAt) : null,
-    stop_requested_at: item.stoppedAt ? iso(item.stoppedAt) : null,
-    stopped_at: state === 'stopped' ? iso(item.completedAt ?? item.stoppedAt ?? item.createdAt!) : null,
-    metadata: item.metadata ?? {},
+    data: { type: 'session', id: claim.sessionId },
+    created_at: iso(claim.createdAt!),
+    acknowledged_at: claim.acceptedAt ? iso(claim.acceptedAt) : null,
+    started_at: claim.acceptedAt ? iso(claim.acceptedAt) : null,
+    latest_heartbeat_at: claim.heartbeatAt ? iso(claim.heartbeatAt) : null,
+    stop_requested_at: claim.stopRequestedAt ? iso(claim.stopRequestedAt) : null,
+    stopped_at: claim.stoppedAt ? iso(claim.stoppedAt) : null,
+    metadata: claim.metadata ?? {},
     secret: secret ?? null,
   };
 }
 
 /**
- * Collapse the queue's markers onto the five published states:
+ * Collapse the claim's markers onto the five published states. The claim's own
+ * lifecycle is already the published one — `stopping` and `stopped` are its
+ * real states — so the mapping is mostly direct. The one projection is at the
+ * front: `claimed` (held, unacknowledged) and `queued` (unheld or re-claimable)
+ * both read as `queued`, because the published surface has no "held but not yet
+ * acknowledged" state — its stats call that population "polled but not
+ * acknowledged", which is what `pending` counts.
  *
- *   queued                → 'queued'    (unclaimed, or claimed awaiting ack —
- *                                        the poll claim is a pending slot,
- *                                        which the published stats call
- *                                        "polled but not acknowledged")
- *   accepted              → 'starting'  (acknowledged, no post-ack life sign
- *                                        yet) or 'active' (a heartbeat renewed
- *                                        the lease after the ack, which is
- *                                        the only "worker is running" signal
- *                                        this queue records)
- *   stopped marker, live  → 'stopping'  (stop recorded; the holder learns from
- *                                        its next refused renewal)
- *   applied/failed/unknown→ 'stopped'   (work ended; `unknown` is the sweep of
- *                                        an accepted item whose lease lapsed)
- *
- * `heartbeat_at`, not a timestamp comparison, decides starting vs active:
- * the column exists only because a heartbeat wrote it, while `claimed_at`
- * and `accepted_at` are `datetime('now')` values with second precision — a
- * poll, ack, and first beat inside one second compare equal, and an
- * ordering rule would report 'starting' for an item that has already
- * heartbeated.
+ * `heartbeat_at`, not a timestamp comparison, decides starting vs active: the
+ * column exists only because a heartbeat wrote it, while `claimed_at` and
+ * `accepted_at` are `datetime('now')` values with second precision — a poll,
+ * ack, and first beat inside one second compare equal, and an ordering rule
+ * would report 'starting' for a claim that has already heartbeated.
  */
-export function projectWorkState(item: WorkItem): 'queued' | 'starting' | 'active' | 'stopping' | 'stopped' {
-  const terminal = item.status === 'applied' || item.status === 'failed' || item.status === 'unknown';
-  if (terminal) return 'stopped';
-  if (item.stoppedAt) return 'stopping';
-  if (item.status === 'accepted') {
-    return item.heartbeatAt ? 'active' : 'starting';
+export function projectSessionClaimState(
+  claim: SessionWorkClaim,
+): 'queued' | 'starting' | 'active' | 'stopping' | 'stopped' {
+  if (claim.status === 'stopped' || claim.stoppedAt) return 'stopped';
+  if (claim.status === 'stopping') return 'stopping';
+  if (claim.status === 'accepted') {
+    return claim.heartbeatAt ? 'active' : 'starting';
   }
   return 'queued';
 }
 
-function heartbeatView(item: WorkItem, queue: WorkQueue, extended: boolean) {
+function heartbeatView(claim: SessionWorkClaim, queue: SessionWorkQueue, extended: boolean) {
   return {
     type: 'work_heartbeat',
-    last_heartbeat: item.heartbeatAt ? iso(item.heartbeatAt) : null,
+    last_heartbeat: claim.heartbeatAt ? iso(claim.heartbeatAt) : null,
     lease_extended: extended,
-    state: projectWorkState(item),
-    ttl_seconds: queue.leaseSeconds,
+    state: projectSessionClaimState(claim),
+    ttl_seconds: claim.ttlSeconds ?? queue.leaseSeconds,
   };
 }
 
 /** The `secret` wire value: base64url JSON in the published `BetaWorkSecret` shape. */
-function mintWorkSecret(c: Context, db: Database, item: WorkItem, environmentId: string): string {
-  const sessionsToken = issueSessionWorkToken(db, item.sessionId, environmentId);
+function mintWorkSecret(c: Context, db: Database, claim: SessionWorkClaim, environmentId: string): string {
+  const sessionsToken = issueSessionWorkToken(db, claim.sessionId, environmentId, claim.id);
   // `api_base_url` tells the runner where its downstream calls go; without it
   // the SDK falls back to the Anthropic endpoint and the claimed work would
   // phone home instead of calling this runtime back.
@@ -436,11 +431,12 @@ function requireEnvironmentScope(
 }
 
 /**
- * The per-item guard every item route shares: credential resolved, the item's
- * owning environment resolved through its session and equal to the path's,
- * and — for a session token — the item must belong to that exact session. The
- * environment join keeps a valid credential from one environment from acting
- * on another's work and answers 404 rather than confirming the item exists.
+ * The per-claim guard every item route shares: credential resolved, the
+ * claim's owning environment read off its own row and equal to the path's, and
+ * — for a session token — the claim must belong to that exact session. The
+ * environment column is denormalized on the claim, so a valid credential from
+ * one environment acting on another's claim answers 404 rather than
+ * confirming the claim exists.
  */
 function requireItemScope(
   c: Context,
@@ -450,8 +446,8 @@ function requireItemScope(
   if (auth instanceof Response) return auth;
   const environmentId = c.req.param('id') ?? '';
   const workId = c.req.param('workId') ?? '';
-  const itemEnvironment = deps.queue.environmentOf(workId);
-  if (itemEnvironment !== environmentId) return notFound(c, 'work item not found');
+  const claimEnvironment = deps.queue.environmentOf(workId);
+  if (claimEnvironment !== environmentId) return notFound(c, 'work item not found');
   if ((auth.kind === 'environment_key' || auth.kind === 'session_token') && auth.environmentId !== environmentId) {
     return c.json(
       { error: { type: 'authentication_error', message: 'Credential is not valid for this environment.' } },
@@ -459,8 +455,8 @@ function requireItemScope(
     );
   }
   if (auth.kind === 'session_token') {
-    const item = deps.queue.get(workId);
-    if (!item || item.sessionId !== auth.sessionId) return notFound(c, 'work item not found');
+    const claimSession = deps.queue.sessionOf(workId);
+    if (!claimSession || claimSession !== auth.sessionId) return notFound(c, 'work item not found');
   }
   return { workId, environmentId, auth };
 }
@@ -535,6 +531,26 @@ function parseReclaimMs(raw: string | undefined): number | Response {
     return new Response(
       JSON.stringify({
         error: { type: 'invalid_request_error', message: 'reclaim_older_than_ms must be a positive number of milliseconds' },
+      }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    );
+  }
+  return value;
+}
+
+/**
+ * `desired_ttl_seconds` — the claim's requested lease in whole seconds.
+ * Positive integers only; a non-positive or non-numeric value is refused
+ * rather than clamped, because the published surface treats it as the claim's
+ * TTL and a silent floor would report a lease the worker did not ask for.
+ */
+function parseDesiredTtl(raw: string | undefined): number | null | Response {
+  if (raw === undefined) return null;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) {
+    return new Response(
+      JSON.stringify({
+        error: { type: 'invalid_request_error', message: 'desired_ttl_seconds must be a positive integer of seconds' },
       }),
       { status: 400, headers: { 'Content-Type': 'application/json' } },
     );

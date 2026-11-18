@@ -27,6 +27,7 @@ import { createServer } from '@/api/server.js';
 import { Database } from '@/core/db/database.js';
 import { SessionManager } from '@/core/session/session-manager.js';
 import { WorkQueue } from '@/sandbox/self-hosted-provider.js';
+import { SessionWorkQueue } from '@/sandbox/session-work-queue.js';
 
 export interface ConformanceContext {
   app: ReturnType<typeof createServer>;
@@ -47,6 +48,9 @@ export function makeConformanceApp(prefix = 'ma-conformance-'): ConformanceConte
     // The official Work data plane mounts only when a queue exists; without one
     // here the conformance suite would report the implemented routes missing.
     workQueue: new WorkQueue(db),
+    // The session claim store is the Work API's lease object — without it the
+    // work routes are absent and the suite reports them missing.
+    sessionWorkQueue: new SessionWorkQueue(db),
   });
   return { app, db, tmpDir };
 }

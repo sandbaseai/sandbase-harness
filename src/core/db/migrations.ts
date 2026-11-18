@@ -1511,6 +1511,83 @@ CREATE INDEX idx_workflow_phases_run ON workflow_phases(run_id);
 CREATE INDEX idx_workflow_phases_run_order ON workflow_phases(run_id, sequence_order);
 `;
 
+/**
+ * Session-scoped work claims — the published claim unit on
+ * `/v1/environments/{id}/work`.
+ *
+ * A work item on the published wire is one session's lifecycle, not a single
+ * tool call: a worker claims the session, acknowledges it, heartbeats the
+ * claim lease, and serves every call the session parks — then `stop`/`force`
+ * ends the session service. `session_work_claims` is that claim object. The
+ * per-call `work_items` rows keep their own lease/accept/`unknown`/stop
+ * fences and become the *calls a held claim contains* — drained under the
+ * claim, never the claim unit themselves.
+ *
+ * The lifecycle is deliberately not the `work_items` chain:
+ *
+ * - `queued`    — the session is waiting to be claimed (the state a fresh row
+ *                 is written in, and the state a re-claim leaves behind).
+ * - `claimed`   — a worker holds the lease but has not acknowledged it. Its
+ *                 reclaim window is the caller's `reclaim_older_than_ms`, the
+ *                 published "claimed but never acknowledged" population.
+ * - `accepted`  — `ack` recorded the execution commitment. The claim's own
+ *                 TTL (`ttl_seconds`, set by heartbeat's `desired_ttl_seconds`
+ *                 or the queue default) governs the lease from here on.
+ * - `stopping`  — a graceful `stop` was requested; the worker learns from its
+ *                 next heartbeat and confirms by finishing the stop.
+ * - `stopped`   — terminal. The claim is never claimable again; a session
+ *                 that produces more work gets a NEW claim row, which is why
+ *                 the table holds history rather than one row per session.
+ *
+ * Re-claiming a live-status claim whose lease lapsed is safe and intended —
+ * the claim's content is the session's server-recorded parked calls, so a
+ * new worker resumes rather than replays a side effect. That is why the
+ * accepted-lapse `unknown` sweep applies only to the per-call items (which
+ * are the side effects) and never to a session claim.
+ *
+ * `ttl_seconds` is the claim's effective lease in seconds — what a heartbeat
+ * reports back — because the published `desired_ttl_seconds` is a claim-level
+ * value, not the per-call queue lease. `NULL` means the queue default.
+ *
+ * The partial unique index enforces at most one live claim per session: a
+ * `stopped` row frees the session for the next claim, which is what makes
+ * "the session's work is queued again" possible without resurrecting a
+ * terminal row. The backfill writes one claim per existing session that has
+ * live per-call items, so a workspace that upgrades mid-session keeps its
+ * queued work claimable under the new model.
+ */
+const M064_SESSION_WORK_CLAIMS = `
+CREATE TABLE session_work_claims (
+  id TEXT PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  environment_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued',
+  claimed_by TEXT,
+  claimed_at TEXT,
+  accepted_at TEXT,
+  heartbeat_at TEXT,
+  stop_requested_at TEXT,
+  stopped_at TEXT,
+  ttl_seconds INTEGER,
+  metadata TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX idx_swc_environment ON session_work_claims(environment_id, created_at);
+CREATE INDEX idx_swc_session ON session_work_claims(session_id);
+CREATE UNIQUE INDEX idx_swc_live_session ON session_work_claims(session_id) WHERE status != 'stopped';
+
+ALTER TABLE session_work_tokens ADD COLUMN claim_id TEXT REFERENCES session_work_claims(id);
+
+INSERT INTO session_work_claims (id, session_id, environment_id, status, created_at)
+SELECT 'work_' || lower(hex(randomblob(12))), wi.session_id, s.environment_id, 'queued', datetime('now')
+FROM (
+  SELECT DISTINCT session_id FROM work_items
+  WHERE status IN ('queued', 'accepted') AND stopped_at IS NULL
+) wi
+JOIN sessions s ON s.id = wi.session_id
+WHERE s.status NOT IN ('completed', 'failed', 'cancelled', 'timed_out', 'cleanup_pending', 'archived');
+`;
+
 export const MIGRATIONS: Migration[] = [
   { version: 1, name: '001_initial', sql: M001_INITIAL },
   { version: 2, name: '002_memory', sql: M002_MEMORY },
@@ -1575,4 +1652,5 @@ export const MIGRATIONS: Migration[] = [
   { version: 61, name: '061_work_api_surface', sql: M061_WORK_API_SURFACE },
   { version: 62, name: '062_deployment_run_due_at', sql: M062_DEPLOYMENT_RUN_DUE_AT },
   { version: 63, name: '063_session_threads', sql: M063_SESSION_THREADS },
+  { version: 64, name: '064_session_work_claims', sql: M064_SESSION_WORK_CLAIMS },
 ];

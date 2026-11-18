@@ -24,6 +24,7 @@ import { Database } from '@/core/db/database.js';
 import { SessionManager } from '@/core/session/session-manager.js';
 import { createServer } from '@/api/server.js';
 import { WorkQueue } from '@/sandbox/self-hosted-provider.js';
+import { SessionWorkQueue } from '@/sandbox/session-work-queue.js';
 import { Readable } from 'node:stream';
 import { resolveWorkerPollOptions, renewWhileRunning, workerPollCommand, workerRunCommand, executeWorkItem } from '@/cli/worker-commands.js';
 
@@ -58,13 +59,14 @@ describe('worker poll CLI', () => {
     tmpDir = undefined;
   });
 
-  /** A real runtime on a real port, with the real work queue behind the real routes. */
+  /** A real runtime on a real port, with both queues behind the real routes. */
   async function startRuntime() {
     const dir = mkdtempSync(join(tmpdir(), 'ma-worker-poll-'));
     tmpDir = dir;
     db = new Database(join(dir, 'test.db'));
     db.runMigrations();
     const queue = new WorkQueue(db);
+    const sessionQueue = new SessionWorkQueue(db);
     const app = createServer({
       db,
       sessionManager: new SessionManager(db),
@@ -72,6 +74,7 @@ describe('worker poll CLI', () => {
       reloadAgents: () => ({ agents: [], errors: [] }),
       consoleRoot: null,
       workQueue: queue,
+      sessionWorkQueue: sessionQueue,
     });
 
     const port = await new Promise<number>((resolve) => {
@@ -83,18 +86,35 @@ describe('worker poll CLI', () => {
 
     const workdir = join(dir, 'work');
     mkdirSync(workdir, { recursive: true });
-    return { queue, port, workdir };
+    return { queue, sessionQueue, port, workdir };
   }
 
-  it('claims, executes and completes a work item over the real routes', async () => {
-    const { queue, port, workdir } = await startRuntime();
+  /**
+   * The claim unit is the session: a claimable work claim exists only when a
+   * live session earns one. `seedClaimable` creates the row set a poll needs —
+   * agent, environment, session — and `sessionQueue.ensure` materializes the
+   * claim itself. No credential is seeded: with no managed API keys the Work
+   * API resolves `open`, so the poller's requests reach the claim as anonymous.
+   */
+  function seedClaimable(sessionQueue: SessionWorkQueue, sessionId: string, envId = 'env_a') {
+    db!.prepare("INSERT OR IGNORE INTO agents (id, name, definition) VALUES ('agent_x', 'x', '{}')").run();
+    db!.prepare("INSERT OR IGNORE INTO environments (id, name, description, config, metadata) VALUES (?, ?, '', '{}', '{}')").run(envId, envId);
+    db!.prepare("INSERT INTO sessions (id, agent_id, agent_name, environment_id, status) VALUES (?, 'agent_x', 'x', ?, 'running')").run(sessionId, envId);
+    return sessionQueue.ensure(sessionId)!;
+  }
+
+  it('claims a session, drains its call, and completes it over the real routes', async () => {
+    const { queue, sessionQueue, port, workdir } = await startRuntime();
     writeFileSync(join(workdir, 'greeting.txt'), 'hello from the worker', 'utf8');
 
+    // The claim unit is the session: the claim exists because the session
+    // earned it, and the call the poller runs is work that claim contains.
+    seedClaimable(sessionQueue, 'sess_worker');
     const id = queue.enqueue('sess_worker', 'read', { path: 'greeting.txt' });
     expect(queue.get(id)!.status).toBe('queued');
 
     const lines = await withCapturedLog(() =>
-      workerPollCommand({ port: String(port), workdir, once: true, workerId: 'worker_test' }));
+      workerPollCommand({ port: String(port), workdir, once: true, workerId: 'worker_test', environmentId: 'env_a' }));
 
     // The row is read back from SQLite, so this asserts the runtime accepted the
     // completion rather than that the command returned without throwing. Without
@@ -109,11 +129,12 @@ describe('worker poll CLI', () => {
   it('reports a failed work item as failed instead of losing it', async () => {
     // The rejection path is the other half of the same completion call and needs
     // `worker_id` too: the item must end `failed`, not `claimed`.
-    const { queue, port, workdir } = await startRuntime();
+    const { queue, sessionQueue, port, workdir } = await startRuntime();
+    seedClaimable(sessionQueue, 'sess_worker');
     const id = queue.enqueue('sess_worker', 'read', { path: 'does-not-exist.txt' });
 
     await withCapturedLog(() =>
-      workerPollCommand({ port: String(port), workdir, once: true, workerId: 'worker_test' }));
+      workerPollCommand({ port: String(port), workdir, once: true, workerId: 'worker_test', environmentId: 'env_a' }));
 
     const item = queue.get(id)!;
     expect(item.status).toBe('failed');
@@ -135,8 +156,14 @@ describe('worker poll CLI', () => {
     // "Not a hang" is asserted by requiring the call to return inside a declared budget that
     // is far below this suite's 30s test timeout, so a missing bound fails as a named
     // assertion in seconds instead of as a timeout that could be blamed on a slow runner.
+    //
+    // The acknowledgement bound is shared by the claim's `ack` and the item's `accept` — the
+    // same `--ack-timeout-ms` option produces both signals — so the mock can sit on the
+    // item-level `/v1/x/worker/accept` and still prove the configured bound is the one that
+    // fired. The claim ack goes through untouched; the accept is the one left hanging.
     const hangBudgetMs = 5_000;
-    const { queue, port, workdir } = await startRuntime();
+    const { queue, sessionQueue, port, workdir } = await startRuntime();
+    seedClaimable(sessionQueue, 'sess_worker');
     const id = queue.enqueue('sess_worker', 'write', { path: 'must-not-exist.txt', content: 'ran anyway' });
 
     const realFetch = globalThis.fetch;
@@ -167,7 +194,7 @@ describe('worker poll CLI', () => {
     let budget: ReturnType<typeof setTimeout> | undefined;
     try {
       lines = await withCapturedLog(() => Promise.race([
-        workerPollCommand({ port: String(port), workdir, once: true, workerId: 'worker_test', ackTimeoutMs: '1' }),
+        workerPollCommand({ port: String(port), workdir, once: true, workerId: 'worker_test', environmentId: 'env_a', ackTimeoutMs: '50' }),
         new Promise<never>((_resolve, reject) => {
           budget = setTimeout(
             () => reject(new Error(
@@ -187,7 +214,9 @@ describe('worker poll CLI', () => {
     // option that produced it rather than some incidental default.
     expect(sawSignal).toBeInstanceOf(AbortSignal);
 
-    // The item was claimed, so the claim really happened and what failed is the confirmation.
+    // The item was claimed by the drain, so what failed is its confirmation —
+    // the claim itself had already been acked. The item row shows the lease the
+    // unconfirmed accept left behind: claimed by the worker, never accepted.
     const item = queue.get(id)!;
     expect(item.status).toBe('queued');
     expect(item.claimedBy).toBe('worker_test');
@@ -201,7 +230,7 @@ describe('worker poll CLI', () => {
     // distinguish "the server went quiet" from "the server refused" without parsing prose.
     expect(warnings.join('\n')).toContain(`not running ${id}`);
     expect(warnings.join('\n')).toContain('work_accept_unconfirmed');
-    expect(warnings.join('\n')).toContain('1ms');
+    expect(warnings.join('\n')).toContain('50ms');
     expect(lines.join('\n')).not.toContain(`completed ${id}`);
   });
 
@@ -221,9 +250,12 @@ describe('worker poll CLI', () => {
 
   it('reports no work and exits when the queue is empty', async () => {
     const { port, workdir } = await startRuntime();
-
+    // The environment exists but no session ever earned a claim, so the poll
+    // answers 204 — 'no work' — on the published claim unit, not on a per-call
+    // item.
+    db!.prepare("INSERT INTO environments (id, name, description, config, metadata) VALUES ('env_a', 'a', '', '{}', '{}')").run();
     const lines = await withCapturedLog(() =>
-      workerPollCommand({ port: String(port), workdir, once: true }));
+      workerPollCommand({ port: String(port), workdir, once: true, environmentId: 'env_a' }));
 
     expect(lines.join('\n')).toContain('no work');
   });
@@ -239,7 +271,8 @@ describe('worker poll CLI', () => {
     // What matters is what does **not** happen next: the command must not run the item and
     // must not report a result for it. A completion would tell the queue an effect
     // occurred that never occurred, and every retry decision downstream reads that record.
-    const { queue, port, workdir } = await startRuntime();
+    const { queue, sessionQueue, port, workdir } = await startRuntime();
+    seedClaimable(sessionQueue, 'sess_worker');
     const id = queue.enqueue('sess_worker', 'write', { path: 'must-not-exist.txt', content: 'ran anyway' });
 
     const realFetch = globalThis.fetch;
@@ -261,7 +294,7 @@ describe('worker poll CLI', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warnings.push(args.join(' ')); });
     try {
       lines = await withCapturedLog(() =>
-        workerPollCommand({ port: String(port), workdir, once: true, workerId: 'worker_test' }));
+        workerPollCommand({ port: String(port), workdir, once: true, workerId: 'worker_test', environmentId: 'env_a' }));
     } finally {
       warn.mockRestore();
       spy.mockRestore();
@@ -295,7 +328,8 @@ describe('worker poll CLI', () => {
     // and the queue moved an accepted item to `unknown`, which is the record that says the
     // outcome can no longer be written - so this is the *expected* answer for a late
     // completion, not an edge case.
-    const { queue, port, workdir } = await startRuntime();
+    const { queue, sessionQueue, port, workdir } = await startRuntime();
+    seedClaimable(sessionQueue, 'sess_worker');
     const id = queue.enqueue('sess_worker', 'read', { path: 'greeting.txt' });
     writeFileSync(join(workdir, 'greeting.txt'), 'the item really ran', 'utf8');
 
@@ -320,7 +354,7 @@ describe('worker poll CLI', () => {
       // `workerPollCommand` **resolving** is the assertion that the refusal did not escape
       // the loop. Before the fix this line rejected, so one late completion ended the process.
       lines = await withCapturedLog(() =>
-        workerPollCommand({ port: String(port), workdir, once: true, workerId: 'worker_test' }));
+        workerPollCommand({ port: String(port), workdir, once: true, workerId: 'worker_test', environmentId: 'env_a' }));
     } finally {
       warn.mockRestore();
       spy.mockRestore();
@@ -355,7 +389,8 @@ describe('worker poll CLI', () => {
     // delivery of that fact must not turn it into silence either. Both outcomes go through
     // the same delivery step, so this asserts the step still carries `failed: true` - and
     // that its own refusal is survived rather than thrown.
-    const { queue, port, workdir } = await startRuntime();
+    const { queue, sessionQueue, port, workdir } = await startRuntime();
+    seedClaimable(sessionQueue, 'sess_worker');
     const id = queue.enqueue('sess_worker', 'read', { path: 'does-not-exist.txt' });
 
     const realFetch = globalThis.fetch;
@@ -376,7 +411,7 @@ describe('worker poll CLI', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warnings.push(args.join(' ')); });
     try {
       await withCapturedLog(() =>
-        workerPollCommand({ port: String(port), workdir, once: true, workerId: 'worker_test' }));
+        workerPollCommand({ port: String(port), workdir, once: true, workerId: 'worker_test', environmentId: 'env_a' }));
     } finally {
       warn.mockRestore();
       spy.mockRestore();
@@ -398,7 +433,8 @@ describe('worker poll CLI', () => {
     // apart from an item failure - but they need to be told apart from **each other** too,
     // because "the server said no" and "the server was not reached" are different diagnoses.
     // The status is what carries the difference, and `null` is the transport case.
-    const { queue, port, workdir } = await startRuntime();
+    const { queue, sessionQueue, port, workdir } = await startRuntime();
+    seedClaimable(sessionQueue, 'sess_worker');
     const id = queue.enqueue('sess_worker', 'read', { path: 'greeting.txt' });
     writeFileSync(join(workdir, 'greeting.txt'), 'ran fine', 'utf8');
 
@@ -413,7 +449,7 @@ describe('worker poll CLI', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warnings.push(args.join(' ')); });
     try {
       await withCapturedLog(() =>
-        workerPollCommand({ port: String(port), workdir, once: true, workerId: 'worker_test' }));
+        workerPollCommand({ port: String(port), workdir, once: true, workerId: 'worker_test', environmentId: 'env_a' }));
     } finally {
       warn.mockRestore();
       spy.mockRestore();
@@ -439,7 +475,8 @@ describe('worker poll CLI', () => {
     // swallowed and the test polls for ever. Throwing from the timer instead also proves the
     // loop got all the way back to sleeping - and it is the same technique the claim tests
     // use, so there is one way to stop this loop, not two.
-    const { queue, port, workdir } = await startRuntime();
+    const { queue, sessionQueue, port, workdir } = await startRuntime();
+    seedClaimable(sessionQueue, 'sess_worker');
     const id = queue.enqueue('sess_worker', 'read', { path: 'greeting.txt' });
     writeFileSync(join(workdir, 'greeting.txt'), 'ran fine', 'utf8');
 
@@ -449,9 +486,10 @@ describe('worker poll CLI', () => {
     const completionBodies: Array<Record<string, unknown>> = [];
     const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(((input: unknown, init?: unknown) => {
       const url = String(input);
-      if (url.endsWith('/v1/x/worker/claim')) {
+      // The session claim is the loop's claim unit — the second one is what
+      // proves the loop kept going after the refused completion.
+      if (url.includes('/work/poll')) {
         claims += 1;
-        // Empty from the second claim on, so the loop has nothing to do but poll and sleep.
         if (claims >= 2) return Promise.resolve(new Response(null, { status: 204 }));
         return realFetch(input as Parameters<typeof realFetch>[0], init as Parameters<typeof realFetch>[1]);
       }
@@ -482,7 +520,7 @@ describe('worker poll CLI', () => {
     try {
       await withCapturedLog(() =>
         workerPollCommand({
-          port: String(port), workdir, intervalMs: String(intervalMarker), workerId: 'worker_test',
+          port: String(port), workdir, intervalMs: String(intervalMarker), workerId: 'worker_test', environmentId: 'env_a',
         }));
     } catch (error) {
       rejection = error;
@@ -504,13 +542,15 @@ describe('worker poll CLI', () => {
   });
 
   it('does not take work belonging to another environment', async () => {
-    // `--environment-id` is passed through to the claim, so a worker pointed at an
-    // environment with no pending work must leave the other environment's item alone.
-    const { queue, port, workdir } = await startRuntime();
-    db!.prepare("INSERT INTO agents (id, name, definition) VALUES ('agent_x', 'x', '{}')").run();
-    db!.prepare("INSERT INTO environments (id, name, description, config, metadata) VALUES ('env_a', 'a', '', '{}', '{}')").run();
-    db!.prepare("INSERT INTO environments (id, name, description, config, metadata) VALUES ('env_b', 'b', '', '{}', '{}')").run();
-    db!.prepare("INSERT INTO sessions (id, agent_id, agent_name, environment_id) VALUES ('sess_b', 'agent_x', 'x', 'env_b')").run();
+    // `--environment-id` scopes the session claim: a worker pointed at an
+    // environment with no live claims must leave the other environment's work
+    // — both its claim and the calls it contains — alone.
+    const { queue, sessionQueue, port, workdir } = await startRuntime();
+    db!.prepare("INSERT OR IGNORE INTO agents (id, name, definition) VALUES ('agent_x', 'x', '{}')").run();
+    db!.prepare("INSERT OR IGNORE INTO environments (id, name, description, config, metadata) VALUES ('env_a', 'a', '', '{}', '{}')").run();
+    db!.prepare("INSERT OR IGNORE INTO environments (id, name, description, config, metadata) VALUES ('env_b', 'b', '', '{}', '{}')").run();
+    db!.prepare("INSERT INTO sessions (id, agent_id, agent_name, environment_id, status) VALUES ('sess_b', 'agent_x', 'x', 'env_b', 'running')").run();
+    sessionQueue.ensure('sess_b');
     const id = queue.enqueue('sess_b', 'read', { path: 'greeting.txt' });
 
     await withCapturedLog(() =>
@@ -525,8 +565,9 @@ describe('worker poll CLI', () => {
     // the item reclaimed and handed to a second worker while the first was still
     // running it. The renewal is the machine-side half of that window, and this case is
     // the only thing that drives it.
-    const { queue, port, workdir } = await startRuntime();
+    const { queue, sessionQueue, port, workdir } = await startRuntime();
     writeFileSync(join(workdir, 'greeting.txt'), 'hello', 'utf8');
+    seedClaimable(sessionQueue, 'sess_worker');
     const id = queue.enqueue('sess_worker', 'read', { path: 'greeting.txt' });
 
     // The claim the poller would have made, taken here so the test controls the row.
@@ -589,7 +630,7 @@ describe('worker poll CLI', () => {
     try {
       const polled = queue.enqueue('sess_worker', 'read', { path: 'greeting.txt' });
       await withCapturedLog(() => workerPollCommand({
-        port: String(port), workdir, once: true, workerId: 'worker_test', heartbeatMs: '60',
+        port: String(port), workdir, once: true, workerId: 'worker_test', environmentId: 'env_a', heartbeatMs: '60',
       }));
       expect(queue.get(polled)!.status).toBe('applied');
     } finally {
@@ -799,7 +840,7 @@ describe('worker poll CLI', () => {
     const realFetch = globalThis.fetch;
     const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(((input: unknown, init?: unknown) => {
       const url = String(input);
-      if (!url.endsWith('/v1/x/worker/claim')) {
+      if (!url.includes('/work/poll')) {
         return realFetch(input as Parameters<typeof realFetch>[0], init as Parameters<typeof realFetch>[1]);
       }
       claims += 1;
@@ -844,7 +885,7 @@ describe('worker poll CLI', () => {
     let failure: unknown;
     try {
       await workerPollCommand({
-        port: String(port), workdir, workerId: 'worker_test',
+        port: String(port), workdir, workerId: 'worker_test', environmentId: 'env_a',
         intervalMs: String(intervalMarker), claimTimeoutMs: '7',
       });
     } catch (error) {
@@ -889,7 +930,7 @@ describe('worker poll CLI', () => {
       try {
         // `--once` is the one configuration where the loop is allowed to stop by itself, so
         // it is the only way to assert "it did not exit" without abandoning a pending promise.
-        await workerPollCommand({ port: '9', workdir: '.', once: true, workerId: 'worker_test' });
+        await workerPollCommand({ port: '9', workdir: '.', once: true, workerId: 'worker_test', environmentId: 'env_a' });
       } catch (error) {
         failure = error;
       } finally {
@@ -924,7 +965,8 @@ describe('worker poll CLI', () => {
     // with `status: null` asserts the request never reached the runtime, which is false here.
     // A request that timed out may have arrived and been applied, so the row may already say
     // `applied` while this process does not know - and the two imply different follow-up.
-    const { queue, port, workdir } = await startRuntime();
+    const { queue, sessionQueue, port, workdir } = await startRuntime();
+    seedClaimable(sessionQueue, 'sess_worker');
     const id = queue.enqueue('sess_worker', 'read', { path: 'greeting.txt' });
     writeFileSync(join(workdir, 'greeting.txt'), 'ran fine', 'utf8');
 
@@ -961,7 +1003,7 @@ describe('worker poll CLI', () => {
     try {
       await Promise.race([
         withCapturedLog(() => workerPollCommand({
-          port: String(port), workdir, once: true, workerId: 'worker_test', completeTimeoutMs: '7',
+          port: String(port), workdir, once: true, workerId: 'worker_test', environmentId: 'env_a', completeTimeoutMs: '7',
         })),
         new Promise<never>((_resolve, reject) => {
           budget = setTimeout(
@@ -1032,20 +1074,19 @@ describe('worker poll CLI', () => {
     expect(resolveWorkerPollOptions({ port: '3000', workdir: '.' }).port).toBe('3000');
   });
 
-  it('hands a claimed item to --on-work instead of running it, with the contract env and stdin JSON', async () => {
+  it('hands a claimed session to --on-work instead of running it, with the contract env and stdin JSON', async () => {
     // The `--on-work` contract is the published spawn-hook shape: the poller
-    // claims, then invokes the command once per item with the item JSON on
-    // stdin and the MANAGED_AGENTS_* variables in its environment — and does
-    // NOT run the item itself. The claim identity is forwarded, so the
-    // spawned process accepts and reports under the poller's worker id.
+    // claims the session, then invokes the command once per claim with the
+    // claim JSON on stdin and the MANAGED_AGENTS_* variables in its
+    // environment — and does NOT serve it itself. The claim identity and the
+    // minted secret are forwarded, so the spawned process holds the claim as
+    // the poller's worker id.
     //
     // A real child process is spawned here (a Node capture script), because
     // the contract is the process boundary: a stubbed spawn would agree with
     // whatever the code happened to pass.
-    const { queue, port, workdir } = await startRuntime();
-    db!.prepare("INSERT INTO agents (id, name, definition) VALUES ('agent_x', 'x', '{}')").run();
-    db!.prepare("INSERT INTO environments (id, name, description, config, metadata) VALUES ('env_a', 'a', '', '{}', '{}')").run();
-    db!.prepare("INSERT INTO sessions (id, agent_id, agent_name, environment_id, status) VALUES ('sess_a', 'agent_x', 'x', 'env_a', 'running')").run();
+    const { queue, sessionQueue, port, workdir } = await startRuntime();
+    const claim = seedClaimable(sessionQueue, 'sess_a');
     writeFileSync(join(workdir, 'greeting.txt'), 'hello from the worker', 'utf8');
     const id = queue.enqueue('sess_a', 'read', { path: 'greeting.txt' });
 
@@ -1078,43 +1119,48 @@ describe('worker poll CLI', () => {
     expect(existsSync(capture)).toBe(true);
     const { item, env } = JSON.parse(readFileSync(capture, 'utf8'));
 
-    // stdin is the claimed item, including the per-claim secret minted by the
-    // claim route — a base64url BetaWorkSecret envelope around a mawt_ bearer.
-    expect(item.id).toBe(id);
-    expect(item.sessionId).toBe('sess_a');
-    expect(item.kind).toBe('read');
+    // stdin is the session claim — `{type:'work', data:{type:'session', id}}`
+    // — including the secret minted at poll: a base64url BetaWorkSecret
+    // envelope around a mawt_ bearer bound to the claim.
+    expect(item.id).toBe(claim.id);
+    expect(item.type).toBe('work');
+    expect(item.data).toEqual({ type: 'session', id: 'sess_a' });
     const secret = JSON.parse(Buffer.from(item.secret, 'base64url').toString('utf8'));
     expect(secret.sessions_token).toMatch(/^mawt_/);
     expect(secret.api_base_url).toBe(`http://localhost:${port}`);
 
     // The environment carries the poller's identity and addressing; the work
-    // secret is deliberately NOT among them — the handler forwards it from
-    // stdin into only the sandbox it spawns.
-    expect(env.MANAGED_AGENTS_WORK_ID).toBe(id);
+    // secret rides stdin inside the claim, and is also forwarded as
+    // MANAGED_AGENTS_WORK_SECRET for the sandbox the handler spawns.
+    expect(env.MANAGED_AGENTS_WORK_ID).toBe(claim.id);
     expect(env.MANAGED_AGENTS_SESSION_ID).toBe('sess_a');
     expect(env.MANAGED_AGENTS_ENVIRONMENT_ID).toBe('env_a');
     expect(env.MANAGED_AGENTS_WORKER_ID).toBe('worker_spawn');
     expect(env.MANAGED_AGENTS_BASE_URL).toBe(`http://localhost:${port}`);
-    expect(env.MANAGED_AGENTS_WORK_SECRET).toBeUndefined();
+    expect(env.MANAGED_AGENTS_WORK_SECRET).toBe(item.secret);
 
-    // The poller never ran the item: the row is claimed by it but never
-    // accepted, and no result was recorded or logged.
-    const row = queue.get(id)!;
-    expect(row.status).toBe('queued');
+    // The poller never served the claim: it stays held-but-unacknowledged under
+    // the poller's id, and the call it contains was never accepted or reported.
+    const row = sessionQueue.get(claim.id)!;
+    expect(row.status).toBe('claimed');
     expect(row.claimedBy).toBe('worker_spawn');
     expect(row.acceptedAt).toBeNull();
-    expect(row.result).toBeUndefined();
+    const itemRow = queue.get(id)!;
+    expect(itemRow.status).toBe('queued');
+    expect(itemRow.result).toBeUndefined();
     expect(lines.join('\n')).not.toContain(`completed ${id}`);
     // The secret never reaches the poller's own output.
     expect(lines.join('\n')).not.toContain(secret.sessions_token);
     expect(warnings.join('\n')).not.toContain(secret.sessions_token);
   });
 
-  it('leaves a claimed item for the queue to reclaim when --on-work fails to run it', async () => {
-    // A spawn that exits non-zero (or cannot start) must not be reported as a
-    // failed item — nothing ran, so a `failed` row would assert an effect that
-    // never happened. The claim lapses unaccepted and the sweep re-hands it.
-    const { queue, port, workdir } = await startRuntime();
+  it('leaves a claimed session for the queue to reclaim when --on-work fails to run it', async () => {
+    // A spawn that exits non-zero (or cannot start) must not be reported as
+    // served — nothing ran, so completing would assert an effect that never
+    // happened. The claim stays held-but-unacknowledged and its lease lapse
+    // hands it back to the queue.
+    const { queue, sessionQueue, port, workdir } = await startRuntime();
+    const claim = seedClaimable(sessionQueue, 'sess_worker');
     const id = queue.enqueue('sess_worker', 'exec', { command: 'echo never ran' });
 
     const script = join(tmpDir!, 'fail.mjs');
@@ -1124,51 +1170,54 @@ describe('worker poll CLI', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => { warnings.push(args.join(' ')); });
     try {
       await withCapturedLog(() =>
-        workerPollCommand({ port: String(port), workdir, once: true, workerId: 'worker_spawn', onWork: `node "${script}"` }));
+        workerPollCommand({ port: String(port), workdir, once: true, workerId: 'worker_spawn', environmentId: 'env_a', onWork: `node "${script}"` }));
     } finally {
       warn.mockRestore();
     }
 
-    const row = queue.get(id)!;
-    expect(row.status).toBe('queued');
+    const row = sessionQueue.get(claim.id)!;
+    expect(row.status).toBe('claimed');
     expect(row.claimedBy).toBe('worker_spawn');
     expect(row.acceptedAt).toBeNull();
-    expect(row.result).toBeUndefined();
-    expect(warnings.join('\n')).toContain(`--on-work handler exited with code 3 for ${id}`);
+    expect(queue.get(id)!.result).toBeUndefined();
+    expect(warnings.join('\n')).toContain(`--on-work handler exited with code 3 for ${claim.id}`);
   });
 
   it('worker run accepts the handed claim and drains the session’s queue only', async () => {
-    // `worker run` is the in-sandbox half: it accepts the claim the poller
-    // already holds (arriving on stdin), executes it under the forwarded
-    // worker id, then keeps claiming this session's items until the queue
-    // runs dry and --max-idle-ms passes. Other sessions' items stay queued.
-    const { queue, port, workdir } = await startRuntime();
-    db!.prepare("INSERT INTO agents (id, name, definition) VALUES ('agent_x', 'x', '{}')").run();
-    db!.prepare("INSERT INTO environments (id, name, description, config, metadata) VALUES ('env_a', 'a', '', '{}', '{}')").run();
-    db!.prepare("INSERT INTO sessions (id, agent_id, agent_name, environment_id, status) VALUES ('sess_a', 'agent_x', 'x', 'env_a', 'running')").run();
-    db!.prepare("INSERT INTO sessions (id, agent_id, agent_name, environment_id, status) VALUES ('sess_other', 'agent_x', 'x', 'env_a', 'running')").run();
+    // `worker run` is the in-sandbox half: it continues the session claim the
+    // poller hands it (arriving on stdin in the published `work` shape), drains
+    // every call that claim contains under the forwarded worker id, and ends
+    // when the queue runs dry and --max-idle-ms passes. Other sessions' calls
+    // stay queued — the claim gate, not convention, sets the scope.
+    const { queue, sessionQueue, port, workdir } = await startRuntime();
+    seedClaimable(sessionQueue, 'sess_a');
+    // The other session needs a claim too — an unclaimed one would be
+    // claimable, and a worker holding no claims of its own could be handed it.
+    seedClaimable(sessionQueue, 'sess_other');
     writeFileSync(join(workdir, 'a.txt'), 'content of a', 'utf8');
     writeFileSync(join(workdir, 'b.txt'), 'content of b', 'utf8');
-    const handedId = queue.enqueue('sess_a', 'read', { path: 'a.txt' });
+    const firstId = queue.enqueue('sess_a', 'read', { path: 'a.txt' });
     const drainedId = queue.enqueue('sess_a', 'read', { path: 'b.txt' });
     const foreignId = queue.enqueue('sess_other', 'read', { path: 'a.txt' });
 
-    // The poller's half: the claim goes over the real route so the handed
-    // item carries a minted secret, exactly as a spawned worker receives it.
-    const claimRes = await fetch(`http://localhost:${port}/v1/x/worker/claim`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ worker_id: 'worker_spawn' }),
+    // The poller's half: the claim goes over the real `work/poll` route so the
+    // handed item is the published shape — `{type:'work', data:{type:'session',
+    // id}, secret}` — exactly as a spawned worker receives it on stdin.
+    const pollRes = await fetch(`http://localhost:${port}/v1/environments/env_a/work/poll`, {
+      headers: { 'Anthropic-Worker-ID': 'worker_spawn' },
     });
-    const handed = (await claimRes.json()) as { id: string; sessionId: string; secret?: string };
-    expect(handed.id).toBe(handedId);
+    const handed = (await pollRes.json()) as { id: string; type: string; data: { type: string; id: string }; secret?: string };
+    expect(handed.type).toBe('work');
+    expect(handed.data).toEqual({ type: 'session', id: 'sess_a' });
     expect(handed.secret).toMatch(/^[A-Za-z0-9_-]+$/);
 
     const envBackup = { ...process.env };
     process.env.MANAGED_AGENTS_SESSION_ID = 'sess_a';
     process.env.MANAGED_AGENTS_WORKER_ID = 'worker_spawn';
     process.env.MANAGED_AGENTS_BASE_URL = `http://localhost:${port}`;
-    delete process.env.MANAGED_AGENTS_ENVIRONMENT_ID;
+    // The claim heartbeats through the official Work API, which needs the
+    // environment the claim lives in — the spawn contract forwards it.
+    process.env.MANAGED_AGENTS_ENVIRONMENT_ID = 'env_a';
     delete process.env.MANAGED_AGENTS_ENVIRONMENT_KEY;
     delete process.env.MANAGED_AGENTS_API_KEY;
     delete process.env.MANAGED_AGENTS_WORK_SECRET;
@@ -1178,14 +1227,14 @@ describe('worker poll CLI', () => {
           { workdir, intervalMs: '250', maxIdleMs: '900' },
           Readable.from([JSON.stringify(handed)]),
         ));
-      expect(lines.join('\n')).toContain(`completed ${handedId}`);
+      expect(lines.join('\n')).toContain(`completed ${firstId}`);
       expect(lines.join('\n')).toContain(`completed ${drainedId}`);
     } finally {
       process.env = envBackup;
     }
 
-    expect(queue.get(handedId)!.status).toBe('applied');
-    expect(queue.get(handedId)!.result).toBe('content of a');
+    expect(queue.get(firstId)!.status).toBe('applied');
+    expect(queue.get(firstId)!.result).toBe('content of a');
     expect(queue.get(drainedId)!.status).toBe('applied');
     expect(queue.get(drainedId)!.result).toBe('content of b');
     // The session scope is the claim filter's, not convention: the other
@@ -1194,18 +1243,8 @@ describe('worker poll CLI', () => {
   });
 
   it('worker run exits when the session ends and when the queue stays idle', async () => {
-    const { port, workdir } = await startRuntime();
-    db!.prepare("INSERT INTO agents (id, name, definition) VALUES ('agent_x', 'x', '{}')").run();
-    db!.prepare("INSERT INTO environments (id, name, description, config, metadata) VALUES ('env_a', 'a', '', '{}', '{}')").run();
-    db!.prepare("INSERT INTO sessions (id, agent_id, agent_name, environment_id, status) VALUES ('sess_end', 'agent_x', 'x', 'env_a', 'running')").run();
-
-    // A token minted while the session runs dies with it — the published
-    // semantic is that the sessions_token's authority is the session's
-    // lifetime, so a dead token is itself the ended signal.
-    const { issueSessionWorkToken } = await import('@/core/auth/session-work-tokens.js');
-    const token = issueSessionWorkToken(db!, 'sess_end', 'env_a');
-    const secret = Buffer.from(
-      JSON.stringify({ sessions_token: token, api_base_url: `http://localhost:${port}` }), 'utf8').toString('base64url');
+    const { sessionQueue, port, workdir } = await startRuntime();
+    seedClaimable(sessionQueue, 'sess_end');
     db!.prepare("UPDATE sessions SET status = 'completed' WHERE id = 'sess_end'").run();
 
     const envBackup = { ...process.env };
@@ -1213,28 +1252,30 @@ describe('worker poll CLI', () => {
       process.env.MANAGED_AGENTS_SESSION_ID = sessionId;
       process.env.MANAGED_AGENTS_WORKER_ID = 'worker_spawn';
       process.env.MANAGED_AGENTS_BASE_URL = `http://localhost:${port}`;
-      delete process.env.MANAGED_AGENTS_ENVIRONMENT_ID;
+      process.env.MANAGED_AGENTS_ENVIRONMENT_ID = 'env_a';
       delete process.env.MANAGED_AGENTS_ENVIRONMENT_KEY;
       delete process.env.MANAGED_AGENTS_API_KEY;
       if (workSecret === undefined) delete process.env.MANAGED_AGENTS_WORK_SECRET;
       else process.env.MANAGED_AGENTS_WORK_SECRET = workSecret;
     };
-    setRunEnv('sess_end', secret);
+    setRunEnv('sess_end');
     try {
-      // The session is already terminal: the run must return promptly even
-      // though --max-idle-ms is far above this test's patience.
-      await withCapturedLog(() =>
+      // The session is already terminal: there is no claim to hold, so
+      // `/claim-session` refuses and the run exits immediately — far under a
+      // --max-idle-ms that would keep a live session waiting.
+      await expect(
         workerRunCommand(
           { workdir, intervalMs: '250', maxIdleMs: '60000' },
           Readable.from(['']),
-        ));
+        ),
+      ).rejects.toThrow('sess_end');
     } finally {
       process.env = envBackup;
     }
 
     // And with a live session and an empty queue, --max-idle-ms is the
     // bound that releases the sandbox: the run ends on its own.
-    db!.prepare("INSERT INTO sessions (id, agent_id, agent_name, environment_id, status) VALUES ('sess_idle', 'agent_x', 'x', 'env_a', 'running')").run();
+    seedClaimable(sessionQueue, 'sess_idle');
     setRunEnv('sess_idle');
     const started = Date.now();
     try {

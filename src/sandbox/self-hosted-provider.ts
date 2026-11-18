@@ -15,6 +15,7 @@
 import { nanoid } from 'nanoid';
 import type { Database } from '@/core/db/database.js';
 import { SESSION_TRANSITIONS } from '@/types/session.js';
+import type { SessionWorkQueue } from './session-work-queue.js';
 import {
   sandboxCapabilities,
   type SandboxProvider,
@@ -488,6 +489,58 @@ export class WorkQueue {
         .run(workerId, candidate.id, reclaimModifier) as { changes: number };
       if (res.changes !== 1) return null; // lost the race — someone else claimed it
 
+      const r = this.db.prepare('SELECT * FROM work_items WHERE id = ?').get(candidate.id) as unknown as RawWorkItem;
+      return toWorkItem(r);
+    });
+  }
+
+  /**
+   * Claim the oldest claimable item whose session is in `sessionIds` — the
+   * unscoped form of `/v1/x/worker/claim` under session-claimed work. The set
+   * is the sessions this worker already holds a live claim on, so the items it
+   * draws are calls contained in claims it owns; an empty set draws nothing.
+   *
+   * Same claim predicate and same guarded-update race rule as {@link claim} —
+   * only the session filter differs, and it is an `IN` list rather than one id.
+   */
+  claimAmongSessions(workerId: string, sessionIds: string[], environmentId?: string, reclaimOlderThanMs?: number): WorkItem | null {
+    if (sessionIds.length === 0) return null;
+    const leaseModifier = `-${this.leaseMs / 1000} seconds`;
+    const reclaimModifier = typeof reclaimOlderThanMs === 'number' && Number.isFinite(reclaimOlderThanMs) && reclaimOlderThanMs > 0
+      ? `-${Math.floor(reclaimOlderThanMs) / 1000} seconds`
+      : leaseModifier;
+    const rowClaimable = (prefix: string): string =>
+      `(${prefix}stopped_at IS NULL AND ${prefix}status = 'queued' AND (${prefix}claimed_at IS NULL OR ${prefix}claimed_at <= datetime('now', ?)))`;
+    const placeholders = sessionIds.map(() => '?').join(', ');
+    const sessionLive = (prefix: string): string =>
+      `((SELECT ss.status FROM sessions ss WHERE ss.id = ${prefix}session_id) IS NULL
+        OR (SELECT ss.status FROM sessions ss WHERE ss.id = ${prefix}session_id) NOT IN (${TERMINAL_SESSION_STATUS_SQL}))`;
+    const claimable = (prefix: string): string => `(${rowClaimable(prefix)} AND ${sessionLive(prefix)})`;
+    return this.db.transaction(() => {
+      // Same accepted-lapse sweep as `claim`: record accepted items whose lease
+      // ran out as `unknown` before offering anything, so a lapsed accepted
+      // claim is never silently replayed.
+      this.db
+        .prepare(
+          `UPDATE work_items SET status = 'unknown'
+           WHERE status = 'accepted' AND stopped_at IS NULL
+             AND claimed_at IS NOT NULL AND claimed_at <= datetime('now', ?)`,
+        )
+        .run(leaseModifier);
+      const candidate = this.db.prepare(
+        `SELECT wi.id
+         FROM work_items wi
+         JOIN sessions s ON s.id = wi.session_id
+         WHERE ${claimable('wi.')} AND wi.session_id IN (${placeholders})
+           ${environmentId ? 'AND s.environment_id = ?' : ''}
+         ORDER BY wi.created_at ASC, wi.rowid ASC
+         LIMIT 1`,
+      ).get(reclaimModifier, ...sessionIds, ...(environmentId ? [environmentId] : [])) as { id: string } | undefined;
+      if (!candidate) return null;
+      const res = this.db
+        .prepare(`UPDATE work_items SET claimed_by = ?, claimed_at = datetime('now'), accepted_at = NULL, abandoned_at = NULL, heartbeat_at = NULL WHERE id = ? AND ${claimable('')}`)
+        .run(workerId, candidate.id, reclaimModifier) as { changes: number };
+      if (res.changes !== 1) return null;
       const r = this.db.prepare('SELECT * FROM work_items WHERE id = ?').get(candidate.id) as unknown as RawWorkItem;
       return toWorkItem(r);
     });
@@ -1077,10 +1130,14 @@ export class SelfHostedSandboxProvider implements SandboxProvider {
     networkPolicyEnforcement: 'none',
   });
 
-  constructor(private readonly queue: WorkQueue) {}
+  constructor(private readonly queue: WorkQueue, private readonly sessionQueue?: SessionWorkQueue) {}
 
   async provision(sessionId: string, config: EnvironmentConfig): Promise<SandboxInstance> {
-    return new SelfHostedSandboxInstance(sessionId, this.queue, (config.timeout ?? 300) * 1000);
+    // A provisioned self_hosted sandbox is a session that may park calls, so it
+    // earns its claim here rather than at the first enqueue: a worker polling
+    // `work/poll` is handed the session's claim as soon as it could serve work.
+    this.sessionQueue?.ensure(sessionId);
+    return new SelfHostedSandboxInstance(sessionId, this.queue, (config.timeout ?? 300) * 1000, this.sessionQueue);
   }
 }
 
@@ -1089,6 +1146,7 @@ class SelfHostedSandboxInstance implements SandboxInstance {
     readonly sessionId: string,
     private readonly queue: WorkQueue,
     private readonly timeoutMs: number,
+    private readonly sessionQueue?: SessionWorkQueue,
   ) {}
 
   async execute(command: string, options?: ExecOptions): Promise<ExecResult> {
@@ -1123,6 +1181,9 @@ class SelfHostedSandboxInstance implements SandboxInstance {
    * mechanism, not through a promise this object resolves.
    */
   enqueueCustomToolCall(call: { name: string; toolUseId: string; input: unknown }): string {
+    // A call this session parks is work a claim contains; materializing the
+    // claim here covers a session whose sandbox was attached without provision.
+    this.sessionQueue?.ensure(this.sessionId);
     return this.queue.enqueue(this.sessionId, 'custom_tool', {
       tool_name: call.name,
       tool_use_id: call.toolUseId,
@@ -1140,6 +1201,7 @@ class SelfHostedSandboxInstance implements SandboxInstance {
    * mechanism, not through a promise this object resolves.
    */
   enqueueToolCall(call: { name: string; toolUseId: string; input: unknown }): string {
+    this.sessionQueue?.ensure(this.sessionId);
     return this.queue.enqueue(this.sessionId, 'tool_call', {
       tool_name: call.name,
       tool_use_id: call.toolUseId,
@@ -1157,6 +1219,9 @@ class SelfHostedSandboxInstance implements SandboxInstance {
     // includes work a worker claimed and abandoned - the claim is a lease on running
     // it, and once the lease expires the item is a candidate again.
     this.queue.stop(this.sessionId);
+    // The session-level claim ends with the session too: it is never handed out
+    // again, and the credential bound to it is revoked.
+    this.sessionQueue?.stopForSession(this.sessionId);
   }
 }
 
