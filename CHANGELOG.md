@@ -109,6 +109,17 @@
 
 ### Fixed
 
+- HTTPS environment credentials inside CONNECT tunnels are now a recorded
+  decision rather than an open gap: substitution happens on the proxy's
+  plain-HTTP forward path, and the CONNECT gate already refuses a tunnel
+  whose target a credential's `allowed_hosts` does not cover — so a
+  `__cred_<id>__` token inside TLS can only ever leave toward a covered host
+  and a real secret never reaches an uncovered one on the wire. MITM and
+  SNI-gating were evaluated and set aside: MITM substitutes on some HTTPS
+  clients only at the cost of confidentiality on all of them, and SNI-gating
+  re-checks the host the CONNECT gate already names. `credentials.md` §4/§5
+  now records the decision and its reasoning.
+
 - A `limited` network policy now installs an egress boundary on every shipped
   backend, each reported at the strength it actually applies. Kubernetes
   provisions a per-session `socat` relay Pod fronted by a Service and a

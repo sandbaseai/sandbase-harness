@@ -296,7 +296,20 @@ Session execution:
   opaque, so a placeholder sent inside an HTTPS request reaches the server
   literally — it fails closed rather than leaking, and HTTPS API use from
   inside the sandbox should be reached through a `static_bearer`/`mcp_oauth`
-  credential on a url transport or through in-process injection.
+  credential on a url transport or through in-process injection. The floor the
+  model guarantees already holds on that path without terminating TLS: the
+  tunnel is refused unless the CONNECT's target matches the credential's own
+  `allowed_hosts`, so a `__cred_<id>__` token inside the tunnel can only ever
+  leave toward a host its own policy covers — it never reaches an uncovered
+  host on the wire, whether as a literal placeholder or as the real value.
+  MITM of the tunnel was rejected rather than implemented: substituting inside
+  TLS requires a session-scoped CA injected into the sandbox trust store, which
+  widens what the boundary can see far past the substitution it buys — and it
+  still fails closed on pinners and Go binaries, so it buys substitution on
+  some HTTPS clients at the cost of confidentiality on all of them. SNI-gating
+  was considered and set aside for the same reason it cannot substitute: it
+  re-checks the host the CONNECT gate already named, so it changes nothing
+  the allowlist does not already decide.
 - Every shipped backend owns an egress boundary, so `environment_variable`
   credentials materialize on all four through the same placeholder model —
   the relay fronted by a Service on `kubernetes` (its Pod selected by the
@@ -432,17 +445,24 @@ their own boundary.
 
 ## 5. Reason for the difference
 
-- Placeholder substitution is scoped to the proxy's HTTP forward path and to
-  backends that own a boundary because those are the only places the runtime can
-  truthfully materialize a value. A CONNECT tunnel is ciphertext from the
-  proxy's seat — rewriting inside it would require terminating TLS, which a
-  loopback boundary cannot honestly do. A provider without a proxy has no wire
-  to substitute on, and the published contract does not support
-  `environment_variable` on a self-hosted sandbox at all, so the credential is
-  refused rather than degraded to a plaintext export the caller never asked for.
-  Both residuals are stated plainly rather than folded into "supported",
-  because pretending a boundary-less backend honors the credential would be the
-  silent materialization this boundary exists to prevent.
+- Placeholder substitution is scoped to the proxy's HTTP forward path because
+  that is the only place the runtime can truthfully materialize a value. A
+  CONNECT tunnel is ciphertext from the proxy's seat — rewriting inside it
+  would require terminating TLS, which a loopback boundary cannot honestly do,
+  and the guarantee the model owes already holds without it: the CONNECT gate
+  refuses the tunnel unless the target matches the credential's own
+  `allowed_hosts`, so a `__cred_<id>__` token inside the tunnel can only ever
+  leave toward a host its own policy covers and never reaches an uncovered
+  host on the wire. MITM and SNI-gating were both evaluated and set aside:
+  MITM substitutes inside TLS but only at the cost of a session-scoped CA
+  injected into the sandbox trust store — it widens what the boundary can see
+  far past the substitution it buys and still fails closed on pinners and Go
+  binaries — while SNI-gating re-checks the host the CONNECT gate already
+  named, so it changes nothing the allowlist does not already decide. Every
+  shipped backend owns a boundary now, so `credential_backend_unsupported`
+  reaches only a `SandboxInstance` that does not implement
+  `configureEgressSubstitutions` — a provider without a wire to substitute on,
+  which is what the refusal was always about.
 - OAuth refresh runs at the injection boundary rather than on a timer because
   that is the only point the runtime knows a token is about to be presented: a
   background loop would refresh credentials no session is using, and refreshing
