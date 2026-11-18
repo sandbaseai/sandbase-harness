@@ -641,7 +641,7 @@ export type RuntimeSettingsConfig = {
    * Optional: absent is the honest spelling of "no search provider configured".
    * `options.api_key` round-trips masked, like every other settings secret.
    */
-  web_search?: { provider: 'tavily' | 'keenable' | 'brave' | 'exa' | 'searxng'; options: Record<string, unknown> };
+  web_search?: { provider: 'tavily' | 'keenable' | 'outcrawl' | 'brave' | 'exa' | 'searxng'; options: Record<string, unknown> };
   /**
    * Optional dream-pipeline override: `model` is the model id a dream runs on
    * when its POST body does not name one. Absent means the workspace model.

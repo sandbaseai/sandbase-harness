@@ -12,11 +12,13 @@ import { resolveEnvVars } from '@/core/config/env-resolver.js';
 import { resolveRuntimeSettingsSecret } from '@/core/settings/secrets.js';
 import type { RuntimeSettings } from '@/core/settings/schema.js';
 import { createKeenableProvider } from './keenable.js';
+import { createOutcrawlProvider } from './outcrawl.js';
 import { createTavilyProvider } from './tavily.js';
 import type { SearchProvider } from './types.js';
 
 export type { SearchProvider, WebSearchOutcome, WebSearchRecency, WebSearchRequest, WebSearchResultItem } from './types.js';
 export { createKeenableProvider, KEENABLE_DEFAULT_BASE_URL } from './keenable.js';
+export { createOutcrawlProvider, OUTCRAWL_DEFAULT_BASE_URL } from './outcrawl.js';
 export { createTavilyProvider, TAVILY_DEFAULT_BASE_URL } from './tavily.js';
 
 export interface SearchProviderDeps {
@@ -54,6 +56,10 @@ export function searchProviderFromSettings(
       if (!apiKey?.trim() && hasOption(webSearch, 'api_key')) return undefined;
       if (!baseUrl?.trim() && hasOption(webSearch, 'base_url')) return undefined;
       return createKeenableProvider({ apiKey, baseUrl, fetchImpl: deps.fetchImpl });
+    case 'outcrawl':
+      // Outcrawl is key-only, like Tavily: without a usable key there is no
+      // adapter to report as configured.
+      return apiKey ? createOutcrawlProvider({ apiKey, baseUrl, fetchImpl: deps.fetchImpl }) : undefined;
     // The remaining ids pass schema validation but ship no adapter yet;
     // the availability check already refuses saving them.
     default:
