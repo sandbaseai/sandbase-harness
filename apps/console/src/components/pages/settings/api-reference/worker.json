@@ -29,6 +29,35 @@
     ]
   },
   {
+    "id": "worker-claim-session",
+    "group": "Worker",
+    "title": "Acquire a session's work claim",
+    "method": "POST",
+    "path": "/v1/x/worker/claim-session",
+    "summary": "Acquires the session's live work claim for this worker — the local equivalent of the published poll + ack on the claim unit. The claim is materialized if the session has none, held by this worker, and acknowledged in one step so the drain gate sees the accepted state a session-scoped claim requires. A session that does not exist or has ended answers 404; one already held by another live worker answers 409, because two workers must never serve the same session.",
+    "parameters": [
+      {
+        "name": "worker_id",
+        "type": "string",
+        "required": true,
+        "description": "Worker identity for claim ownership."
+      },
+      {
+        "name": "session_id",
+        "type": "string",
+        "required": true,
+        "description": "Session whose claim this worker acquires."
+      }
+    ],
+    "response": [
+      {
+        "name": "claim",
+        "type": "object",
+        "description": "The held, acknowledged session claim, in the same shape the official work/poll hands out."
+      }
+    ]
+  },
+  {
     "id": "worker-claim",
     "group": "Worker",
     "title": "Claim work item",

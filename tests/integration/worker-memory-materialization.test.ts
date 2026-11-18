@@ -20,6 +20,7 @@ import { serve } from '@hono/node-server';
 import { Database } from '@/core/db/database.js';
 import { SessionManager } from '@/core/session/session-manager.js';
 import { WorkQueue } from '@/sandbox/self-hosted-provider.js';
+import { SessionWorkQueue } from '@/sandbox/session-work-queue.js';
 import { createServer } from '@/api/server.js';
 import { issueSessionWorkToken } from '@/core/auth/session-work-tokens.js';
 import { workerRunCommand } from '@/cli/worker-commands.js';
@@ -111,6 +112,7 @@ describe('worker memory store materialization', () => {
       consoleRoot: null,
       apiKeys: [API_KEY],
       workQueue: new WorkQueue(db),
+      sessionWorkQueue: new SessionWorkQueue(db),
       workspace: {
         root: tmpDir,
         dataDir,
@@ -244,16 +246,22 @@ describe('worker memory store materialization', () => {
 
   itPosix('worker run mounts the store, serves items against it, and flushes on exit', async () => {
     const queue = new WorkQueue(db);
+    const sessionQueue = new SessionWorkQueue(db);
+    // The session earns a claim and the parked items become the calls it
+    // contains — the drain gate (`drainableBy`) is what hands them out.
+    sessionQueue.ensure('sess_mem');
     const readItem = queue.enqueue('sess_mem', 'read', { path: '/mnt/memory/context/notes.md' });
     const writeItem = queue.enqueue('sess_mem', 'write', { path: '/mnt/memory/context/final.md', content: 'flushed at exit' });
 
-    const claimRes = await fetch(`${baseUrl}/v1/x/worker/claim`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', authorization: `Bearer ${API_KEY}` },
-      body: JSON.stringify({ worker_id: 'worker_mem' }),
+    // The poller's half: the claim goes over the official `work/poll` so the
+    // handed item is the published shape — `{type:'work', data:{type:'session',
+    // id}, secret}` — as a spawned worker receives it on stdin.
+    const pollRes = await fetch(`${baseUrl}/v1/environments/env_a/work/poll`, {
+      headers: { authorization: `Bearer ${API_KEY}`, 'Anthropic-Worker-ID': 'worker_mem' },
     });
-    const handed = (await claimRes.json()) as { id: string; secret?: string };
-    expect(handed.id).toBe(readItem);
+    const handed = (await pollRes.json()) as { id: string; type: string; data: { type: string; id: string }; secret?: string };
+    expect(handed.type).toBe('work');
+    expect(handed.data).toEqual({ type: 'session', id: 'sess_mem' });
     expect(handed.secret).toBeTruthy();
 
     const envBackup = { ...process.env };
@@ -261,7 +269,9 @@ describe('worker memory store materialization', () => {
     process.env.MANAGED_AGENTS_WORKER_ID = 'worker_mem';
     process.env.MANAGED_AGENTS_BASE_URL = baseUrl;
     process.env.MANAGED_AGENTS_API_KEY = API_KEY;
-    delete process.env.MANAGED_AGENTS_ENVIRONMENT_ID;
+    // The claim heartbeats through the official Work API, which needs the
+    // environment the claim lives in — the spawn contract forwards it.
+    process.env.MANAGED_AGENTS_ENVIRONMENT_ID = 'env_a';
     delete process.env.MANAGED_AGENTS_ENVIRONMENT_KEY;
     try {
       await workerRunCommand(

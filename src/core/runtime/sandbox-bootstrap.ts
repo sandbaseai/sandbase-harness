@@ -4,6 +4,7 @@ import { DockerSandboxProvider, isDockerAvailable } from '../../sandbox/docker-p
 import { KubernetesSandboxProvider, isKubernetesAvailable, type KubernetesProviderLogger } from '../../sandbox/kubernetes-provider.js';
 import { SandboxProviderRegistry } from '../../sandbox/registry.js';
 import { SelfHostedSandboxProvider, WorkQueue } from '../../sandbox/self-hosted-provider.js';
+import { SessionWorkQueue } from '../../sandbox/session-work-queue.js';
 
 export interface RuntimeSandboxBootstrapOptions {
   db: Database;
@@ -18,6 +19,7 @@ export interface RuntimeSandboxBootstrapResult {
   sandboxProvider: LocalSandboxProvider;
   sandboxRegistry: SandboxProviderRegistry;
   workQueue: WorkQueue;
+  sessionWorkQueue: SessionWorkQueue;
   dockerAvailable: boolean;
   kubernetesAvailable: boolean;
 }
@@ -49,14 +51,18 @@ export function bootstrapRuntimeSandboxes(options: RuntimeSandboxBootstrapOption
     sandboxRegistry.register(new KubernetesSandboxProvider(options.logger));
   }
 
-  // self_hosted: tool calls are dispatched to a user-run Worker via the queue.
+  // self_hosted: a worker claims a whole session (the published claim unit,
+  // `SessionWorkQueue`); the per-call tool items it parks are the calls that
+  // claim contains, drained under it on the local worker channel (`WorkQueue`).
   const workQueue = new WorkQueue(options.db);
-  sandboxRegistry.register(new SelfHostedSandboxProvider(workQueue));
+  const sessionWorkQueue = new SessionWorkQueue(options.db);
+  sandboxRegistry.register(new SelfHostedSandboxProvider(workQueue, sessionWorkQueue));
 
   return {
     sandboxProvider,
     sandboxRegistry,
     workQueue,
+    sessionWorkQueue,
     dockerAvailable,
     kubernetesAvailable,
   };

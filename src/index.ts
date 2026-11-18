@@ -86,7 +86,7 @@ async function startServer(opts: StartServerOptions) {
   });
   const metrics = new Metrics();
 
-  const { sandboxProvider, sandboxRegistry, workQueue } = bootstrapRuntimeSandboxes({ db, dataDir, logger });
+  const { sandboxProvider, sandboxRegistry, workQueue, sessionWorkQueue } = bootstrapRuntimeSandboxes({ db, dataDir, logger });
 
   // Settings V2 is seeded after legacy config/import data exists, then becomes
   // the runtime source for settings that have a shipped adapter.
@@ -240,6 +240,7 @@ async function startServer(opts: StartServerOptions) {
       stopRuntime('restart');
     },
     workQueue,
+    sessionWorkQueue,
     sandboxCapabilities: (type) => sandboxRegistry.capabilitiesOf(type),
     corsOrigins: parseCsv(process.env.MANAGED_AGENTS_CORS_ORIGINS),
     workspace: {

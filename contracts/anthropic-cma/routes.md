@@ -226,6 +226,7 @@ every row is mounted, and every mounted route has a row.
 | GET | `/v1/x/templates` | `src/api/routes/templates.ts` |
 | POST | `/v1/x/worker/accept` | `src/api/routes/worker.ts` |
 | POST | `/v1/x/worker/claim` | `src/api/routes/worker.ts` |
+| POST | `/v1/x/worker/claim-session` | `src/api/routes/worker.ts` |
 | POST | `/v1/x/worker/heartbeat` | `src/api/routes/worker.ts` |
 | POST | `/v1/x/worker/complete` | `src/api/routes/worker.ts` |
 | GET | `/v1/x/workspace` | `src/api/routes/runtime.ts` |

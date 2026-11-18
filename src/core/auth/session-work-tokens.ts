@@ -33,7 +33,7 @@ import { isTerminal } from '@/core/session/state-machine.js';
 import { SESSION_TRANSITIONS, type SessionStatus } from '@/types/session.js';
 
 export type SessionWorkTokenValidation =
-  | { ok: true; sessionId: string; environmentId: string }
+  | { ok: true; sessionId: string; environmentId: string; claimId: string | null }
   | { ok: false };
 
 /** Mint a fresh bearer for a claim about to be handed to a worker. */
@@ -41,12 +41,13 @@ export function issueSessionWorkToken(
   db: Database,
   sessionId: string,
   environmentId: string,
+  claimId?: string,
 ): string {
   const token = `mawt_${randomBytes(32).toString('base64url')}`;
   db.prepare(
-    `INSERT INTO session_work_tokens (id, session_id, environment_id, token_hash, token_prefix)
-     VALUES (?, ?, ?, ?, ?)`,
-  ).run(`swt_${nanoid(18)}`, sessionId, environmentId, hashSessionWorkToken(token), sessionWorkTokenPrefix(token));
+    `INSERT INTO session_work_tokens (id, session_id, environment_id, token_hash, token_prefix, claim_id)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(`swt_${nanoid(18)}`, sessionId, environmentId, hashSessionWorkToken(token), sessionWorkTokenPrefix(token), claimId ?? null);
   return token;
 }
 
@@ -62,10 +63,10 @@ export function validateSessionWorkToken(
   if (typeof value !== 'string' || !value.startsWith('mawt_')) return { ok: false };
   const hash = hashSessionWorkToken(value);
   const row = db.prepare(
-    `SELECT id, session_id, environment_id
+    `SELECT id, session_id, environment_id, claim_id
      FROM session_work_tokens
      WHERE token_hash = ? AND revoked_at IS NULL`,
-  ).get(hash) as { id: string; session_id: string; environment_id: string } | undefined;
+  ).get(hash) as { id: string; session_id: string; environment_id: string; claim_id: string | null } | undefined;
   if (!row) return { ok: false };
   const session = db.prepare('SELECT status FROM sessions WHERE id = ?').get(row.session_id) as
     | { status: SessionStatus }
@@ -77,7 +78,7 @@ export function validateSessionWorkToken(
     return { ok: false };
   }
   db.prepare("UPDATE session_work_tokens SET last_seen_at = datetime('now') WHERE id = ?").run(row.id);
-  return { ok: true, sessionId: row.session_id, environmentId: row.environment_id };
+  return { ok: true, sessionId: row.session_id, environmentId: row.environment_id, claimId: row.claim_id };
 }
 
 /**

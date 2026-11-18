@@ -254,7 +254,8 @@
     "precondition_failed": [
       "tests/integration/memory-mounts.test.ts",
       "tests/unit/memory-semantics-wiring.test.ts",
-      "tests/unit/memory-semantics.test.ts"
+      "tests/unit/memory-semantics.test.ts",
+      "tests/unit/session-work-queue.test.ts"
     ],
     "request_too_large": [
       "tests/integration/initial-events-transaction.test.ts"

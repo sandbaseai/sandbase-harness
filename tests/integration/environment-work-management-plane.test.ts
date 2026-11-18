@@ -2,12 +2,12 @@
  * Integration test: the published Work API management plane.
  *
  * `GET /v1/environments/{id}/work`, `GET .../work/{workId}`, and
- * `GET .../work/stats` read the same local queue the data plane mutates.
- * These assertions pin what a management caller depends on: the list's
- * newest-first order and keyset `page` cursor, per-item retrieval under the
- * same credential scoping as the item routes, the `work_queue_stats`
- * counters' meaning on the local lease model, and the queue-authority fence
- * that keeps a session token out of all three.
+ * `GET .../work/stats` read the same session-claim store the data plane
+ * mutates. These assertions pin what a management caller depends on: the
+ * list's newest-first order and keyset `page` cursor, per-claim retrieval
+ * under the same credential scoping as the claim routes, the
+ * `work_queue_stats` counters' meaning on the claim lease model, and the
+ * queue-authority fence that keeps a session token out of all three.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os';
 import Anthropic from '@anthropic-ai/sdk';
 import { Database } from '@/core/db/database.js';
 import { SessionManager } from '@/core/session/session-manager.js';
-import { WorkQueue } from '@/sandbox/self-hosted-provider.js';
+import { SessionWorkQueue } from '@/sandbox/session-work-queue.js';
 import { createServer } from '@/api/server.js';
 import { createEnvironmentWorkerKey } from '@/core/auth/environment-worker-keys.js';
 import { CMA_ANTHROPIC_VERSION, CMA_MANAGED_AGENTS_BETA } from '@/core/cma/compatibility.js';
@@ -59,9 +59,14 @@ describe('Environment work management plane', () => {
   let db: Database;
   let tmpDir: string;
   let app: ReturnType<typeof createServer>;
-  let queue: WorkQueue;
+  let sessionQueue: SessionWorkQueue;
   let envKeyA: string;
   let envKeyB: string;
+
+  function addSession(id: string, envId: string, status = 'running') {
+    db.prepare("INSERT INTO sessions (id, agent_id, agent_name, environment_id, status) VALUES (?, 'agent_x', 'x', ?, ?)")
+      .run(id, envId, status);
+  }
 
   beforeEach(() => {
     tmpDir = mkdtempSync(join(tmpdir(), 'ma-ewmp-'));
@@ -70,18 +75,18 @@ describe('Environment work management plane', () => {
     db.prepare("INSERT INTO environments (id, name, description, config, metadata) VALUES ('env_a', 'a', '', '{}', '{}')").run();
     db.prepare("INSERT INTO environments (id, name, description, config, metadata) VALUES ('env_b', 'b', '', '{}', '{}')").run();
     db.prepare("INSERT INTO agents (id, name, definition) VALUES ('agent_x', 'x', '{}')").run();
-    db.prepare("INSERT INTO sessions (id, agent_id, agent_name, environment_id) VALUES ('sess_a', 'agent_x', 'x', 'env_a')").run();
-    db.prepare("INSERT INTO sessions (id, agent_id, agent_name, environment_id) VALUES ('sess_a2', 'agent_x', 'x', 'env_a')").run();
-    db.prepare("INSERT INTO sessions (id, agent_id, agent_name, environment_id) VALUES ('sess_b', 'agent_x', 'x', 'env_b')").run();
+    addSession('sess_a', 'env_a');
+    addSession('sess_a2', 'env_a');
+    addSession('sess_b', 'env_b');
 
-    queue = new WorkQueue(db);
+    sessionQueue = new SessionWorkQueue(db);
     app = createServer({
       db,
       sessionManager: new SessionManager(db),
       agents: [],
       reloadAgents: () => ({ agents: [], errors: [] }),
       consoleRoot: null,
-      workQueue: queue,
+      sessionWorkQueue: sessionQueue,
     });
     envKeyA = createEnvironmentWorkerKey(db, 'env_a', { name: 'worker-a' }).secret_key;
     envKeyB = createEnvironmentWorkerKey(db, 'env_b', { name: 'worker-b' }).secret_key;
@@ -111,15 +116,15 @@ describe('Environment work management plane', () => {
     return res.json() as Promise<WorkBody>;
   }
 
-  it('lists items newest-first in the published shape, scoped to the environment', async () => {
-    const first = queue.enqueue('sess_a', 'exec', { command: 'x' });
-    queue.enqueue('sess_b', 'exec', { command: 'foreign' });
-    const second = queue.enqueue('sess_a2', 'read', { path: '/y' });
+  it('lists claims newest-first in the published shape, scoped to the environment', async () => {
+    const first = sessionQueue.ensure('sess_a')!;
+    sessionQueue.ensure('sess_b');
+    const second = sessionQueue.ensure('sess_a2')!;
 
     const res = await list();
     expect(res.status).toBe(200);
     const body = await res.json() as ListBody;
-    expect(body.data.map((w) => w.id)).toEqual([second, first]);
+    expect(body.data.map((w) => w.id)).toEqual([second.id, first.id]);
     expect(body.next_page).toBeNull();
     const item = body.data[0]!;
     expect(item.type).toBe('work');
@@ -128,9 +133,12 @@ describe('Environment work management plane', () => {
     expect(item.secret).toBeNull();
   });
 
-  it('walks every item exactly once through the page cursor', async () => {
+  it('walks every claim exactly once through the page cursor', async () => {
     const ids: string[] = [];
-    for (let i = 0; i < 5; i += 1) ids.push(queue.enqueue('sess_a', 'exec', { command: `c${i}` }));
+    for (let i = 0; i < 5; i += 1) {
+      addSession(`sess_p${i}`, 'env_a');
+      ids.push(sessionQueue.ensure(`sess_p${i}`)!.id);
+    }
 
     const seen: string[] = [];
     let page: string | null = null;
@@ -150,10 +158,13 @@ describe('Environment work management plane', () => {
 
   it('keeps cursor pages stable when equal created_at timestamps collide', async () => {
     const ids: string[] = [];
-    for (let i = 0; i < 4; i += 1) ids.push(queue.enqueue('sess_a', 'exec', { command: `c${i}` }));
+    for (let i = 0; i < 4; i += 1) {
+      addSession(`sess_t${i}`, 'env_a');
+      ids.push(sessionQueue.ensure(`sess_t${i}`)!.id);
+    }
     // Second-precision timestamps: force every row onto one instant so the
     // rowid half of the keyset is what separates pages.
-    db.prepare("UPDATE work_items SET created_at = '2026-01-01 00:00:00'").run();
+    db.prepare("UPDATE session_work_claims SET created_at = '2026-01-01 00:00:00'").run();
 
     const firstPage = await (await list('env_a', envKeyA, '?limit=2')).json() as ListBody;
     const secondPage = await (await list('env_a', envKeyA, `?limit=2&page=${firstPage.next_page}`)).json() as ListBody;
@@ -169,26 +180,26 @@ describe('Environment work management plane', () => {
     }
   });
 
-  it('retrieves one item and hides foreign items behind 404', async () => {
-    const own = queue.enqueue('sess_a', 'exec', { command: 'x' });
-    const foreign = queue.enqueue('sess_b', 'exec', { command: 'y' });
+  it('retrieves one claim and hides foreign claims behind 404', async () => {
+    const own = sessionQueue.ensure('sess_a')!;
+    const foreign = sessionQueue.ensure('sess_b')!;
 
-    const res = await app.request(`/v1/environments/env_a/work/${own}`, {
+    const res = await app.request(`/v1/environments/env_a/work/${own.id}`, {
       headers: { ...HEADERS, authorization: `Bearer ${envKeyA}` },
     });
     expect(res.status).toBe(200);
     const work = await res.json() as WorkBody;
-    expect(work.id).toBe(own);
+    expect(work.id).toBe(own.id);
     expect(work.state).toBe('queued');
     expect(work.secret).toBeNull();
 
-    // A valid env_a credential asking env_b's item — even through env_b's own
+    // A valid env_a credential asking env_b's claim — even through env_b's own
     // path — cannot confirm it exists.
-    const cross = await app.request(`/v1/environments/env_b/work/${foreign}`, {
+    const cross = await app.request(`/v1/environments/env_b/work/${foreign.id}`, {
       headers: { ...HEADERS, authorization: `Bearer ${envKeyA}` },
     });
     expect(cross.status).toBe(401);
-    const misplaced = await app.request(`/v1/environments/env_a/work/${foreign}`, {
+    const misplaced = await app.request(`/v1/environments/env_a/work/${foreign.id}`, {
       headers: { ...HEADERS, authorization: `Bearer ${envKeyA}` },
     });
     expect(misplaced.status).toBe(404);
@@ -198,8 +209,8 @@ describe('Environment work management plane', () => {
     expect(missing.status).toBe(404);
   });
 
-  it('lets a session token read its own item but no other session\'s', async () => {
-    queue.enqueue('sess_a', 'exec', { command: 'x' });
+  it('lets a session token read its own claim but no other session\'s', async () => {
+    sessionQueue.ensure('sess_a');
     const claimed = await poll();
     const sessionsToken = decodeSecret(claimed.secret!).sessions_token;
 
@@ -208,8 +219,8 @@ describe('Environment work management plane', () => {
     });
     expect(own.status).toBe(200);
 
-    const other = queue.enqueue('sess_a2', 'exec', { command: 'y' });
-    const denied = await app.request(`/v1/environments/env_a/work/${other}`, {
+    const other = sessionQueue.ensure('sess_a2')!;
+    const denied = await app.request(`/v1/environments/env_a/work/${other.id}`, {
       headers: { ...HEADERS, authorization: `Bearer ${sessionsToken}` },
     });
     expect(denied.status).toBe(404);
@@ -220,9 +231,9 @@ describe('Environment work management plane', () => {
   });
 
   it('counts depth, pending, oldest, and polling workers the published way', async () => {
-    const unclaimed = queue.enqueue('sess_a', 'exec', { command: 'x' });
-    const held = queue.enqueue('sess_a', 'exec', { command: 'y' });
-    queue.enqueue('sess_b', 'exec', { command: 'foreign' });
+    const unclaimed = sessionQueue.ensure('sess_a')!;
+    const held = sessionQueue.ensure('sess_a2')!;
+    sessionQueue.ensure('sess_b'); // another environment — out of scope
 
     let body = await (await stats()).json() as StatsBody;
     expect(body.type).toBe('work_queue_stats');
@@ -231,24 +242,24 @@ describe('Environment work management plane', () => {
     expect(body.workers_polling).toBe(0);
     expect(body.oldest_queued_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
 
-    // A poll claims the older item: it leaves depth and joins pending while
+    // A poll claims the older claim: it leaves depth and joins pending while
     // its lease lives; the poller joins workers_polling.
     const claimed = await poll();
-    expect(claimed.id).toBe(unclaimed);
+    expect(claimed.id).toBe(unclaimed.id);
     body = await (await stats()).json() as StatsBody;
     expect(body.depth).toBe(1);
     expect(body.pending).toBe(1);
     expect(body.workers_polling).toBe(1);
 
-    // Once the claim outlives the lease the item is claimable again: back in
-    // depth, out of pending.
-    db.prepare("UPDATE work_items SET claimed_at = datetime('now', '-1 hour') WHERE id = ?").run(unclaimed);
+    // Once the claim outlives the reclaim window it is claimable again: back
+    // in depth, out of pending.
+    db.prepare("UPDATE session_work_claims SET claimed_at = datetime('now', '-1 hour') WHERE id = ?").run(unclaimed.id);
     body = await (await stats()).json() as StatsBody;
     expect(body.depth).toBe(2);
     expect(body.pending).toBe(0);
 
-    // A stopped item and a dead session's item are not queue pressure.
-    queue.stopItem(held);
+    // A stopped claim and a dead session's claim are not queue pressure.
+    sessionQueue.stop(held.id, true);
     db.prepare("UPDATE sessions SET status = 'completed' WHERE id = 'sess_a'").run();
     body = await (await stats()).json() as StatsBody;
     expect(body.depth).toBe(0);
@@ -257,8 +268,8 @@ describe('Environment work management plane', () => {
   });
 
   it('scopes stats to the environment and answers 404 for an unknown one', async () => {
-    queue.enqueue('sess_a', 'exec', { command: 'x' });
-    queue.enqueue('sess_b', 'exec', { command: 'y' });
+    sessionQueue.ensure('sess_a');
+    sessionQueue.ensure('sess_b');
 
     expect(((await stats('env_b', envKeyB)).status)).toBe(200);
     const envB = await (await stats('env_b', envKeyB)).json() as StatsBody;
@@ -271,13 +282,19 @@ describe('Environment work management plane', () => {
   });
 
   it('lets the pinned SDK decode list pages and stats', async () => {
-    queue.enqueue('sess_a', 'exec', { command: 'x' });
-    queue.enqueue('sess_a', 'exec', { command: 'y' });
+    sessionQueue.ensure('sess_a');
+    sessionQueue.ensure('sess_a2');
     const client = new Anthropic({
       baseURL: 'http://conformance.local',
       apiKey: envKeyA,
       maxRetries: 0,
-      fetch: async (input, init) => app.request(input, init),
+      fetch: async (input, init) => {
+        const request = new Request(input, init);
+        if (request.headers.has('x-api-key')) {
+          request.headers.delete('authorization');
+        }
+        return app.request(request);
+      },
     });
 
     const ids: string[] = [];

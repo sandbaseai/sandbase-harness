@@ -37,6 +37,7 @@ import type { AgentDefinition } from '@/types/agent.js';
 import { workerRoutes } from './routes/worker.js';
 import { operationsRoutes } from './routes/operations.js';
 import type { WorkQueue } from '@/sandbox/self-hosted-provider.js';
+import type { SessionWorkQueue } from '@/sandbox/session-work-queue.js';
 import type { SandboxCapabilities } from '@/types/sandbox.js';
 import type { Logger, LogStore } from '@/core/observability/logger.js';
 import type { Metrics } from '@/core/observability/metrics.js';
@@ -117,6 +118,14 @@ export interface ServerDeps {
   /** Optional work queue for the self_hosted sandbox worker endpoints (R9.14). */
   workQueue?: WorkQueue;
   /**
+   * Optional session-claim queue for the published Work API
+   * (`/v1/environments/{id}/work`). The official wire claims whole sessions;
+   * `workQueue` drains the contained calls under a held session claim. The two
+   * are mounted together: a partial wiring (one without the other) would claim
+   * sessions it cannot serve or serve calls nobody claimed.
+   */
+  sessionWorkQueue?: SessionWorkQueue;
+  /**
    * Capability lookup for a registered sandbox provider, so an Environment's
    * projected enforcement fields report what the effective backend can do
    * rather than what the declaration asked for. Absent means "no registry was
@@ -194,9 +203,9 @@ app.route('/v1/runs', runsRoutes(deps));
   app.route('/v1/api-keys', apiKeysRoutes(deps));
   // The implemented Work data plane mounts ahead of the refusal router so its
   // subroutes win; list/retrieve/stats still fall through to their refusals.
-  if (deps.workQueue) {
+  if (deps.sessionWorkQueue) {
     app.route('/v1', environmentWorkRoutes({
-      queue: deps.workQueue,
+      queue: deps.sessionWorkQueue,
       db: deps.db,
       apiKeys: deps.apiKeys,
       hasApiKeys: deps.hasApiKeys,
@@ -220,8 +229,10 @@ app.route('/v1/runs', runsRoutes(deps));
   // Self-hosted sandbox worker endpoints (R9.14)
   if (deps.workQueue) {
     // `db` is passed so a claim presenting an `environment_key` is scoped to
-    // the issuing environment rather than being unscoped.
-    app.route('/v1/x/worker', workerRoutes(deps.workQueue, deps.db));
+    // the issuing environment rather than being unscoped, and `sessionWorkQueue`
+    // so a session-scoped drain is gated on the caller holding that session's
+    // claim.
+    app.route('/v1/x/worker', workerRoutes(deps.workQueue, deps.db, deps.sessionWorkQueue));
     // A `custom_tool` item's completion is the parked call's answer: the queue
     // records it, then this hook hands it to the session through the same
     // `sendEvent` a caller's `user.custom_tool_result` takes. The delivery is

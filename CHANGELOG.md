@@ -164,6 +164,34 @@
 
 ### Changed
 
+- The self-hosted work claim is now a whole session, matching the published
+  `/v1/environments/{id}/work` semantics: a worker claims the session's claim
+  object on `poll`, and `ack`/`heartbeat`/`stop` act on that claim while the
+  per-call items (`exec`/`tool_call`/`custom_tool`/`read`/`write`/`list`)
+  become the work the held claim *contains*. M064 adds `session_work_claims`
+  — `queued → claimed → accepted → stopping → stopped`, one live claim per
+  session enforced by a partial unique index on
+  `session_id WHERE status != 'stopped'` — deliberately in its own table
+  rather than on the `work_items` lifecycle: a lapsed session claim is
+  re-claimable (its content is server-recorded parked calls, so a new worker
+  resumes rather than replays a side effect), while an accepted per-call
+  item must go `unknown`. `poll`/`ack`/`heartbeat`/`stop` now read and write
+  that claim: `heartbeat` honors `desired_ttl_seconds` as the claim's TTL,
+  `stop` is the real graceful (`stopping`, a second stop confirms) vs forced
+  (`stopped` at once) distinction, and a stopped claim frees the session for
+  a NEW claim row. Each claim mints a `mawt_` bound to `claim_id`, revoked
+  on reclaim, stop, or session-terminal. The contained calls drain under the
+  held claim: `POST /v1/x/worker/claim-session` acquires it for a `worker
+  run`, a `session_id`-scoped `/v1/x/worker/claim` is gated on `drainableBy`,
+  and an unscoped claim draws only from sessions the worker already holds.
+  `worker poll` now polls the official `work/poll`, acks the claim, and
+  drains the session's parked calls with a claim heartbeat between items;
+  `worker run` acquires or continues the claim and drains the session only.
+  `environment-work` stays `partial` for the remaining deltas (the
+  `started_at` projection, the local drain channel, the separate result
+  channel, the lease-derived stats) — the granularity, `desired_ttl_seconds`,
+  and force-stop differences from before are gone.
+
 - MiniMax defaults and setup suggestions now use `MiniMax-M3.1-Flash`, with
   `MiniMax-M3` as the other current catalog choice. Explicit saved, legacy, and
   custom model IDs remain unchanged, including legacy workspace imports. Flash

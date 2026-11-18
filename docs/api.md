@@ -2524,34 +2524,48 @@ which is what a runtime that has not issued any worker keys expects.
 
 ### Official Work API data plane
 
-The published self-hosted worker surface is mounted over the same queue:
+The published self-hosted worker surface is mounted over a real session-claim
+store (`session_work_claims`, migration 064). The claim unit is the published
+one — a whole session — and the parked per-call items
+(`exec`/`tool_call`/`custom_tool`/`read`/`write`/`list`) are the work a held
+claim *contains*, drained under it on the local `/v1/x/worker` channel. The
+claim lifecycle is `queued → claimed → accepted → stopping → stopped`, one live
+claim per session enforced by a partial unique index on
+`session_id WHERE status != 'stopped'`; a `stopped` claim frees the session for
+a NEW claim row rather than being resurrected. A session claim is deliberately
+stored apart from the `work_items` lifecycle: a lapsed claim is re-claimable
+because its content is server-recorded parked calls (a new worker resumes
+rather than replays a side effect), while an accepted per-call item must go
+`unknown` because it *is* the side effect — so the `unknown` sweep never
+applies to a claim.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/v1/environments/{id}/work/poll` | Long-poll the queue. `block_ms` (1–999) waits before answering `204` on an empty queue; `reclaim_older_than_ms` (default 5000) decides when a claimed-but-unacknowledged item may be taken back. A claim returns the published work shape with `data: {"type": "session", "id": ...}` and a `secret`. |
-| `POST` | `/v1/environments/{id}/work/{work_id}/ack` | Commit the claim (`queued` → `starting`). Refused with `409` `work_lease_lost` once the claim lease lapses or the item is stopped, and `409` when a `Anthropic-Worker-ID` header names a holder different from the recorded one. |
-| `POST` | `/v1/environments/{id}/work/{work_id}/heartbeat` | Renew the lease. The first beat sends `expected_last_heartbeat=NO_HEARTBEAT` to claim the heartbeat lease, later beats echo the returned `last_heartbeat`; a stale value answers `412` with the server's `current_state` in `error.details`. A stopped or finished item answers `200` with `lease_extended: false` and its projected state — the shutdown signal. |
+| `GET` | `/v1/environments/{id}/work/poll` | Long-poll for the oldest claimable session claim — live (non-`stopped`, session not terminal) and either never held or held under a lapsed lease. `block_ms` (1–999) waits before answering `204` on an empty queue; `reclaim_older_than_ms` (default 5000) is the unacknowledged-claim window, while an `accepted`/`stopping` claim is reclaimed on its own TTL. A claim returns the published work shape with `data: {"type": "session", "id": ...}` and a `secret`. |
+| `POST` | `/v1/environments/{id}/work/{work_id}/ack` | Commit the claim — the execution commitment the drain gate requires. Refused with `409` `work_lease_lost` once the claim is stopped or its lease lapsed, and `409` when a `Anthropic-Worker-ID` header names a holder different from the recorded one. Re-acknowledging is idempotent for the holder. |
+| `POST` | `/v1/environments/{id}/work/{work_id}/heartbeat` | Renew the claim lease. The first beat sends `expected_last_heartbeat=NO_HEARTBEAT` to claim the heartbeat lease, later beats echo the returned `last_heartbeat`; a stale value answers `412` with the server's `current_state` in `error.details`. `desired_ttl_seconds` retunes the claim's TTL and the response reports the effective `ttl_seconds`. A stopped or terminal claim answers `200` with `lease_extended: false` and its projected state — the shutdown signal. |
 | `POST` | `/v1/environments/{id}/work/{work_id}` | Merge a `metadata` patch: a string upserts, `null` deletes, omitted keys are preserved. This route does not carry results. |
-| `POST` | `/v1/environments/{id}/work/{work_id}/stop` | Record the stop marker (`stopping`). `force` is accepted but selects nothing: the marker is already the immediate form. |
+| `POST` | `/v1/environments/{id}/work/{work_id}/stop` | Stop the claim — the real graceful/forced distinction. Graceful writes `stopping` so the holder finishes or cancels its in-flight call and a second stop confirms it; `force: true` writes `stopped` at once. Either way the claim is never claimable again and the `mawt_` bound to it is revoked. |
 
-The management reads project the same queue:
+The management reads project the same claim store:
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/v1/environments/{id}/work` | List work items newest first. `limit` bounds the page (1–200, default 50) and `page` carries the keyset cursor the previous page's `next_page` returned — an opaque base64url value this route issued, refused rather than rewound when malformed. `next_page` is `null` on the last page. |
-| `GET` | `/v1/environments/{id}/work/stats` | `work_queue_stats` for the environment: `depth` is what a poll could hand out now, `pending` is claimed-but-unacknowledged work inside its lease, `oldest_queued_at` is the oldest row in that live population, and `workers_polling` counts worker identities seen on `poll` in the last 30 seconds. |
-| `GET` | `/v1/environments/{id}/work/{work_id}` | Retrieve one work item; `secret` is null on this path. Environment mismatch and another session's item — for a session token — answer `404`. |
+| `GET` | `/v1/environments/{id}/work` | List claims newest first. `limit` bounds the page (1–200, default 50) and `page` carries the keyset cursor the previous page's `next_page` returned — an opaque base64url value this route issued, refused rather than rewound when malformed. `next_page` is `null` on the last page. |
+| `GET` | `/v1/environments/{id}/work/stats` | `work_queue_stats` for the environment: `depth` is what a poll could hand out now (unclaimed or held past its reclaim window/lease), `pending` is held-unacknowledged claims inside their window, `oldest_queued_at` is the oldest row in that live population, and `workers_polling` counts worker identities seen on `poll` in the last 30 seconds. Stopped claims and dead sessions' claims count in neither. |
+| `GET` | `/v1/environments/{id}/work/{work_id}` | Retrieve one claim; `secret` is null on this path. Environment mismatch and another session's claim — for a session token — answer `404`. |
 
 Authentication is the published credential set, not the account key: an
 environment worker key (`mawk_...`) polls, lists, reads stats, and operates
-any item in its environment, and the `sessions_token` inside a claimed
-item's `secret` operates that session's own items — item authority only, so
+any claim in its environment, and the `sessions_token` inside a claimed
+item's `secret` operates that session's own claim — item authority only, so
 `poll`, `list`, and `stats` refuse it. The `secret` is minted per claim —
 base64url JSON `{sessions_token, api_base_url}` in the published
 `BetaWorkSecret` shape, where `api_base_url` points back at this runtime so
 the runner's downstream calls stay local — and its hash is all that is
-persisted. A token whose session has ended stops authenticating, and one
-that names a different environment is refused.
+persisted, bound to `claim_id`. A token whose session has ended, whose claim
+was stopped, or whose claim was re-claimed stops authenticating, and one that
+names a different environment is refused.
 
 The `sessions_token` is also the worker's session-level credential — the
 only bearer the published worker flow holds for everything outside the work
@@ -2568,15 +2582,16 @@ route answers `401`. Authorization of an event name does not bypass admission:
 for the environment's workers (`metadata.awaiting_tool_result`), and anything
 else is `400 tool_result_not_pending` / `tool_result_invalid` like a caller's.
 
-The projection's honest edges: `data` is always the session variant because
-every queue item belongs to a session and the per-call payload stays on the
-local `/v1/x/worker` channel; `started_at` equals `acknowledged_at`;
-`desired_ttl_seconds` is reported back rather than applied per item; and
-result reporting remains `POST /v1/x/worker/complete` — the official update
-route is metadata only. States collapse onto the queue's markers: `queued`,
-`starting` (acknowledged, no heartbeat yet), `active` (a heartbeat renewed
-the lease), `stopping`, and `stopped` (`applied`, `failed`, and `unknown`
-all read as `stopped`).
+The projection's honest edges: `data` is always the session variant — the
+claim is the session, and the per-call payload stays on the local
+`/v1/x/worker` channel; `started_at` equals `acknowledged_at`; and result
+reporting remains `POST /v1/x/worker/complete` — the official update route is
+metadata only. States collapse onto the claim's markers: `stopping` and
+`stopped` are the real rows, `accepted` reads `starting` until the first
+heartbeat lands then `active` (the `heartbeat_at` column's presence, not a
+timestamp compare, decides), and both unheld and held-unacknowledged read
+`queued` — the published surface has no "held but not yet acknowledged" state,
+which is what `pending` counts.
 
 ## Credential Vaults
 
@@ -3358,7 +3373,8 @@ Extension endpoints expose local runtime operations.
 | `GET` | `/v1/x/metrics/summary` | JSON runtime summary for Dashboard monitoring and SDK helpers. |
 | `GET` | `/v1/x/mcp/status?session_id=...` | MCP connection status for a session. |
 | `POST` | `/v1/x/worker/accept` | Self-hosted sandbox worker confirms, immediately before running an item, that its claim is still held, the work is not stopped, and the lease is still live. A claim is a lease on running an item rather than ownership of it, and the window can pass between claiming and starting - the worker returns from the claim, resolves its workdir, and may be a process that was paused or descheduled - so an item whose window passed is claimable and would run on two machines. The lease condition is deliberately stricter here than on `/v1/x/worker/heartbeat`: a renewal concerns an item already in flight whose effect cannot be un-run, while an acceptance authorizes starting one, and a lapsed claim is reclaimable at any instant. A refusal answers `409` with `work_lease_lost` for both a stopped item and a lapsed lease - the instruction to the worker is the same, do not run it, and the message says which - or `409` without a code when another worker holds the item, which means the work is alive for its holder. `404` for an unknown id. Re-accepting is idempotent for the holder. A refusal is never a completion: the worker must not run the item and must not report a result, which would assert an effect that never happened. |
-| `POST` | `/v1/x/worker/claim` | Self-hosted sandbox worker claims pending tool-execution work. The claim carries a lease window; a claim older than the window is treated as abandoned and may be claimed again. Work whose session has ended is never handed out, and that exclusion is read from the session's own status rather than only from the stop marker on the row: the marker is written when a session releases its sandbox, which a terminal session is allowed to skip, so the claim predicate asks the session directly. An item enqueued after the session reached a terminal status is recorded as stopped rather than inserted as claimable, in the same statement as the insert. Work for a session id with no row, and for one that is merely not running and therefore still resumable, stays claimable. |
+| `POST` | `/v1/x/worker/claim-session` | Self-hosted sandbox worker acquires the session's live work claim — the local equivalent of the published `poll` + `ack` on the claim unit. The claim is materialized if the session has none (a session's first worker creates it), held by this worker, and acknowledged in one step so the drain gate sees the `accepted` state a session-scoped claim requires. A session that does not exist or has ended answers `404`; one already held by another live worker answers `409`, because two workers must never serve the same session. A `worker run` process launched manually calls this to take the claim itself; a spawned worker continues the poller's claim under the same identity. |
+| `POST` | `/v1/x/worker/claim` | Self-hosted sandbox worker claims one of the calls a held session claim contains. A `session_id`-scoped claim is gated on this worker holding that session's `accepted`, live claim — the parked calls are the claim's content, so a process that does not hold the claim is refused `409` with `work_lease_lost`; an unscoped claim draws only from sessions this worker already claims. The claimed item carries a lease window; a claim older than the window is treated as abandoned and may be claimed again. Work whose session has ended is never handed out, and that exclusion is read from the session's own status rather than only from the stop marker on the row: the marker is written when a session releases its sandbox, which a terminal session is allowed to skip, so the claim predicate asks the session directly. An item enqueued after the session reached a terminal status is recorded as stopped rather than inserted as claimable, in the same statement as the insert. |
 | `POST` | `/v1/x/worker/heartbeat` | Self-hosted sandbox worker renews the lease on work it still holds, so an item that outlives the window is not handed to another worker while it is still running. A renewal from a worker that does not hold the item is refused with `409`. A renewal on work whose session has ended is refused with `409` and the engine-neutral code `work_lease_lost`, which tells a worker that is already executing the item to stop: the stop marker is persisted server-side, and this response is the only channel through which the process running the command learns of it. |
 | `POST` | `/v1/x/worker/complete` | Self-hosted sandbox worker reports completed or failed work. A completion from a worker that does not hold the claim is refused with `409`, and an unknown item answers `404`. |
 | `POST` | `/v1/x/sessions/{session_id}/handoff-bundle` | Export a session as a replayable handoff bundle. |

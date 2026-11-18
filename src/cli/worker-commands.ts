@@ -312,6 +312,13 @@ type WorkerItem = {
   id: string;
   sessionId?: string;
   session_id?: string;
+  /**
+   * Present on the session-claim shape (`'work'`): the published claim unit.
+   * Absent on a per-call item, which instead carries `kind`/`payload`.
+   */
+  type?: string;
+  /** On a session claim: `{type:'session', id}` — the session the claim serves. */
+  data?: { type?: string; id?: string };
   kind: 'exec' | 'read' | 'write' | 'list' | 'custom_tool' | 'tool_call';
   payload: Record<string, unknown>;
   /**
@@ -392,95 +399,59 @@ export async function workerPollCommand(opts: WorkerPollOptions) {
     // when the claim produced one, and a claim that produced none leaves the worker polling.**
     // A bound alone would have been a regression: the timeout it raises would have taken the
     // same uncaught path and turned a stall into a crash.
-    let item: WorkerItem | null;
+    // The claim unit on the published wire is a whole session, not a call:
+    // `work/poll` hands out `{type:'session', id}` and this worker then serves
+    // every call that session contains — either by spawning `--on-work` per
+    // claim, or by draining the session's parked items itself below.
+    let claim: WorkerItem | null;
     try {
-      item = await claimWorkItem(config);
+      claim = await pollSessionClaim(config);
     } catch (error) {
       console.warn(`could not claim work: ${error instanceof Error ? error.message : String(error)}`);
       if (config.once) return;
       await sleep(config.intervalMs);
       continue;
     }
-    if (item && config.onWork) {
-      // `--on-work` hands the whole item lifecycle to the spawned command: this
-      // process never accepts, executes, or completes it — the handler does, which
-      // is what makes a fresh sandbox per claim work (the claim identity is
-      // forwarded, so the sandbox's worker accepts the claim as this worker). A
-      // spawn that fails leaves the item claimed-but-unaccepted, and its lease
-      // lapse hands it back to the queue rather than reporting a run that never
-      // happened.
-      const code = await runWorkHandler(config.onWork, item, config);
+    if (claim && config.onWork) {
+      // `--on-work` hands the whole claim lifecycle to the spawned command: this
+      // process never acks, executes, or reports it — the handler does, which
+      // is what makes a fresh sandbox per claim work (the claim identity and the
+      // secret are forwarded, so the sandbox's worker holds the claim as this
+      // worker). A spawn that fails leaves the claim held-but-unacknowledged,
+      // and its lease lapse hands it back to the queue rather than reporting a
+      // run that never happened.
+      const code = await runWorkHandler(config.onWork, claim, config);
       if (code !== 0) {
-        console.warn(`--on-work handler exited with code ${code} for ${item.id}; the item was left for the queue to reclaim`);
+        console.warn(`--on-work handler exited with code ${code} for ${claim.id}; the claim was left for the queue to reclaim`);
       }
       if (config.once) return;
       await sleep(config.intervalMs);
       continue;
     }
-    if (item) {
-      // The claim is confirmed immediately before the item runs, because the lease window
-      // can pass between the two and an item whose window passed is claimable again. A
-      // refusal here is not a failure of the item: nothing has run, so nothing is reported
-      // - completing it would assert an effect that never happened, and the queue would
-      // record it as though the tool had executed.
-      //
-      // A confirmation that never arrives is treated identically, and for the same reason:
-      // the worker cannot prove it still holds the claim, so running the item is the one
-      // thing it must not do. The difference is the message, which is what tells an operator
-      // whether the server refused or went quiet.
-      try {
-        await acceptWorkItem(config, item.id);
-      } catch (error) {
-        console.warn(`not running ${item.id}: ${error instanceof Error ? error.message : String(error)}`);
+    if (claim) {
+      // The claim is acknowledged immediately before serving, because the lease
+      // window can pass between poll and ack and a claim whose window passed is
+      // claimable again. A refusal here is not a failure of the session: nothing
+      // has been served, so the loop moves on and the claim re-queues.
+      const claimSessionId = claim.data?.id ?? claim.sessionId ?? claim.session_id;
+      if (!claimSessionId) {
+        console.warn(`claim ${claim.id} carries no session id; skipping`);
         if (config.once) return;
         await sleep(config.intervalMs);
         continue;
       }
-      // The run and the report are separated deliberately, because they fail for unrelated
-      // reasons and the single `try` that used to wrap both could not tell them apart. Its
-      // `catch` existed to report a failed command, but it also caught a completion the
-      // server had **refused**, and answered that by reporting the same item a second time
-      // with `failed: true`. Two things followed. Work that had succeeded was recorded as
-      // failed whenever the first delivery was refused, carrying the transport error as the
-      // result. And when the refusal was `409` - the expected answer for an item whose
-      // outcome can no longer be recorded, because its lease lapsed and the queue moved it
-      // to `unknown` - the second request was refused as well and nothing caught it, so the
-      // refusal escaped this loop and rejected `workerPollCommand`. One late completion took
-      // the entire worker process down, and the operator saw a crash instead of a refusal.
-      let outcome: PromiseSettledResult<unknown>;
       try {
-        outcome = {
-          status: 'fulfilled',
-          value: await renewWhileRunning(config, item.id, async (signal) => {
-            // The session's files, skill packages, and memory mounts land
-            // under the worker root the first time a session's work runs
-            // here — inside the heartbeat window so a slow download never
-            // lapses the lease.
-            await ensureSessionResources(config, item, materialization);
-            return executeWorkItem(item, config.root, signal, customTools);
-          }),
-        };
+        await ackSessionClaim(config, claim.id);
       } catch (error) {
-        outcome = { status: 'rejected', reason: error };
+        console.warn(`not serving ${claim.id}: ${error instanceof Error ? error.message : String(error)}`);
+        if (config.once) return;
+        await sleep(config.intervalMs);
+        continue;
       }
-      // Delivering that outcome is a fact about **this process**, not about the work, and a
-      // delivery that does not happen is reported as exactly that. The item is never re-run
-      // and never re-reported, and the loop continues rather than ending: the queue already
-      // holds the truth, because an item whose outcome was not delivered keeps its lease and
-      // becomes `unknown` when the lease lapses - which is the record that says "accepted,
-      // outcome unknown, never replay" rather than a claim that the work failed.
-      //
-      // The failure path is unaffected and still reports `failed: true` with the item's own
-      // error: that outcome is a rejected `PromiseSettledResult`, and the refusal to deliver
-      // it is a separate `catch` that no longer shares a body with it.
-      try {
-        await completeWorkItem(config, item, outcome);
-        // Logged only once the queue has accepted the report, because the line asserts the
-        // outcome is recorded rather than that the command returned.
-        if (outcome.status === 'fulfilled') console.log(`completed ${item.id}`);
-      } catch (error) {
-        console.warn(`could not report ${item.id}: ${error instanceof Error ? error.message : String(error)}`);
-      }
+      // Drain the calls this claim contains: the session keeps parking items
+      // while the claim is held, so the loop pulls until the session's queue
+      // runs dry rather than serving a single item and repolling.
+      await drainClaimedSession(config, claim.id, claimSessionId, customTools, materialization);
     } else if (config.once) {
       console.log('no work');
       return;
@@ -493,6 +464,76 @@ export async function workerPollCommand(opts: WorkerPollOptions) {
     // removed, so a worker exit cannot strand the agent's latest edits.
     clearInterval(memoryTimer);
     await releaseSessionMemoryMounts(materialization.memoryMounts);
+  }
+}
+
+/**
+ * Serve every call a held session claim contains.
+ *
+ * The session keeps parking items while its claim is held, so this pulls the
+ * session's queue until it runs dry rather than serving a single item and
+ * repolling — the same drain `worker run` performs under its own claim. Claim,
+ * accept, run, and report per item follow the same rules they always did: a
+ * refused accept runs nothing and reports nothing, a run that fails reports
+ * `failed: true`, and a completion the queue refuses is logged, not replayed.
+ */
+async function drainClaimedSession(
+  config: ResolvedWorkerPollOptions,
+  claimId: string,
+  sessionId: string,
+  customTools: WorkerCustomTools,
+  materialization: SessionMaterialization,
+): Promise<void> {
+  const scoped: ResolvedWorkerPollOptions = { ...config, sessionId };
+  for (;;) {
+    // The session claim has its own lease: a drain that outlives it loses the
+    // claim mid-service and the drain gate stops handing out items. The claim
+    // heartbeat between items keeps it alive the same way per-item renewals
+    // keep a long item's lease.
+    try {
+      await heartbeatSessionClaim(config, claimId);
+    } catch (error) {
+      console.warn(`claim heartbeat failed for ${claimId}: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    let item: WorkerItem | null;
+    try {
+      item = await claimWorkItem(scoped);
+    } catch (error) {
+      console.warn(`could not claim work for ${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    if (!item) return;
+    // The claim is confirmed immediately before the item runs, because the lease window
+    // can pass between the two and an item whose window passed is claimable again. A
+    // refusal here is not a failure of the item: nothing has run, so nothing is reported
+    // - completing it would assert an effect that never happened, and the queue would
+    // record it as though the tool had executed.
+    try {
+      await acceptWorkItem(scoped, item.id);
+    } catch (error) {
+      console.warn(`not running ${item.id}: ${error instanceof Error ? error.message : String(error)}`);
+      await sleep(config.intervalMs);
+      continue;
+    }
+    let outcome: PromiseSettledResult<unknown>;
+    try {
+      outcome = {
+        status: 'fulfilled',
+        value: await renewWhileRunning(scoped, item.id, async (signal) => {
+          await ensureSessionResources(scoped, item, materialization);
+          return executeWorkItem(item, config.root, signal, customTools);
+        }),
+      };
+    } catch (error) {
+      outcome = { status: 'rejected', reason: error };
+    }
+    try {
+      await completeWorkItem(scoped, item, outcome);
+      if (outcome.status === 'fulfilled') console.log(`completed ${item.id}`);
+    } catch (error) {
+      console.warn(`could not report ${item.id}: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 }
 
@@ -1051,6 +1092,119 @@ async function claimWorkItem(opts: ResolvedWorkerPollOptions): Promise<WorkerIte
   return res.json() as Promise<WorkerItem>;
 }
 
+/**
+ * The published claim unit: poll the environment's work queue for a session
+ * claim — `GET /v1/environments/{id}/work/poll`. The claim is the whole
+ * session, not a call: `data` is `{type:'session', id}`, and the returned
+ * `secret` carries the `mawt_` bearer the spawned worker uses for its
+ * session-level calls. `block_ms` stays a short probe — this worker's own
+ * sleep interval is the real wait, matching how the per-call loop paced claims.
+ */
+async function pollSessionClaim(opts: ResolvedWorkerPollOptions): Promise<WorkerItem | null> {
+  if (!opts.environmentId) {
+    throw new Error('environment_id is required to poll session claims');
+  }
+  const url = `${opts.baseUrl}/v1/environments/${opts.environmentId}/work/poll?block_ms=50`;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: workApiHeaders(opts),
+      signal: AbortSignal.timeout(opts.claimTimeoutMs),
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === 'TimeoutError') {
+      throw new WorkClaimUnconfirmedError(opts.claimTimeoutMs);
+    }
+    throw error;
+  }
+  if (res.status === 204) return null;
+  if (!res.ok) throw new Error(`session claim poll failed: ${res.status} ${await res.text()}`);
+  return res.json() as Promise<WorkerItem>;
+}
+
+/**
+ * The published `ack` on a session claim — the commitment point after which
+ * draining its contained calls is authorized. Refusal means the claim was
+ * stopped, lapsed, or taken by another worker; the call must not be served.
+ */
+async function ackSessionClaim(opts: ResolvedWorkerPollOptions, workId: string): Promise<void> {
+  const res = await fetch(`${opts.baseUrl}/v1/environments/${opts.environmentId}/work/${workId}/ack`, {
+    method: 'POST',
+    headers: workApiHeaders(opts),
+    body: '{}',
+    signal: AbortSignal.timeout(opts.ackTimeoutMs),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    throw new WorkAcceptRefusedError(workId, res.status, body);
+  }
+}
+
+/**
+ * Acquire (or re-acquire) the session's live claim for this worker through the
+ * local channel — `POST /v1/x/worker/claim-session`. Used by `worker run`,
+ * which holds no forwarded claim when launched manually and continues the
+ * poller's claim when spawned: the route materializes the claim if missing,
+ * holds it for this worker, and acknowledges it in one step so the drain gate
+ * sees the required `accepted` state.
+ */
+async function claimSession(opts: ResolvedWorkerPollOptions, sessionId: string): Promise<WorkerItem> {
+  const res = await fetch(`${opts.baseUrl}/v1/x/worker/claim-session`, {
+    method: 'POST',
+    headers: jsonHeaders(opts),
+    body: JSON.stringify({
+      worker_id: opts.workerId,
+      session_id: sessionId,
+      environment_key: opts.environmentKey ?? process.env.MANAGED_AGENTS_ENVIRONMENT_KEY,
+    }),
+    signal: AbortSignal.timeout(opts.claimTimeoutMs),
+  });
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    if (res.status === 404) throw new Error(`session ${sessionId} not found or already ended`);
+    if (res.status === 409) throw new WorkAcceptRefusedError(sessionId, res.status, body);
+    throw new WorkClaimUnconfirmedError(opts.claimTimeoutMs);
+  }
+  return res.json() as Promise<WorkerItem>;
+}
+
+/**
+ * Renew the session claim's lease — the published heartbeat on the claim unit.
+ * `expected_last_heartbeat` is omitted (unconditional renewal): the drain loop
+ * is the only beater of this claim, so there is no second writer to fence
+ * against. A refusal surfaces as a thrown error and the drain stops — the
+ * claim is stopped, lapsed, or taken, and serving its calls must end.
+ */
+async function heartbeatSessionClaim(opts: ResolvedWorkerPollOptions, workId: string): Promise<void> {
+  const res = await fetch(`${opts.baseUrl}/v1/environments/${opts.environmentId}/work/${workId}/heartbeat`, {
+    method: 'POST',
+    headers: workApiHeaders(opts),
+    body: '{}',
+    signal: AbortSignal.timeout(opts.heartbeatTimeoutMs),
+  });
+  if (!res.ok) {
+    // A refused renewal on the claim is a decision, not a suspicion: the claim
+    // is stopped, lapsed, or held elsewhere, and the drain must end.
+    throw new WorkLeaseLostError(workId);
+  }
+  const view = (await res.json()) as { lease_extended?: boolean; state?: string };
+  // A beat the server does not extend is the shutdown signal: the claim is
+  // stopping or stopped, and the drain must end rather than pull another call.
+  if (view.lease_extended === false || view.state === 'stopping' || view.state === 'stopped') {
+    throw new WorkLeaseLostError(workId);
+  }
+}
+
+/** Headers for the published Work API: worker key or API key bearer + worker id. */
+function workApiHeaders(opts: ResolvedWorkerPollOptions): Record<string, string> {
+  const credential = opts.environmentKey ?? opts.apiKey;
+  return {
+    'Content-Type': 'application/json',
+    ...(credential ? { Authorization: `Bearer ${credential}` } : {}),
+    'Anthropic-Worker-ID': opts.workerId,
+  };
+}
+
 async function completeWorkItem(
   opts: ResolvedWorkerPollOptions,
   item: WorkerItem,
@@ -1178,7 +1332,9 @@ export function runWorkHandler(
       env: {
         ...process.env,
         [ON_WORK_ENV.workId]: item.id,
-        [ON_WORK_ENV.sessionId]: item.sessionId ?? item.session_id ?? '',
+        // A session claim names its session on `data.id`; a per-call item on
+        // `sessionId`/`session_id` — the spawned worker reads either shape.
+        [ON_WORK_ENV.sessionId]: item.data?.id ?? item.sessionId ?? item.session_id ?? '',
         ...(config.environmentId ? { [ON_WORK_ENV.environmentId]: config.environmentId } : {}),
         ...(config.environmentKey ?? process.env.MANAGED_AGENTS_ENVIRONMENT_KEY
           ? { [ON_WORK_ENV.environmentKey]: config.environmentKey ?? process.env.MANAGED_AGENTS_ENVIRONMENT_KEY! }
@@ -1186,6 +1342,10 @@ export function runWorkHandler(
         [ON_WORK_ENV.workerId]: config.workerId,
         [ON_WORK_ENV.baseUrl]: config.baseUrl,
         ...(config.apiKey ? { [ON_WORK_ENV.apiKey]: config.apiKey } : {}),
+        // The claim's `secret` (the `mawt_` envelope) is the spawned worker's
+        // session-level credential: session retrieve, event stream, tool-answer
+        // posts. Forwarded only when the claim carried one.
+        ...(item.secret ? { [ON_WORK_ENV.workSecret]: item.secret } : {}),
       },
     });
     if (child.stdin) {
@@ -1286,21 +1446,57 @@ export async function workerRunCommand(opts: WorkerRunOptions, stdin: Readable =
   const memoryTimer = startMemoryReconcile(materialization.memoryMounts);
 
   try {
-  // The item the poller claimed arrives on stdin. When stdin is a TTY there is
-  // no handed item — the loop below serves the session from the queue.
+  // What the poller hands on stdin changed shape with session claims: a work
+  // claim is `{type:'work', data:{type:'session', id}}` — the session lease
+  // this process now continues — while a legacy kind item is one call to
+  // serve. Both carry `secret`. A TTY stdin means a manually-launched worker,
+  // which acquires the claim itself below.
   const handed = await readStdinItem(stdin);
-  if (handed) {
+  const handedIsClaim = handed?.type === 'work' || handed?.data?.type === 'session';
+  const claimSessionId = handedIsClaim ? (handed!.data?.id ?? sessionId) : sessionId;
+
+  if (handed && !handedIsClaim) {
+    // A single handed item: accept and serve it under the forwarded identity.
     await acceptWorkItem(config, handed.id);
     const outcome = await runItemWithHeartbeat(config, handed, customTools, ensureSkills);
     await completeWorkItem(config, handed, outcome);
     if (outcome.status === 'fulfilled') console.log(`completed ${handed.id}`);
   }
 
+  // Acquire the session's live claim before draining. A spawned worker re-takes
+  // the claim the poller already holds under the same identity (the route
+  // acknowledges it in place); a manually-launched one materializes it. Either
+  // way the drain gate below sees the `accepted` state it requires. A claim
+  // that another live worker holds is a hard refusal — two workers must never
+  // serve the same session.
+  let claimId: string | undefined;
+  try {
+    const acquired = await claimSession(config, claimSessionId);
+    claimId = acquired?.id ?? (handedIsClaim ? handed!.id : undefined);
+  } catch (error) {
+    if (!handed) throw error; // nothing else to do — a manual worker needs the claim
+    console.warn(`session claim not held for ${claimSessionId}: ${error instanceof Error ? error.message : String(error)}`);
+    return; // the handed item was served; draining without the claim would bypass the gate
+  }
+  config.sessionId = claimSessionId;
+
   // Every claim mints a fresh token, so the newest claimed item's `secret` is
   // the freshest credential to read session liveness through.
   let workSecret = handed?.secret ?? process.env.MANAGED_AGENTS_WORK_SECRET;
   let idleSince: number | null = null;
   for (;;) {
+    // The claim's own lease has to outlive the drain: a session that parks a
+    // call after `intervalMs` would otherwise find its claim lapsed between
+    // pulls. Heartbeating at each loop top keeps it alive while the drain
+    // idles, the same way the poller's claim does between items.
+    if (claimId) {
+      try {
+        await heartbeatSessionClaim(config, claimId);
+      } catch (error) {
+        console.warn(`claim heartbeat failed for ${claimId}: ${error instanceof Error ? error.message : String(error)}`);
+        return;
+      }
+    }
     let item: WorkerItem | null;
     try {
       item = await claimWorkItem(config);
