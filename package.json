@@ -129,7 +129,7 @@
     "@hono/node-server": "^2.1.6",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "ai": "^7.0.173",
-    "commander": "^15.0.0",
+    "commander": "^15.1.0",
     "escape-html": "1.0.3",
     "hono": "^4.13.16",
     "nanoid": "^6.0.2",
