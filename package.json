@@ -126,7 +126,7 @@
     "@ai-sdk/anthropic": "^4.0.105",
     "@ai-sdk/openai": "^4.0.118",
     "@ai-sdk/openai-compatible": "3.0.92",
-    "@hono/node-server": "^2.1.6",
+    "@hono/node-server": "^2.1.9",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "ai": "^7.0.173",
     "commander": "^15.0.0",
